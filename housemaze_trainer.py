@@ -753,15 +753,17 @@ def sweep(search: str = ''):
 
   return sweep_config
 
+CONFIG_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), 'configs'))
+
 @hydra.main(
       version_base=None,
-      config_path='configs',
+      config_path=CONFIG_PATH,
       config_name="config")
 def main(config: DictConfig):
   launcher.run(
       config,
       trainer_filename=__file__,
-      config_path='projects/humansf/configs',
+      absolute_config_path=CONFIG_PATH,
       run_fn=run_single,
       sweep_fn=sweep,
       folder=os.environ.get(

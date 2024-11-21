@@ -3,10 +3,10 @@
 TESTING:
 JAX_DEBUG_NANS=True \
 JAX_DISABLE_JIT=1 \
-HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue housemaze_trainer.py \
+HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue craftax_trainer.py \
   app.debug=True \
   app.wandb=False \
-  app.search=usfa
+  app.search=pqn
 
 RUNNING ON SLURM:
 python housemaze_trainer.py \
@@ -46,6 +46,10 @@ from flax.traverse_util import flatten_dict
 import numpy as np
 
 
+from jaxneurorl.agents import value_based_pqn as pqn
+from jaxneurorl.agents import value_based_basics as vbb
+from jaxneurorl.wrappers import TimestepWrapper
+
 import housemaze_experiments
 import observers as humansf_observers
 import networks
@@ -54,12 +58,17 @@ import usfa
 import qlearning
 import alphazero
 
-from housemaze_trainer import AlgorithmConstructor
+@struct.dataclass
+class AlgorithmConstructor:
+  make_agent: Callable
+  make_optimizer: Callable
+  make_loss_fn_class: Callable
+  make_actor: Callable
 
 
 def get_qlearning_fns(config, num_categories=10_000,):
   HouzemazeObsEncoder = functools.partial(
-      networks.CategoricalHouzemazeObsEncoder,
+      networks.CraftaxObsEncoder,
       num_categories=num_categories,
       embed_hidden_dim=config["EMBED_HIDDEN_DIM"],
       mlp_hidden_dim=config["MLP_HIDDEN_DIM"],
@@ -77,6 +86,24 @@ def get_qlearning_fns(config, num_categories=10_000,):
       make_optimizer=qlearning.make_optimizer,
       make_loss_fn_class=qlearning.make_loss_fn_class,
       make_actor=qlearning.make_actor,
+  )
+
+def get_pqn_fns(config, num_categories=10_000,):
+  encoder = functools.partial(
+    networks.CraftaxObsEncoder,
+    #pqn.MLP,
+    hidden_dim=config["MLP_HIDDEN_DIM"],
+    num_layers=config['NUM_MLP_LAYERS'],
+    activation=config['ACTIVATION'],
+    norm_type=config.get('NORM_TYPE', 'batch_norm'),
+  )
+
+  return AlgorithmConstructor(
+      make_agent=functools.partial(
+         pqn.make_agent, ObsEncoderCls=encoder),
+      make_optimizer=pqn.make_optimizer,
+      make_loss_fn_class=pqn.make_loss_fn_class,
+      make_actor=pqn.make_actor,
   )
 
 
@@ -138,11 +165,11 @@ class OptimisticResetVecEnvWrapper(object):
             jnp.arange(self.num_resets))
 
         obs_re = obs_re[reset_indexes]
-        state_re = jax.tree_map(lambda x: x[reset_indexes], state_re)
+        state_re = jax.tree.map(lambda x: x[reset_indexes], state_re)
 
         # Auto-reset environment based on termination
         def auto_reset(done, state_re, state_st, obs_re, obs_st):
-            state = jax.tree_map(
+            state = jax.tree.map(
                 lambda x, y: jax.lax.select(done, x, y), state_re, state_st
             )
             obs = jax.lax.select(done, obs_re, obs_st)
@@ -161,16 +188,13 @@ def run_single(
 
     rng = jax.random.PRNGKey(config["SEED"])
 
-    #env = CraftaxSymbolicEnvNoAutoReset()
-
-    #from craftax.craftax.renderer import render_craftax_pixels
-    #render = jax.jit(partial(render_craftax_pixels,
-    #                 block_pixel_size=constants.BLOCK_PIXEL_SIZE_IMG))
-    ## def render_craftax(state):
-
-
-    env = make_craftax_env_from_name("Craftax-Symbolic-v1", auto_reset=False)
-    env_params = env.default_params
+    if config["rlenv"]['ENV_NAME'] == 'classic':
+       env = make_craftax_env_from_name("Craftax-Classic-Symbolic-v1", auto_reset=False)
+    elif config["rlenv"]['ENV_NAME'] == 'craftax':
+      env = make_craftax_env_from_name("Craftax-Symbolic-v1", auto_reset=False)
+    else:
+      raise NotImplementedError(config["ENV"])
+    
     env = OptimisticResetVecEnvWrapper(
         env,
         num_envs=config["NUM_ENVS"],
@@ -179,17 +203,74 @@ def run_single(
     test_env = OptimisticResetVecEnvWrapper(
         env,
         num_envs=config["TEST_NUM_ENVS"],
+        reset_ratio=min(config["OPTIMISTIC_RESET_RATIO"], config["TEST_NUM_ENVS"]),
     )
-    #seed = 7
-    #rng = jax.random.PRNGKey(seed)
+    env = TimestepWrapper(env, autoreset=False)
+    test_env = TimestepWrapper(test_env, autoreset=False)
 
-    #obs, env_state = env.reset_env(rng, env_params)
-    #image = render(env_state)
+    env_params = env.default_params
+    test_env_params = test_env.default_params
+
+    if config['ALG'] == 'qlearning':
+        constructor = get_qlearning_fns(config)
+        train_fn = vbb.make_train(
+          config=config,
+          env=env,
+          make_agent=constructor.make_agent,
+          make_optimizer=constructor.make_optimizer,
+          make_loss_fn_class=constructor.make_loss_fn_class,
+          make_actor=constructor.make_actor,
+          train_env_params=env_params,
+          test_env_params=test_env_params,
+          vmap_env=False,
+        )
+    elif config['ALG'] == 'pqn':
+        constructor = get_pqn_fns(config)
+        train_fn = vpq.make_train(
+          config=config,
+          env=env,
+          make_agent=constructor.make_agent,
+          make_optimizer=constructor.make_optimizer,
+          make_loss_fn_class=constructor.make_loss_fn_class,
+          make_actor=constructor.make_actor,
+          train_env_params=env_params,
+          test_env_params=test_env_params,
+          vmap_env=False,
+        )
+    else:
+      raise NotImplementedError(config['ALG'])
     
-    # plt.imshow(image)
+    start_time = time.time()
+    train_vjit = jax.jit(jax.vmap(train_fn))
 
+    rngs = jax.random.split(rng, config["NUM_SEEDS"])
+    outs = jax.block_until_ready(train_vjit(rngs))
+    elapsed_time = time.time() - start_time
+    print("Elapsed time: {:.2f} seconds".format(elapsed_time))
 
+    #---------------
+    # save model weights
+    #---------------
+    alg_name = config['ALG']
+    if save_path is not None:
+        def save_params(params: Dict, filename: Union[str, os.PathLike]) -> None:
+            flattened_dict = flatten_dict(params, sep=',')
+            save_file(flattened_dict, filename)
 
+        model_state = outs['runner_state'][0]
+        # save only params of the firt run
+        params = jax.tree.map(lambda x: x[0], model_state.params)
+        os.makedirs(save_path, exist_ok=True)
+
+        save_params(params, f'{save_path}/{alg_name}.safetensors')
+        print(f'Parameters of first batch saved in {save_path}/{alg_name}.safetensors')
+
+        config_filename = f'{save_path}/{alg_name}.config'
+        import pickle
+        # Save the dictionary as a pickle file
+        with open(config_filename, 'wb') as f:
+          pickle.dump(config, f)
+        print(f'Config saved in {config_filename}')
 
 def sweep(search: str = ''):
   search = search or 'ql'
@@ -201,22 +282,10 @@ def sweep(search: str = ''):
         },
         'parameters': {
             "env.exp": {'values': ['exp2']},
-            #"setting": {'values': [40_000_000]},
+            "TOTAL_TIMESTEPS": {'values': [int(1e9), int(1e6)]},
         },
         'overrides': ['alg=ql', 'rlenv=craftax', 'user=wilka'],
         'group': 'ql-1',
-    }
-  elif search == 'dynaq_shared':
-    sweep_config = {
-        'metric': {
-            'name': 'evaluator_performance/0.0 avg_episode_return',
-            'goal': 'maximize',
-        },
-        'parameters': {
-            'ALG': {'values': ['dynaq_shared']},
-        },
-        'overrides': ['alg=dyna', 'rlenv=craftax', 'user=wilka'],
-        'group': 'dynaq-1',
     }
   elif search == 'pqn':
     sweep_config = {
@@ -225,44 +294,27 @@ def sweep(search: str = ''):
             'goal': 'maximize',
         },
         'parameters': {
-            "env.exp": {'values': [
-                'maze3_open',
-            ]},
-            "BATCH_SIZE": {'values': [512*128, 256*128, 128*128]},
-            "NORM_TYPE": {'values': ['layer_norm', 'none']},
-            "NORM_QFN": {'values': ['layer_norm', 'none']},
-            "TOTAL_TIMESTEPS": {'values': [100_000_000]},
+            "env.exp": {'values': ['exp2']},
+            "TOTAL_TIMESTEPS": {'values': [int(1e9), int(1e6)]},
         },
-        'overrides': ['alg=pqn', 'rlenv=craftax', 'user=wilka'],
+        'overrides': ['alg=pqn-craftax', 'rlenv=craftax', 'user=wilka'],
         'group': 'pqn-1',
     }
-  elif search == 'alpha':
-    sweep_config = {
-        'metric': {
-            'name': 'evaluator_performance/0.0 avg_episode_return',
-            'goal': 'maximize',
-        },
-        'parameters': {
-            "config_name": {'values': ['alpha_housemaze']},
-            'TOTAL_TIMESTEPS': {'values': [5e6]},
-        }
-    }
-
   else:
     raise NotImplementedError(search)
 
   return sweep_config
 
-
+CONFIG_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), 'configs'))
 @hydra.main(
     version_base=None,
-    config_path='configs',
+    config_path=CONFIG_PATH,
     config_name="config")
 def main(config: DictConfig):
   launcher.run(
       config,
       trainer_filename=__file__,
-      config_path='projects/humansf/configs',
+      absolute_config_path=CONFIG_PATH,
       run_fn=run_single,
       sweep_fn=sweep,
       folder=os.environ.get(

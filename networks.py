@@ -84,3 +84,27 @@ class CategoricalHouzemazeObsEncoder(nn.Module):
             activation=self.activation)(outputs)
 
         return outputs
+
+class CraftaxObsEncoder(nn.Module):
+    """
+    Follows: https://github.com/mttga/purejaxql/blob/2205ae5308134d2cedccd749074bff2871832dc8/purejaxql/pqn_rnn_craftax.py#L199
+
+    - observation encoder: CNN over binary inputs
+    - MLP with truncated-normal-initialized Linear layer as initial layer for other inputs
+    """
+    hidden_dim: int = 512
+    num_layers: int = 0
+    norm_type: str = "batch_norm"
+    activation: str = 'relu'
+
+    @nn.compact
+    def __call__(self, obs: Observation, train: bool = False):
+
+
+        outputs = MLP(
+            self.hidden_dim,
+            self.num_layers,
+            norm_type=self.norm_type,
+            activation=self.activation)(obs)
+
+        return outputs
