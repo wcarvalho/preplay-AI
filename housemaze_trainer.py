@@ -43,13 +43,13 @@ from jaxneurorl import launcher
 from jaxneurorl import utils
 from jaxneurorl import loggers
 
-from projects.humansf import alphazero
-from projects.humansf import qlearning
-from projects.humansf import usfa
-from projects.humansf import offtask_dyna
-from projects.humansf import networks
-from projects.humansf import observers as humansf_observers
-from projects.humansf import housemaze_experiments
+import alphazero
+import qlearning
+import usfa
+import offtask_dyna
+import networks
+import observers as humansf_observers
+import housemaze_experiments
 
 from housemaze import renderer
 from housemaze import utils as housemaze_utils

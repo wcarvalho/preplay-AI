@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import math
 
-from projects.humansf.keyroom import Observation
+from keyroom import Observation
 
 from jaxneurorl.agents.value_based_pqn import MLP, BatchRenorm, get_activation_fn
 

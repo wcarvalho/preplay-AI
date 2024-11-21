@@ -46,15 +46,15 @@ from flax.traverse_util import flatten_dict
 import numpy as np
 
 
-from projects.humansf import housemaze_experiments
-from projects.humansf import observers as humansf_observers
-from projects.humansf import networks
-from projects.humansf import offtask_dyna
-from projects.humansf import usfa
-from projects.humansf import qlearning
-from projects.humansf import alphazero
+import housemaze_experiments
+import observers as humansf_observers
+import networks
+import offtask_dyna
+import usfa
+import qlearning
+import alphazero
 
-from projects.humansf.housemaze_trainer import AlgorithmConstructor
+from housemaze_trainer import AlgorithmConstructor
 
 
 def get_qlearning_fns(config, num_categories=10_000,):

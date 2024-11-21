@@ -18,12 +18,9 @@ import rlax
 from gymnax.environments import environment
 import matplotlib.pyplot as plt
 
-from xminigrid.rendering.rgb_render import render as rgb_render
 
-
-from projects.humansf.networks import KeyroomObsEncoder, HouzemazeObsEncoder
-from projects.humansf import keyroom
-from projects.humansf.visualizer import plot_frames
+from networks import KeyroomObsEncoder, HouzemazeObsEncoder
+from visualizer import plot_frames
 
 from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb

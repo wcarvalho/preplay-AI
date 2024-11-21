@@ -21,7 +21,7 @@ import wandb
 from jaxneurorl import utils
 from jaxneurorl import loggers
 
-from projects.humansf.networks import KeyroomObsEncoder
+from networks import KeyroomObsEncoder
 
 from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
