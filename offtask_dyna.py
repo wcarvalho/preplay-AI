@@ -22,9 +22,8 @@ from jaxneurorl import losses
 from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
 from jaxneurorl.agents import qlearning as base_agent
-import qlearning
-from networks import KeyroomObsEncoder, MLP
-import keyroom
+from networks import MLP, CategoricalHouzemazeObsEncoder
+
 from visualizer import plot_frames
 
 from housemaze import renderer
@@ -872,7 +871,7 @@ def make_agent(
         example_timestep: TimeStep,
         rng: jax.random.PRNGKey,
         model_env_params: Optional[environment.EnvParams] = None,
-        ObsEncoderCls: nn.Module = KeyroomObsEncoder,
+        ObsEncoderCls: nn.Module = CategoricalHouzemazeObsEncoder,
         ) -> Tuple[nn.Module, Params, vbb.AgentResetFn]:
 
     model_env_params = model_env_params or env_params

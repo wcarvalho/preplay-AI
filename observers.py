@@ -13,7 +13,6 @@ import wandb
 import matplotlib.pyplot as plt
 
 
-import keyroom
 from visualizer import plot_frames
 from jaxneurorl.agents.basics import TimeStep
 

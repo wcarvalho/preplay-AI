@@ -19,13 +19,12 @@ from gymnax.environments import environment
 import matplotlib.pyplot as plt
 
 
-from networks import KeyroomObsEncoder, HouzemazeObsEncoder
 from visualizer import plot_frames
 
 from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
 from jaxneurorl.agents import qlearning as base_agent
-
+from networks import CategoricalHouzemazeObsEncoder
 
 
 Agent = nn.Module
@@ -106,7 +105,7 @@ def make_agent(
         env_params: environment.EnvParams,
         example_timestep: TimeStep,
         rng: jax.random.PRNGKey,
-        ObsEncoderCls: nn.Module = KeyroomObsEncoder,
+        ObsEncoderCls: nn.Module = CategoricalHouzemazeObsEncoder,
         ) -> Tuple[Agent, Params, vbb.AgentResetFn]:
 
     cell_type = config.get('RNN_CELL_TYPE', 'OptimizedLSTMCell')
