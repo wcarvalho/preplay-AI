@@ -65,7 +65,6 @@ class AlgorithmConstructor:
   make_loss_fn_class: Callable
   make_actor: Callable
 
-
 def get_qlearning_fns(config, num_categories=10_000,):
   HouzemazeObsEncoder = functools.partial(
       networks.CraftaxObsEncoder,
@@ -105,7 +104,6 @@ def get_pqn_fns(config, num_categories=10_000,):
       make_loss_fn_class=pqn.make_loss_fn_class,
       make_actor=pqn.make_actor,
   )
-
 
 class OptimisticResetVecEnvWrapper(object):
     """
@@ -180,7 +178,6 @@ class OptimisticResetVecEnvWrapper(object):
             done, state_re, state_st, obs_re, obs_st)
 
         return obs, state, reward, done, info
-
 
 def run_single(
         config: dict,
