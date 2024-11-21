@@ -1,27 +1,15 @@
 """
 Alpha-Zero
 """
-import functools
-from typing import Callable, Dict, List, Optional, Tuple, Union
 
-import distrax
+from typing import Tuple
+
 import flax
-from flax import struct
+
 import flax.linen as nn
 from gymnax.environments import environment
 
 import jax
-import jax.numpy as jnp
-import matplotlib.pyplot as plt
-import mctx
-import optax
-import rlax
-import wandb
-
-from jaxneurorl import utils
-from jaxneurorl import loggers
-
-from projects.humansf.networks import KeyroomObsEncoder
 
 from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
@@ -45,7 +33,7 @@ def make_agent(
         example_timestep: TimeStep,
         rng: jax.random.PRNGKey,
         test_env_params: environment.EnvParams,
-        ObsEncoderCls: nn.Module = KeyroomObsEncoder,
+        ObsEncoderCls: nn.Module,
         ) -> Tuple[nn.Module, Params, vbb.AgentResetFn]:
 
     agent = base_agent.AlphaZeroAgent(

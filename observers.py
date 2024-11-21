@@ -13,8 +13,7 @@ import wandb
 import matplotlib.pyplot as plt
 
 
-from projects.humansf import keyroom
-from projects.humansf.visualizer import plot_frames
+from visualizer import plot_frames
 from jaxneurorl.agents.basics import TimeStep
 
 Number = Union[int, float, np.float32, jnp.float32]

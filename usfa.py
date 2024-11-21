@@ -11,8 +11,9 @@ import wandb
 import flax
 import rlax
 import matplotlib.pyplot as plt
-
-from projects.humansf.visualizer import plot_frames
+import matplotlib
+matplotlib.use('Agg')
+from visualizer import plot_frames
 
 from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents.usfa import *

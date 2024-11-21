@@ -3,13 +3,13 @@
 TESTING:
 JAX_DEBUG_NANS=True \
 JAX_DISABLE_JIT=1 \
-HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue projects/humansf/housemaze_trainer.py \
+HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue housemaze_trainer.py \
   app.debug=True \
   app.wandb=False \
   app.search=usfa
 
 RUNNING ON SLURM:
-python projects/humansf/housemaze_trainer.py \
+python housemaze_trainer.py \
   app.parallel=slurm_wandb \
   app.search=dynaq_shared
 """
@@ -46,15 +46,15 @@ from flax.traverse_util import flatten_dict
 import numpy as np
 
 
-from projects.humansf import housemaze_experiments
-from projects.humansf import observers as humansf_observers
-from projects.humansf import networks
-from projects.humansf import offtask_dyna
-from projects.humansf import usfa
-from projects.humansf import qlearning
-from projects.humansf import alphazero
+import housemaze_experiments
+import observers as humansf_observers
+import networks
+import offtask_dyna
+import usfa
+import qlearning
+import alphazero
 
-from projects.humansf.housemaze_trainer import AlgorithmConstructor
+from housemaze_trainer import AlgorithmConstructor
 
 
 def get_qlearning_fns(config, num_categories=10_000,):
@@ -179,7 +179,7 @@ def run_single(
     test_env = OptimisticResetVecEnvWrapper(
         env,
         num_envs=config["TEST_NUM_ENVS"],
-
+    )
     #seed = 7
     #rng = jax.random.PRNGKey(seed)
 

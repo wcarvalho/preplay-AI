@@ -1,0 +1,15 @@
+name: preplay-ai
+channels:
+  - conda-forge
+dependencies:
+  - pip:
+    - wandb
+    - ipdb
+    - tqdm
+    - rlax
+    - matplotlib
+    - numpy==1.26.4
+    - mctx==0.0.5
+    - craftax
+    - safetensors
+    - git+https://github.com/wcarvalho/JaxHouseMaze.git
