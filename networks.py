@@ -16,7 +16,7 @@ class CategoricalHouzemazeObsEncoder(nn.Module):
     - observation encoder: CNN over binary inputs
     - MLP with truncated-normal-initialized Linear layer as initial layer for other inputs
     """
-    num_categories: int = 10000
+    num_categories: int = 10_000
     include_task: bool = True
     embed_hidden_dim: int = 64
     mlp_hidden_dim: int = 256
@@ -100,11 +100,22 @@ class CraftaxObsEncoder(nn.Module):
     @nn.compact
     def __call__(self, obs: Observation, train: bool = False):
 
+        act = get_activation_fn(self.activation)
+        if self.norm_type == 'layer_norm':
+            norm = lambda x: act(nn.LayerNorm()(x))
+        elif self.norm_type == 'batch_norm':
+            norm = lambda x: act(BatchRenorm(use_running_average=not train)(x))
+        elif self.norm_type == 'none':
+            norm = lambda x: x
+        else:
+            raise NotImplementedError(self.norm_type)
+
+        obs = norm(obs)
 
         outputs = MLP(
             self.hidden_dim,
             self.num_layers,
             norm_type=self.norm_type,
-            activation=self.activation)(obs)
+            activation=self.activation)(obs, train)
 
         return outputs

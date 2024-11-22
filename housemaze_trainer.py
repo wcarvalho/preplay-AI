@@ -48,7 +48,7 @@ import qlearning
 import usfa
 import offtask_dyna
 import networks
-import observers as humansf_observers
+import housemaze_observer as humansf_observers
 import housemaze_experiments
 
 from housemaze import renderer
@@ -102,10 +102,7 @@ def get_qlearning_fns(config, num_categories=10_000,):
       )
 
   return AlgorithmConstructor(
-    make_agent=functools.partial(
-              qlearning.make_agent,
-              ObsEncoderCls=HouzemazeObsEncoder,
-              ),
+    make_agent=qlearning.make_housemaze_agent,
     make_optimizer=qlearning.make_optimizer,
     make_loss_fn_class=qlearning.make_loss_fn_class,
     make_actor=qlearning.make_actor,
@@ -357,7 +354,7 @@ def run_single(
       make_train = functools.partial(
           vbb.make_train,
           make_agent=functools.partial(
-             qlearning.make_agent,
+             qlearning.make_housemaze_agent,
              ObsEncoderCls=HouzemazeObsEncoder,
              ),
           make_optimizer=qlearning.make_optimizer,
@@ -615,7 +612,7 @@ def run_single(
 
         model_state = outs['runner_state'][0]
         # save only params of the firt run
-        params = jax.tree_map(lambda x: x[0], model_state.params)
+        params = jax.tree.map(lambda x: x[0], model_state.params)
         os.makedirs(save_path, exist_ok=True)
 
         save_params(params, f'{save_path}/{alg_name}.safetensors')
@@ -643,7 +640,7 @@ def sweep(search: str = ''):
             "TOTAL_TIMESTEPS": {'values': [40_000_000]},
         },
         'overrides': ['alg=ql', 'rlenv=housemaze','user=wilka'],
-        'group': 'ql-big-2',
+        'group': 'ql-big-4',
     }
   elif search == 'usfa':
     sweep_config = {
@@ -656,10 +653,27 @@ def sweep(search: str = ''):
             "env.exp": {'values': ['exp2']},
             "SF_HIDDEN_DIM": {'values': [512, 1024]},
             "NUM_SF_LAYERS": {'values': [2, 3]},
+            "NSAMPLES": {'values': [1, 5]},
             "TOTAL_TIMESTEPS": {'values': [40_000_000]},
         },
         'overrides': ['alg=usfa', 'rlenv=housemaze', 'user=wilka'],
-        'group': 'usfa-big-10-search',
+        'group': 'usfa-big-11-search',
+    }
+  elif search == 'dynaq_vanilla':
+    sweep_config = {
+       'metric': {
+            'name': 'evaluator_performance/0.0 avg_episode_return',
+            'goal': 'maximize',
+        },
+        'parameters': {
+            'ALG': {'values': ['dynaq_shared']},
+            "SEED": {'values': list(range(1,6))},
+            "env.exp": {'values': ['exp2']},
+            "AGENT_RNN_DIM": {'values': [256]},
+            "TOTAL_TIMESTEPS": {'values': [100_000_000]},
+        },
+        'overrides': ['alg=dyna', 'rlenv=housemaze', 'user=wilka'],
+        'group': 'dynaq-big-5',
     }
   elif search == 'dynaq_shared':
     sweep_config = {
@@ -669,13 +683,13 @@ def sweep(search: str = ''):
         },
         'parameters': {
             'ALG': {'values': ['dynaq_shared']},
-            "SEED": {'values': list(range(1,3))},
+            "SEED": {'values': list(range(1,6))},
             "env.exp": {'values': ['exp2']},
-            "AGENT_RNN_DIM": {'values': [256, 512]},
+            "AGENT_RNN_DIM": {'values': [256]},
             "TOTAL_TIMESTEPS": {'values': [100_000_000]},
         },
         'overrides': ['alg=dyna', 'rlenv=housemaze', 'user=wilka'],
-        'group': 'dynaq-big-4',
+        'group': 'dynaq-big-5',
     }
   #elif search == 'pqn':
   #  sweep_config = {

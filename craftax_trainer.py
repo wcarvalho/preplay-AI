@@ -9,17 +9,18 @@ HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue crafta
   app.search=pqn
 
 RUNNING ON SLURM:
-python housemaze_trainer.py \
-  app.parallel=slurm_wandb \
-  app.search=dynaq_shared
+python craftax_trainer.py \
+  app.parallel=slurm \
+  app.search=pqn
 """
 import os
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 
+MAX_SCORE = 226
+
+
+import wandb
 from functools import partial
-from housemaze.human_dyna import multitask_env
-from housemaze import utils as housemaze_utils
-from housemaze import renderer
 from jaxneurorl import loggers
 from jaxneurorl import utils
 from jaxneurorl import launcher
@@ -51,12 +52,13 @@ from jaxneurorl.agents import value_based_basics as vbb
 from jaxneurorl.wrappers import TimestepWrapper
 
 import housemaze_experiments
-import observers as humansf_observers
+import craftax_observer
 import networks
 import offtask_dyna
 import usfa
 import qlearning
 import alphazero
+
 
 @struct.dataclass
 class AlgorithmConstructor:
@@ -66,22 +68,8 @@ class AlgorithmConstructor:
   make_actor: Callable
 
 def get_qlearning_fns(config, num_categories=10_000,):
-  HouzemazeObsEncoder = functools.partial(
-      networks.CraftaxObsEncoder,
-      num_categories=num_categories,
-      embed_hidden_dim=config["EMBED_HIDDEN_DIM"],
-      mlp_hidden_dim=config["MLP_HIDDEN_DIM"],
-      num_embed_layers=config["NUM_EMBED_LAYERS"],
-      num_mlp_layers=config['NUM_MLP_LAYERS'],
-      activation=config['ACTIVATION'],
-      norm_type=config.get('NORM_TYPE', 'none'),
-  )
-
   return AlgorithmConstructor(
-      make_agent=functools.partial(
-          qlearning.make_agent,
-          ObsEncoderCls=HouzemazeObsEncoder,
-      ),
+      make_agent=qlearning.make_craftax_agent,
       make_optimizer=qlearning.make_optimizer,
       make_loss_fn_class=qlearning.make_loss_fn_class,
       make_actor=qlearning.make_actor,
@@ -179,6 +167,39 @@ class OptimisticResetVecEnvWrapper(object):
 
         return obs, state, reward, done, info
 
+
+def craftax_experience_logger(train_state, observer_state,
+                              key: str = 'train', **kwargs):
+    def callback(ts, os):
+        # main
+        end = min(os.idx + 1, len(os.episode_lengths))
+        metrics = {
+            f'{key}/avg_episode_length': os.episode_lengths[:end].mean(),
+            f'{key}/avg_episode_return': os.episode_returns[:end].mean(),
+            f'{key}/avg_%_max_score': os.episode_returns[:end].mean()/MAX_SCORE,
+            f'{key}/num_actor_steps': ts.timesteps,
+            f'{key}/num_learner_updates': ts.n_updates,
+        }
+        if wandb.run is not None:
+          wandb.log(metrics)
+
+    jax.debug.callback(callback, train_state, observer_state)
+
+def make_logger(
+        config: dict,
+        env,
+        env_params,
+        learner_log_extra: Optional[Callable[[Any], Any]] = None
+):
+
+  del config, env, env_params
+  return loggers.Logger(
+      gradient_logger=loggers.default_gradient_logger,
+      learner_logger=loggers.default_learner_logger,
+      experience_logger=craftax_experience_logger,
+      learner_log_extra=learner_log_extra,
+  )
+
 def run_single(
         config: dict,
         save_path: str = None):
@@ -191,7 +212,9 @@ def run_single(
       env = make_craftax_env_from_name("Craftax-Symbolic-v1", auto_reset=False)
     else:
       raise NotImplementedError(config["ENV"])
-    
+
+    config["TEST_NUM_ENVS"] = config.get("TEST_NUM_ENVS", None) or config["NUM_ENVS"]
+
     env = OptimisticResetVecEnvWrapper(
         env,
         num_envs=config["NUM_ENVS"],
@@ -217,8 +240,10 @@ def run_single(
           make_optimizer=constructor.make_optimizer,
           make_loss_fn_class=constructor.make_loss_fn_class,
           make_actor=constructor.make_actor,
+          make_logger=make_logger,
           train_env_params=env_params,
           test_env_params=test_env_params,
+          ObserverCls=craftax_observer.Observer,
           vmap_env=False,
         )
     elif config['ALG'] == 'pqn':
@@ -230,8 +255,10 @@ def run_single(
           make_optimizer=constructor.make_optimizer,
           make_loss_fn_class=constructor.make_loss_fn_class,
           make_actor=constructor.make_actor,
+          make_logger=make_logger,
           train_env_params=env_params,
           test_env_params=test_env_params,
+          ObserverCls=craftax_observer.Observer,
           vmap_env=False,
         )
     else:
@@ -279,10 +306,12 @@ def sweep(search: str = ''):
         },
         'parameters': {
             "env.exp": {'values': ['exp2']},
-            "TOTAL_TIMESTEPS": {'values': [int(1e9), int(1e6)]},
+            "TOTAL_TIMESTEPS": {'values': [int(1e7)]},
+            "BUFFER_SIZE": {'values': [50_000, 10_000]},
+            "NUM_ENVS": {'values': [32, 64]},
         },
         'overrides': ['alg=ql', 'rlenv=craftax', 'user=wilka'],
-        'group': 'ql-1',
+        'group': 'ql-2',
     }
   elif search == 'pqn':
     sweep_config = {
@@ -292,10 +321,15 @@ def sweep(search: str = ''):
         },
         'parameters': {
             "env.exp": {'values': ['exp2']},
-            "TOTAL_TIMESTEPS": {'values': [int(1e9), int(1e6)]},
+            "FIXED_EPSILON": {'values': [0, 2]},
+            "LAMBDA": {'values': [.95, .5]},
+            "MAX_GRAD_NORM": {'values': [.5, 10]},
+            "LR_LINEAR_DECAY": {'values': [True, False]},
+            "LR": {'values': [.001, .0003]},
+            "NUM_ENVS": {'values': [512]},
         },
         'overrides': ['alg=pqn-craftax', 'rlenv=craftax', 'user=wilka'],
-        'group': 'pqn-1',
+        'group': 'pqn-6',
     }
   else:
     raise NotImplementedError(search)

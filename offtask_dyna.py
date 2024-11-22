@@ -85,7 +85,7 @@ def make_optimizer(config: dict) -> optax.GradientTransformation:
   )
 
 
-def  simulate_n_trajectories(
+def simulate_n_trajectories(
         x_t: TimeStep,
         h_tm1: RnnState,
         rng:jax.random.PRNGKey,
@@ -227,6 +227,7 @@ class OfftaskDyna(vbb.RecurrentLossFn):
         ):
 
         rewards = make_float(rewards)
+        rewards = rewards - self.step_cost
         is_last = make_float(is_last)
         discounts = make_float(non_terminal)*self.discount
         lambda_ = jnp.ones_like(non_terminal)*self.lambda_
