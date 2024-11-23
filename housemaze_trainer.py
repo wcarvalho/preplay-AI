@@ -502,17 +502,11 @@ def run_single(
       elif sim_policy == 'epsilon':
         epsilon_setting = config['SIM_EPSILON_SETTING']
         if epsilon_setting == 1:
-          vals = np.logspace(
-                    num=256,
-                    start=1,
-                    stop=3,
-                    base=.1)
+          vals = np.logspace(num=256, start=1, stop=3, base=.1)
         elif epsilon_setting == 2:
-           vals = np.logspace(
-                    num=256,
-                    start=.05,
-                    stop=.9,
-                    base=.1)
+           vals = np.logspace(num=256, start=.05, stop=.9, base=.1)
+        elif epsilon_setting == 3:
+           vals = np.ones(256)*0.9
         epsilons = jax.random.choice(
             rng, vals, shape=(num_simulations - 1,))
         epsilons = jnp.concatenate((jnp.zeros(1), epsilons))
@@ -640,7 +634,7 @@ def sweep(search: str = ''):
             "TOTAL_TIMESTEPS": {'values': [40_000_000]},
         },
         'overrides': ['alg=ql', 'rlenv=housemaze','user=wilka'],
-        'group': 'ql-big-4',
+        'group': 'ql-big-5',
     }
   elif search == 'usfa':
     sweep_config = {
@@ -649,17 +643,14 @@ def sweep(search: str = ''):
             'goal': 'maximize',
         },
         'parameters': {
-            "SEED": {'values': list(range(1,2))},
+            "SEED": {'values': list(range(1,6))},
             "env.exp": {'values': ['exp2']},
-            "SF_HIDDEN_DIM": {'values': [512, 1024]},
-            "NUM_SF_LAYERS": {'values': [2, 3]},
-            "NSAMPLES": {'values': [1, 5]},
             "TOTAL_TIMESTEPS": {'values': [40_000_000]},
         },
         'overrides': ['alg=usfa', 'rlenv=housemaze', 'user=wilka'],
-        'group': 'usfa-big-11-search',
+        'group': 'usfa-big-12',
     }
-  elif search == 'dynaq_vanilla':
+  elif search == 'dyna':
     sweep_config = {
        'metric': {
             'name': 'evaluator_performance/0.0 avg_episode_return',
@@ -669,11 +660,12 @@ def sweep(search: str = ''):
             'ALG': {'values': ['dynaq_shared']},
             "SEED": {'values': list(range(1,6))},
             "env.exp": {'values': ['exp2']},
-            "AGENT_RNN_DIM": {'values': [256]},
+            "SIM_EPSILON_SETTING": {'values': [3]},
+            "OFFTASK_SIMULATION": {'values': [False]},
             "TOTAL_TIMESTEPS": {'values': [100_000_000]},
         },
         'overrides': ['alg=dyna', 'rlenv=housemaze', 'user=wilka'],
-        'group': 'dynaq-big-5',
+        'group': 'dyna-big-1',
     }
   elif search == 'dynaq_shared':
     sweep_config = {

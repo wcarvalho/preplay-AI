@@ -349,7 +349,6 @@ class OfftaskDyna(vbb.RecurrentLossFn):
             # [T-1, B, ...]
             x_t = jax.tree_map(
                 lambda x: sg(x[1:]), online_preds.state.timestep)
-
             if self.offtask_simulation:
                 assert self.make_init_offtask_timestep is not None
                 #--------------
@@ -541,6 +540,7 @@ def make_loss_fn_class(config, **kwargs) -> vbb.RecurrentLossFn:
         num_simulations=config.get('NUM_SIMULATIONS', 15),
         simulation_length=config.get('SIMULATION_LENGTH', 5),
         stop_dyna_gradient=config.get('STOP_DYNA_GRAD', True),
+        offtask_simulation=config.get('OFFTASK_SIMULATION', True),
         **kwargs
         )
 

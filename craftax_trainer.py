@@ -326,10 +326,10 @@ def sweep(search: str = ''):
             "MAX_GRAD_NORM": {'values': [.5, 10]},
             "LR_LINEAR_DECAY": {'values': [True, False]},
             "LR": {'values': [.001, .0003]},
-            "NUM_ENVS": {'values': [512]},
+            "NUM_ENVS": {'values': [256]},
         },
         'overrides': ['alg=pqn-craftax', 'rlenv=craftax', 'user=wilka'],
-        'group': 'pqn-6',
+        'group': 'pqn-7',
     }
   else:
     raise NotImplementedError(search)
