@@ -68,189 +68,244 @@ class Observation(struct.PyTreeNode):
     task_w: chex.Array
 
 
-def get_possible_achievements(state, static_params):
-    """Returns a boolean array indicating which achievements are currently possible based only on visible state."""
-    
-    possible = jnp.zeros_like(state.achievements)
-    
-    # Get visible map view (same logic as render_craftax_symbolic)
+def get_possible_achievements(state: EnvState) -> jnp.ndarray:
+    """Returns a binary vector indicating which achievements are currently possible given the agent's observation."""
+
+    # Get the visible map and items within observation range
     obs_dim_array = jnp.array([OBS_DIM[0], OBS_DIM[1]], dtype=jnp.int32)
+    tl_corner = state.player_position - obs_dim_array // 2 + MAX_OBS_DIM + 2
+
+    # Pad and slice the maps similar to render_craftax_symbolic
     padded_grid = jnp.pad(
-        state.map,
+        state.map[state.player_level],
         (MAX_OBS_DIM + 2, MAX_OBS_DIM + 2),
         constant_values=BlockType.OUT_OF_BOUNDS.value,
     )
-    tl_corner = state.player_position - obs_dim_array // 2 + MAX_OBS_DIM + 2
-    visible_map = jax.lax.dynamic_slice(padded_grid, tl_corner, OBS_DIM)
-    
-    # Get visible mobs (similar to render_craftax_symbolic mob logic)
-    def is_mob_visible(mob_pos, mob_mask):
-        local_position = (
-            mob_pos
-            - state.player_position
-            + jnp.array([OBS_DIM[0], OBS_DIM[1]]) // 2
-        )
-        on_screen = jnp.logical_and(
-            local_position >= 0,
-            local_position < jnp.array([OBS_DIM[0], OBS_DIM[1]])
-        ).all()
-        return jnp.logical_and(on_screen, mob_mask)
-    
-    # Resource collection possibilities (only visible blocks)
-    possible = possible.at[Achievement.COLLECT_WOOD.value].set(
-        jnp.any(visible_map == BlockType.TREE.value)
+    padded_items = jnp.pad(
+        state.item_map[state.player_level],
+        (MAX_OBS_DIM + 2, MAX_OBS_DIM + 2),
+        constant_values=ItemType.NONE.value,
     )
-    
-    possible = possible.at[Achievement.COLLECT_STONE.value].set(
-        jnp.logical_and(
-            state.inventory.wood_pickaxe,
-            jnp.any(visible_map == BlockType.STONE.value)
-        )
-    )
-    
-    possible = possible.at[Achievement.COLLECT_COAL.value].set(
-        jnp.logical_and(
-            state.inventory.wood_pickaxe,
-            jnp.any(visible_map == BlockType.COAL.value)
-        )
-    )
-    
-    possible = possible.at[Achievement.COLLECT_IRON.value].set(
-        jnp.logical_and(
-            state.inventory.stone_pickaxe,
-            jnp.any(visible_map == BlockType.IRON.value)
-        )
-    )
-    
-    possible = possible.at[Achievement.COLLECT_DIAMOND.value].set(
-        jnp.logical_and(
-            state.inventory.iron_pickaxe,
-            jnp.any(visible_map == BlockType.DIAMOND.value)
-        )
-    )
-    
-    # Crafting possibilities (only if crafting table is visible)
-    crafting_table_visible = jnp.any(visible_map == BlockType.CRAFTING_TABLE.value)
-    furnace_visible = jnp.any(visible_map == BlockType.FURNACE.value)
-    
-    possible = possible.at[Achievement.MAKE_WOOD_PICKAXE.value].set(
-        jnp.logical_and(
-            state.inventory.wood >= 1,
-            crafting_table_visible
-        )
-    )
-    
-    possible = possible.at[Achievement.MAKE_STONE_PICKAXE.value].set(
-        jnp.logical_and(
-            jnp.logical_and(state.inventory.wood >= 1, state.inventory.stone >= 1),
-            crafting_table_visible
-        )
-    )
-    
-    possible = possible.at[Achievement.MAKE_IRON_PICKAXE.value].set(
-        jnp.logical_and(
-            jnp.logical_and(
-                state.inventory.wood >= 1,
-                jnp.logical_and(
-                    state.inventory.stone >= 1,
-                    jnp.logical_and(
-                        state.inventory.iron >= 1,
-                        state.inventory.coal >= 1
-                    )
-                )
-            ),
-            jnp.logical_and(crafting_table_visible, furnace_visible)
-        )
-    )
-    
-    # Combat/Mob possibilities (only visible mobs)
-    visible_zombies = jax.vmap(
-        lambda idx: is_mob_visible(state.zombies.position[idx], state.zombies.mask[idx])
-    )(jnp.arange(state.zombies.mask.shape[0]))
-    
-    visible_skeletons = jax.vmap(
-        lambda idx: is_mob_visible(state.skeletons.position[idx], state.skeletons.mask[idx])
-    )(jnp.arange(state.skeletons.mask.shape[0]))
-    
-    visible_cows = jax.vmap(
-        lambda idx: is_mob_visible(state.cows.position[idx], state.cows.mask[idx])
-    )(jnp.arange(state.cows.mask.shape[0]))
-    
-    possible = possible.at[Achievement.DEFEAT_ZOMBIE.value].set(
-        jnp.any(visible_zombies)
-    )
-    
-    possible = possible.at[Achievement.DEFEAT_SKELETON.value].set(
-        jnp.any(visible_skeletons)
-    )
-    
-    # Food/Water possibilities (only visible resources)
-    possible = possible.at[Achievement.EAT_COW.value].set(
-        jnp.any(visible_cows)
-    )
-    
-    possible = possible.at[Achievement.EAT_PLANT.value].set(
-        jnp.any(visible_map == BlockType.RIPE_PLANT.value)
-    )
-    
-    possible = possible.at[Achievement.COLLECT_DRINK.value].set(
-        jnp.any(visible_map == BlockType.WATER.value)
-    )
-    
-    # Other possibilities (based on player state)
-    possible = possible.at[Achievement.WAKE_UP.value].set(
-        jnp.logical_and(state.is_sleeping, state.player_energy >= 9)
-    )
-    
-    # Filter out already achieved
-    possible = jnp.logical_and(possible, jnp.logical_not(state.achievements))
-    
-    return possible
 
-def describe_possible_achievements(possible_achievements):
+    visible_map = jax.lax.dynamic_slice(padded_grid, tl_corner, OBS_DIM)
+    visible_items = jax.lax.dynamic_slice(padded_items, tl_corner, OBS_DIM)
+
+    # Get light map
+    padded_light = jnp.pad(
+        state.light_map[state.player_level],
+        (MAX_OBS_DIM + 2, MAX_OBS_DIM + 2),
+        constant_values=0.0,
+    )
+    light_map = jax.lax.dynamic_slice(padded_light, tl_corner, OBS_DIM) > 0.05
+
+    # Initialize achievement possibilities array (using max value from Achievement enum + 1)
+    max_achievement = max(achievement.value for achievement in Achievement)
+    possible_achievements = jnp.zeros(max_achievement + 1, dtype=jnp.int32)
+
+    # Check for gatherable resources in visible and lit areas
+    visible_blocks = visible_map * light_map
+    visible_items = visible_items * light_map
+
+    # Resource gathering possibilities with tool requirements
+    has_tree_nearby = jnp.any(jnp.logical_or(
+        visible_blocks == BlockType.TREE.value,
+        jnp.logical_or(
+            visible_blocks == BlockType.FIRE_TREE.value,
+            visible_blocks == BlockType.ICE_SHRUB.value
+        )
+    ))
+    has_stone_nearby = jnp.any(visible_blocks == BlockType.STONE.value) & (state.inventory.pickaxe >= 1)
+    has_coal_nearby = jnp.any(visible_blocks == BlockType.COAL.value) & (state.inventory.pickaxe >= 1)
+    has_iron_nearby = jnp.any(visible_blocks == BlockType.IRON.value) & (state.inventory.pickaxe >= 2)
+    has_diamond_nearby = jnp.any(visible_blocks == BlockType.DIAMOND.value) & (state.inventory.pickaxe >= 3)
+    has_sapphire_nearby = jnp.any(visible_blocks == BlockType.SAPPHIRE.value) & (state.inventory.pickaxe >= 4)
+    has_ruby_nearby = jnp.any(visible_blocks == BlockType.RUBY.value) & (state.inventory.pickaxe >= 4)
+
+    # Check for mobs in visible range
+    def check_mob_nearby(mob_type_id, mob_collection):
+        mob_positions = mob_collection.position[state.player_level]
+        mob_types = mob_collection.type_id
+        mob_masks = mob_collection.mask[state.player_level]
+
+        is_visible = (
+            (mob_positions[:, 0] >= tl_corner[0]) &
+            (mob_positions[:, 0] < tl_corner[0] + OBS_DIM[0]) &
+            (mob_positions[:, 1] >= tl_corner[1]) &
+            (mob_positions[:, 1] < tl_corner[1] + OBS_DIM[1]) &
+            mob_masks &
+            (mob_types == mob_type_id)
+        )
+        return jnp.any(is_visible)
+
+    # Helper function to check for crafting table
+    def is_near_crafting_table():
+        return jnp.any(visible_blocks == BlockType.CRAFTING_TABLE.value)
+    
+    def is_near_furnace():
+        return jnp.any(visible_blocks == BlockType.FURNACE.value)
+
+    # Resource collection
+    possible_achievements = possible_achievements.at[Achievement.COLLECT_WOOD.value].set(has_tree_nearby)
+    possible_achievements = possible_achievements.at[Achievement.COLLECT_STONE.value].set(has_stone_nearby)
+    possible_achievements = possible_achievements.at[Achievement.COLLECT_COAL.value].set(has_coal_nearby)
+    possible_achievements = possible_achievements.at[Achievement.COLLECT_IRON.value].set(has_iron_nearby)
+    possible_achievements = possible_achievements.at[Achievement.COLLECT_DIAMOND.value].set(has_diamond_nearby)
+    possible_achievements = possible_achievements.at[Achievement.COLLECT_SAPPHIRE.value].set(has_sapphire_nearby)
+    possible_achievements = possible_achievements.at[Achievement.COLLECT_RUBY.value].set(has_ruby_nearby)
+
+    # Crafting possibilities (based on inventory and crafting table)
+    has_crafting_table = is_near_crafting_table()
+    has_furnace = is_near_furnace()
+
+    possible_achievements = possible_achievements.at[Achievement.MAKE_WOOD_PICKAXE.value].set(
+        (state.inventory.wood >= 1) & (has_crafting_table) & (state.inventory.pickaxe < 1)
+    )
+    possible_achievements = possible_achievements.at[Achievement.MAKE_WOOD_SWORD.value].set(
+        (state.inventory.wood >= 1) & (has_crafting_table) & (state.inventory.sword < 1)
+    )
+    possible_achievements = possible_achievements.at[Achievement.MAKE_STONE_PICKAXE.value].set(
+        (state.inventory.wood >= 1) & (state.inventory.stone >= 1) & 
+        (has_crafting_table) & (state.inventory.pickaxe < 2)
+    )
+    possible_achievements = possible_achievements.at[Achievement.MAKE_STONE_SWORD.value].set(
+        (state.inventory.wood >= 1) & (state.inventory.stone >= 1) & 
+        (has_crafting_table) & (state.inventory.sword < 2)
+    )
+    possible_achievements = possible_achievements.at[Achievement.MAKE_IRON_PICKAXE.value].set(
+        (state.inventory.wood >= 1) & (state.inventory.stone >= 1) & 
+        (state.inventory.iron >= 1) & (state.inventory.coal >= 1) &
+        (has_crafting_table) & (has_furnace) & (state.inventory.pickaxe < 3)
+    )
+    possible_achievements = possible_achievements.at[Achievement.MAKE_IRON_SWORD.value].set(
+        (state.inventory.wood >= 1) & (state.inventory.stone >= 1) & 
+        (state.inventory.iron >= 1) & (state.inventory.coal >= 1) &
+        (has_crafting_table) & (has_furnace) & (state.inventory.sword < 3)
+    )
+
+    # Placement possibilities
+    possible_achievements = possible_achievements.at[Achievement.PLACE_TABLE.value].set(
+        state.inventory.wood >= 4
+    )
+    possible_achievements = possible_achievements.at[Achievement.PLACE_STONE.value].set(
+        state.inventory.stone > 0
+    )
+    possible_achievements = possible_achievements.at[Achievement.PLACE_FURNACE.value].set(
+        state.inventory.stone >= 8
+    )
+    possible_achievements = possible_achievements.at[Achievement.PLACE_TORCH.value].set(
+        state.inventory.torches > 0
+    )
+
+    # Helper function to check for blocks in visible and lit areas
+    def check_block_nearby(block_type, visible_blocks):
+        return jnp.any(visible_blocks == block_type.value)
+
+    # Check for chests and plants
+    has_chest_nearby = check_block_nearby(BlockType.CHEST, visible_blocks)
+    has_plant_nearby = check_block_nearby(BlockType.RIPE_PLANT, visible_blocks)
+
+    # Interaction possibilities
+    possible_achievements = possible_achievements.at[Achievement.OPEN_CHEST.value].set(
+        has_chest_nearby)
+    possible_achievements = possible_achievements.at[Achievement.EAT_PLANT.value].set(
+        has_plant_nearby)
+    possible_achievements = possible_achievements.at[Achievement.DRINK_POTION.value].set(
+        jnp.any(state.inventory.potions > 0)
+    )
+
+    # Combat-related possibilities (including spells)
+    has_weapon = (state.inventory.sword > 0) | (state.inventory.bow > 0 & state.inventory.arrows > 0) | (
+        (state.learned_spells[0] | state.learned_spells[1]) & state.player_mana >= 1
+    )
+
+    # Melee mobs (using exact Achievement enum values)
+    possible_achievements = possible_achievements.at[Achievement.DEFEAT_ZOMBIE.value].set(
+        check_mob_nearby(0, state.melee_mobs) & has_weapon
+    )
+    possible_achievements = possible_achievements.at[Achievement.DEFEAT_GNOME_WARRIOR.value].set(
+        check_mob_nearby(1, state.melee_mobs) & has_weapon
+    )
+    possible_achievements = possible_achievements.at[Achievement.DEFEAT_ORC_SOLIDER.value].set(
+        check_mob_nearby(2, state.melee_mobs) & has_weapon
+    )
+    possible_achievements = possible_achievements.at[Achievement.DEFEAT_LIZARD.value].set(
+        check_mob_nearby(3, state.melee_mobs) & has_weapon
+    )
+    possible_achievements = possible_achievements.at[Achievement.DEFEAT_KNIGHT.value].set(
+        check_mob_nearby(4, state.melee_mobs) & has_weapon
+    )
+    possible_achievements = possible_achievements.at[Achievement.DEFEAT_TROLL.value].set(
+        check_mob_nearby(5, state.melee_mobs) & has_weapon
+    )
+    possible_achievements = possible_achievements.at[Achievement.DEFEAT_PIGMAN.value].set(
+        check_mob_nearby(6, state.melee_mobs) & has_weapon
+    )
+    possible_achievements = possible_achievements.at[Achievement.DEFEAT_FROST_TROLL.value].set(
+        check_mob_nearby(7, state.melee_mobs) & has_weapon
+    )
+
+    # Ranged mobs
+    possible_achievements = possible_achievements.at[Achievement.DEFEAT_SKELETON.value].set(
+        check_mob_nearby(0, state.ranged_mobs) & has_weapon
+    )
+    possible_achievements = possible_achievements.at[Achievement.DEFEAT_GNOME_ARCHER.value].set(
+        check_mob_nearby(1, state.ranged_mobs) & has_weapon
+    )
+    possible_achievements = possible_achievements.at[Achievement.DEFEAT_ORC_MAGE.value].set(
+        check_mob_nearby(2, state.ranged_mobs) & has_weapon
+    )
+    possible_achievements = possible_achievements.at[Achievement.DEFEAT_KOBOLD.value].set(
+        check_mob_nearby(3, state.ranged_mobs) & has_weapon
+    )
+    possible_achievements = possible_achievements.at[Achievement.DEFEAT_ARCHER.value].set(
+        check_mob_nearby(4, state.ranged_mobs) & has_weapon
+    )
+    possible_achievements = possible_achievements.at[Achievement.DEFEAT_DEEP_THING.value].set(
+        check_mob_nearby(5, state.ranged_mobs) & has_weapon
+    )
+    possible_achievements = possible_achievements.at[Achievement.DEFEAT_FIRE_ELEMENTAL.value].set(
+        check_mob_nearby(6, state.ranged_mobs) & has_weapon
+    )
+    possible_achievements = possible_achievements.at[Achievement.DEFEAT_ICE_ELEMENTAL.value].set(
+        check_mob_nearby(7, state.ranged_mobs) & has_weapon
+    )
+
+    # Passive mobs (for eating)
+    possible_achievements = possible_achievements.at[Achievement.EAT_COW.value].set(
+        check_mob_nearby(0, state.passive_mobs)
+    )
+    possible_achievements = possible_achievements.at[Achievement.EAT_BAT.value].set(
+        check_mob_nearby(1, state.passive_mobs)
+    )
+    possible_achievements = possible_achievements.at[Achievement.EAT_SNAIL.value].set(
+        check_mob_nearby(2, state.passive_mobs)
+    )
+    return possible_achievements
+
+
+def print_possible_achievements(possible_achievements: jnp.ndarray) -> None:
     """
-    Converts a binary achievement vector into human-readable text.
+    Prints a readable list of currently achievable achievements.
     
     Args:
-        possible_achievements: Binary array indicating which achievements are possible
-        
-    Returns:
-        List of strings describing currently possible achievements
+        possible_achievements: Binary array indicating which achievements are possible,
+                             with length max_achievement + 1 where max_achievement is
+                             the highest value in the Achievement enum
     """
-    possible_tasks = []
-    
-    # Map achievement indices to descriptions
-    achievement_descriptions = {
-        Achievement.COLLECT_WOOD.value: "Collect wood from a tree",
-        Achievement.COLLECT_STONE.value: "Mine stone with a wooden pickaxe",
-        Achievement.COLLECT_COAL.value: "Mine coal with a wooden pickaxe",
-        Achievement.COLLECT_IRON.value: "Mine iron with a stone pickaxe",
-        Achievement.COLLECT_DIAMOND.value: "Mine diamond with an iron pickaxe",
-        Achievement.COLLECT_SAPLING.value: "Collect a sapling",
-        Achievement.PLACE_PLANT.value: "Plant a sapling",
-        Achievement.EAT_PLANT.value: "Eat from a ripe plant",
-        Achievement.COLLECT_DRINK.value: "Drink water",
-        Achievement.PLACE_TABLE.value: "Place a crafting table",
-        Achievement.PLACE_FURNACE.value: "Place a furnace",
-        Achievement.PLACE_STONE.value: "Place stone",
-        Achievement.MAKE_WOOD_PICKAXE.value: "Craft a wooden pickaxe",
-        Achievement.MAKE_STONE_PICKAXE.value: "Craft a stone pickaxe",
-        Achievement.MAKE_IRON_PICKAXE.value: "Craft an iron pickaxe",
-        Achievement.MAKE_WOOD_SWORD.value: "Craft a wooden sword",
-        Achievement.MAKE_STONE_SWORD.value: "Craft a stone sword",
-        Achievement.MAKE_IRON_SWORD.value: "Craft an iron sword",
-        Achievement.DEFEAT_ZOMBIE.value: "Defeat a zombie",
-        Achievement.DEFEAT_SKELETON.value: "Defeat a skeleton",
-        Achievement.EAT_COW.value: "Kill and eat a cow",
-        Achievement.WAKE_UP.value: "Wake up from sleep"
-    }
-    
-    for idx, is_possible in enumerate(possible_achievements):
-        if is_possible:
-            description = achievement_descriptions.get(idx, f"Unknown achievement {idx}")
-            possible_tasks.append(description)
-            
-    return possible_tasks
+    achievable = []
+    for achievement in Achievement:
+        # Check if this index is 1 in the binary array
+        if possible_achievements[achievement.value] == 1:
+            # Convert enum name from COLLECT_WOOD to "Collect Wood"
+            achievement_name = achievement.name.replace('_', ' ').title()
+            achievable.append(achievement_name)
+
+    if achievable:
+        print("\nCurrently achievable:")
+        for name in sorted(achievable):
+            print(f"- {name}")
+    else:
+        print("\nNo achievements currently achievable")
 
 def generate_world(rng, params, static_params):
     player_position = jnp.array(
