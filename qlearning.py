@@ -48,17 +48,11 @@ class RnnAgent(nn.Module):
     Returns:
         _type_: _description_
     """
-    action_dim: int
 
     observation_encoder: nn.Module
     rnn: vbb.ScannedRNN
+    q_fn: nn.Module
 
-    def setup(self):
-
-        self.q_fn = base_agent.MLP(
-           hidden_dim=512,
-           num_layers=1,
-           out_dim=self.action_dim)
 
     def initialize(self, x: TimeStep):
         """Only used for initialization."""
@@ -126,8 +120,11 @@ def make_housemaze_agent(
           activation=config['ACTIVATION'],
           norm_type=config.get('NORM_TYPE', 'none'),
         ),
-        action_dim=env.num_actions(env_params),
         rnn=rnn,
+        q_fn=base_agent.MLP(
+           hidden_dim=config.get('Q_HIDDEN_DIM', 512),
+           num_layers=config.get('NUM_Q_LAYERS', 1),
+           out_dim=env.num_actions(env_params))
     )
 
     rng, _rng = jax.random.split(rng)
@@ -168,9 +165,13 @@ def make_craftax_agent(
           num_layers=config['NUM_MLP_LAYERS'],
           activation=config['ACTIVATION'],
           norm_type=config.get('NORM_TYPE', 'none'),
-        ),
-        action_dim=env.action_space(env_params).n,
+          structured_inputs=config.get('STRUCTURED_INPUTS', False)
+          ),
         rnn=rnn,
+        q_fn=base_agent.MLP(
+           hidden_dim=config.get('Q_HIDDEN_DIM', 512),
+           num_layers=config.get('NUM_Q_LAYERS', 2),
+           out_dim=env.action_space(env_params).n)
     )
 
     rng, _rng = jax.random.split(rng)

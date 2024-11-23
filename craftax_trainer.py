@@ -6,7 +6,7 @@ JAX_DISABLE_JIT=1 \
 HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue craftax_trainer.py \
   app.debug=True \
   app.wandb=False \
-  app.search=pqn
+  app.search=ql
 
 RUNNING ON SLURM:
 python craftax_trainer.py \
@@ -55,10 +55,8 @@ import housemaze_experiments
 import craftax_observer
 import networks
 import offtask_dyna
-import usfa
 import qlearning
-import alphazero
-
+import craftax_usfa as usfa
 
 @struct.dataclass
 class AlgorithmConstructor:
@@ -67,15 +65,8 @@ class AlgorithmConstructor:
   make_loss_fn_class: Callable
   make_actor: Callable
 
-def get_qlearning_fns(config, num_categories=10_000,):
-  return AlgorithmConstructor(
-      make_agent=qlearning.make_craftax_agent,
-      make_optimizer=qlearning.make_optimizer,
-      make_loss_fn_class=qlearning.make_loss_fn_class,
-      make_actor=qlearning.make_actor,
-  )
 
-def get_pqn_fns(config, num_categories=10_000,):
+def get_pqn_fns(config):
   encoder = functools.partial(
     networks.CraftaxObsEncoder,
     #pqn.MLP,
@@ -150,15 +141,17 @@ class OptimisticResetVecEnvWrapper(object):
         reset_indexes = reset_indexes.at[being_reset].set(
             jnp.arange(self.num_resets))
 
-        obs_re = obs_re[reset_indexes]
-        state_re = jax.tree.map(lambda x: x[reset_indexes], state_re)
+        obs_re = jax.tree_map(lambda x: x[reset_indexes], obs_re)
+        state_re = jax.tree_map(lambda x: x[reset_indexes], state_re)
 
         # Auto-reset environment based on termination
         def auto_reset(done, state_re, state_st, obs_re, obs_st):
             state = jax.tree.map(
                 lambda x, y: jax.lax.select(done, x, y), state_re, state_st
             )
-            obs = jax.lax.select(done, obs_re, obs_st)
+            obs = jax.tree.map(
+                lambda x, y: jax.lax.select(done, x, y), obs_re, obs_st
+            )
 
             return state, obs
 
@@ -205,15 +198,31 @@ def run_single(
         save_path: str = None):
 
     rng = jax.random.PRNGKey(config["SEED"])
+    config["TEST_NUM_ENVS"] = config.get("TEST_NUM_ENVS", None) or config["NUM_ENVS"]
 
-    if config["rlenv"]['ENV_NAME'] == 'classic':
-       env = make_craftax_env_from_name("Craftax-Classic-Symbolic-v1", auto_reset=False)
-    elif config["rlenv"]['ENV_NAME'] == 'craftax':
+    if config['ENV'] == 'classic':
+      env = make_craftax_env_from_name("Craftax-Classic-Symbolic-v1", auto_reset=False)
+      env_params = env.default_params
+      test_env_params = env.default_params
+
+    elif config['ENV'] == 'craftax':
       env = make_craftax_env_from_name("Craftax-Symbolic-v1", auto_reset=False)
+      env_params = env.default_params
+      test_env_params = env.default_params
+
+    elif config['ENV'] == 'craftax-gen':
+      from craftax_env import CraftaxSymbolicEnvNoAutoReset
+      config['STRUCTURED_INPUTS'] = True
+
+      env = CraftaxSymbolicEnvNoAutoReset()
+      env_params = env.default_params.replace(
+         reset_seeds=jnp.arange(config['NUM_ENV_SEEDS']))
+      test_env_params = env.default_params.replace(
+         reset_seeds=jnp.arange(config['NUM_ENV_SEEDS'], config['NUM_ENV_SEEDS'] + config['TEST_NUM_ENVS']))
+
     else:
       raise NotImplementedError(config["ENV"])
-
-    config["TEST_NUM_ENVS"] = config.get("TEST_NUM_ENVS", None) or config["NUM_ENVS"]
+  
 
     env = OptimisticResetVecEnvWrapper(
         env,
@@ -228,18 +237,15 @@ def run_single(
     env = TimestepWrapper(env, autoreset=False)
     test_env = TimestepWrapper(test_env, autoreset=False)
 
-    env_params = env.default_params
-    test_env_params = test_env.default_params
 
     if config['ALG'] == 'qlearning':
-        constructor = get_qlearning_fns(config)
         train_fn = vbb.make_train(
           config=config,
           env=env,
-          make_agent=constructor.make_agent,
-          make_optimizer=constructor.make_optimizer,
-          make_loss_fn_class=constructor.make_loss_fn_class,
-          make_actor=constructor.make_actor,
+          make_agent=qlearning.make_agent,
+          make_optimizer=qlearning.make_optimizer,
+          make_loss_fn_class=qlearning.make_loss_fn_class,
+          make_actor=qlearning.make_actor,
           make_logger=make_logger,
           train_env_params=env_params,
           test_env_params=test_env_params,
@@ -255,6 +261,20 @@ def run_single(
           make_optimizer=constructor.make_optimizer,
           make_loss_fn_class=constructor.make_loss_fn_class,
           make_actor=constructor.make_actor,
+          make_logger=make_logger,
+          train_env_params=env_params,
+          test_env_params=test_env_params,
+          ObserverCls=craftax_observer.Observer,
+          vmap_env=False,
+        )
+    elif config['ALG'] == 'usfa':
+        train_fn = vbb.make_train(
+          config=config,
+          env=env,
+          make_agent=usfa.make_craftax_agent,
+          make_optimizer=usfa.make_optimizer,
+          make_loss_fn_class=usfa.make_loss_fn_class,
+          make_actor=usfa.make_actor,
           make_logger=make_logger,
           train_env_params=env_params,
           test_env_params=test_env_params,
@@ -305,10 +325,11 @@ def sweep(search: str = ''):
             'goal': 'maximize',
         },
         'parameters': {
-            "env.exp": {'values': ['exp2']},
+            "ENV": {'values': ['craftax-gen']},
             "TOTAL_TIMESTEPS": {'values': [int(1e7)]},
-            "BUFFER_SIZE": {'values': [50_000, 10_000]},
-            "NUM_ENVS": {'values': [32, 64]},
+            "NUM_ENV_SEEDS": {'values': [100, 1_000, 10_000]},
+            #"BUFFER_SIZE": {'values': [50_000,]},
+            #"NUM_ENVS": {'values': [32, 64]},
         },
         'overrides': ['alg=ql', 'rlenv=craftax', 'user=wilka'],
         'group': 'ql-2',
@@ -320,7 +341,7 @@ def sweep(search: str = ''):
             'goal': 'maximize',
         },
         'parameters': {
-            "env.exp": {'values': ['exp2']},
+            "ENV": {'values': ['craftax-gen']},
             "FIXED_EPSILON": {'values': [0, 2]},
             "LAMBDA": {'values': [.95, .5]},
             "MAX_GRAD_NORM": {'values': [.5, 10]},
@@ -330,6 +351,18 @@ def sweep(search: str = ''):
         },
         'overrides': ['alg=pqn-craftax', 'rlenv=craftax', 'user=wilka'],
         'group': 'pqn-7',
+    }
+  elif search == 'usfa':
+    sweep_config = {
+        'metric': {
+            'name': 'evaluator_performance/0.0 avg_episode_return',
+            'goal': 'maximize',
+        },
+        'parameters': {
+            "ENV": {'values': ['craftax-gen']},
+        },
+        'overrides': ['alg=usfa-craftax', 'rlenv=craftax', 'user=wilka'],
+        'group': 'usfa-1',
     }
   else:
     raise NotImplementedError(search)

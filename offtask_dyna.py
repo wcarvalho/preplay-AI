@@ -541,6 +541,7 @@ def make_loss_fn_class(config, **kwargs) -> vbb.RecurrentLossFn:
         simulation_length=config.get('SIMULATION_LENGTH', 5),
         stop_dyna_gradient=config.get('STOP_DYNA_GRAD', True),
         offtask_simulation=config.get('OFFTASK_SIMULATION', True),
+        step_cost=config.get("STEP_COST", .001),
         **kwargs
         )
 
@@ -732,24 +733,11 @@ def learner_log_extra(
 
 class DynaAgentEnvModel(nn.Module):
 
-    action_dim: int
-
     observation_encoder: nn.Module
     rnn: vbb.ScannedRNN
+    q_fn: nn.Module
     env: environment.Environment
     env_params: environment.EnvParams
-    num_q_layers: int = 1
-    activation: str = 'relu'
-
-    def setup(self):
-
-        self.q_fn = MLP(
-            hidden_dim=512,
-            num_layers=self.num_q_layers + 1,
-            out_dim=self.action_dim,
-            activation=self.activation,
-            activate_final=False,
-            )
 
     def initialize(self, x: TimeStep):
         """Only used for initialization."""
@@ -881,16 +869,20 @@ def make_agent(
         rnn = vbb.DummyRNN()
     else:
         rnn = vbb.ScannedRNN(
-            hidden_dim=config.get("AGENT_RNN_DIM", 128),
+            hidden_dim=config.get("AGENT_RNN_DIM", 256),
             cell_type=cell_type,
             unroll_output_state=True,
             )
     agent = DynaAgentEnvModel(
-        activation=config['ACTIVATION'],
-        action_dim=env.num_actions(env_params),
-        num_q_layers=config['NUM_Q_LAYERS'],
         observation_encoder=ObsEncoderCls(),
         rnn=rnn,
+        q_fn=MLP(
+            hidden_dim=config.get('Q_HIDDEN_DIM', 512),
+            num_layers=config.get('NUM_Q_LAYERS', 1),
+            out_dim=env.num_actions(env_params),
+            activation=config['ACTIVATION'],
+            activate_final=False,
+            ),
         env=env,
         env_params=model_env_params,
     )

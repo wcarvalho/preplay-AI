@@ -96,6 +96,7 @@ class CraftaxObsEncoder(nn.Module):
     num_layers: int = 0
     norm_type: str = "batch_norm"
     activation: str = 'relu'
+    structured_inputs: bool = False
 
     @nn.compact
     def __call__(self, obs: Observation, train: bool = False):
@@ -110,7 +111,10 @@ class CraftaxObsEncoder(nn.Module):
         else:
             raise NotImplementedError(self.norm_type)
 
-        obs = norm(obs)
+        if self.structured_inputs:
+            obs = norm(obs.image)
+        else:
+            obs = norm(obs)
 
         outputs = MLP(
             self.hidden_dim,

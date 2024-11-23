@@ -45,7 +45,7 @@ from jaxneurorl import loggers
 
 import alphazero
 import qlearning
-import usfa
+import housemaze_usfa
 import offtask_dyna
 import networks
 import housemaze_observer as humansf_observers
@@ -124,13 +124,13 @@ def get_sf_fns(config, env, env_params, num_categories=10_000,):
                            for o in train_objects])
   return AlgorithmConstructor(
     make_agent=functools.partial(
-              usfa.make_agent,
+              housemaze_usfa.make_agent,
               train_tasks=train_tasks,
               ObsEncoderCls=HouzemazeObsEncoder,
               ),
-    make_optimizer=usfa.make_optimizer,
-    make_loss_fn_class=usfa.make_loss_fn_class,
-    make_actor=functools.partial(usfa.make_actor, remove_gpi_dim=False),
+    make_optimizer=housemaze_usfa.make_optimizer,
+    make_loss_fn_class=housemaze_usfa.make_loss_fn_class,
+    make_actor=functools.partial(housemaze_usfa.make_actor, remove_gpi_dim=False),
   )
 
 def get_dynaq_fns(
@@ -382,9 +382,9 @@ def run_single(
                               for o in train_objects])
 
       make_train = functools.partial(
-          usfa.make_train,
+          housemaze_usfa.make_train,
           make_agent=functools.partial(
-              usfa.make_agent,
+              housemaze_usfa.make_agent,
               train_tasks=train_tasks,
               ObsEncoderCls=HouzemazeObsEncoder,
           ),
@@ -395,7 +395,7 @@ def run_single(
               get_task_name=get_task_name,
               action_names=action_names,
               learner_log_extra=functools.partial(
-                  usfa.learner_log_extra,
+                  housemaze_usfa.learner_log_extra,
                   config=config,
                   action_names=action_names,
                   extract_task_info=extract_task_info,
@@ -629,12 +629,13 @@ def sweep(search: str = ''):
             'goal': 'maximize',
         },
         'parameters': {
-            "SEED": {'values': list(range(1,6))},
+            "SEED": {'values': list(range(1,3))},
             "env.exp": {'values': ['exp2']},
-            "TOTAL_TIMESTEPS": {'values': [40_000_000]},
+            "GAMMA": {'values': [.99, .993]},
+            "STEP_COST": {'values': [.005, .001]},
         },
         'overrides': ['alg=ql', 'rlenv=housemaze','user=wilka'],
-        'group': 'ql-big-5',
+        'group': 'ql-big-6',
     }
   elif search == 'usfa':
     sweep_config = {
@@ -643,12 +644,12 @@ def sweep(search: str = ''):
             'goal': 'maximize',
         },
         'parameters': {
-            "SEED": {'values': list(range(1,6))},
+            "SEED": {'values': list(range(1,3))},
             "env.exp": {'values': ['exp2']},
-            "TOTAL_TIMESTEPS": {'values': [40_000_000]},
+            "STEP_COST": {'values': [.01, .005, .001]},
         },
         'overrides': ['alg=usfa', 'rlenv=housemaze', 'user=wilka'],
-        'group': 'usfa-big-12',
+        'group': 'usfa-big-13',
     }
   elif search == 'dyna':
     sweep_config = {
@@ -675,13 +676,13 @@ def sweep(search: str = ''):
         },
         'parameters': {
             'ALG': {'values': ['dynaq_shared']},
-            "SEED": {'values': list(range(1,6))},
+            "SEED": {'values': list(range(1,3))},
             "env.exp": {'values': ['exp2']},
-            "AGENT_RNN_DIM": {'values': [256]},
-            "TOTAL_TIMESTEPS": {'values': [100_000_000]},
+            "GAMMA": {'values': [.99, .993]},
+            "STEP_COST": {'values': [.005, .001]},
         },
         'overrides': ['alg=dyna', 'rlenv=housemaze', 'user=wilka'],
-        'group': 'dynaq-big-5',
+        'group': 'dynaq-big-6',
     }
   #elif search == 'pqn':
   #  sweep_config = {
