@@ -599,11 +599,10 @@ class CraftaxSymbolicEnvNoAutoReset(EnvironmentNoAutoReset):
         task_w = jnp.concatenate(
             (achievement_coefficients,
              jnp.zeros_like(achievement_coefficients)))
-        #achievable=get_possible_achievements(
-        #        state, self.static_env_params)
+        achievable = get_possible_achievements(state)
         return Observation(
             image=render_craftax_symbolic(state),
-            achievable=achievements,
+            achievable=achievable,
             achievements=achievements,
             task_w=task_w)
 
