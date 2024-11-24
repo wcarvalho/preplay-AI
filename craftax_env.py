@@ -114,12 +114,30 @@ def get_possible_achievements(state: EnvState) -> jnp.ndarray:
             visible_blocks == BlockType.ICE_SHRUB.value
         )
     ))
-    has_stone_nearby = jnp.any(visible_blocks == BlockType.STONE.value) & (state.inventory.pickaxe >= 1)
-    has_coal_nearby = jnp.any(visible_blocks == BlockType.COAL.value) & (state.inventory.pickaxe >= 1)
-    has_iron_nearby = jnp.any(visible_blocks == BlockType.IRON.value) & (state.inventory.pickaxe >= 2)
-    has_diamond_nearby = jnp.any(visible_blocks == BlockType.DIAMOND.value) & (state.inventory.pickaxe >= 3)
-    has_sapphire_nearby = jnp.any(visible_blocks == BlockType.SAPPHIRE.value) & (state.inventory.pickaxe >= 4)
-    has_ruby_nearby = jnp.any(visible_blocks == BlockType.RUBY.value) & (state.inventory.pickaxe >= 4)
+    has_stone_nearby = jnp.logical_and(
+        jnp.any(visible_blocks == BlockType.STONE.value),
+        state.inventory.pickaxe >= 1
+    )
+    has_coal_nearby = jnp.logical_and(
+        jnp.any(visible_blocks == BlockType.COAL.value),
+        state.inventory.pickaxe >= 1
+    )
+    has_iron_nearby = jnp.logical_and(
+        jnp.any(visible_blocks == BlockType.IRON.value),
+        state.inventory.pickaxe >= 2
+    )
+    has_diamond_nearby = jnp.logical_and(
+        jnp.any(visible_blocks == BlockType.DIAMOND.value),
+        state.inventory.pickaxe >= 3
+    )
+    has_sapphire_nearby = jnp.logical_and(
+        jnp.any(visible_blocks == BlockType.SAPPHIRE.value),
+        state.inventory.pickaxe >= 4
+    )
+    has_ruby_nearby = jnp.logical_and(
+        jnp.any(visible_blocks == BlockType.RUBY.value),
+        state.inventory.pickaxe >= 4
+    )
 
     # Check for mobs in visible range
     def check_mob_nearby(mob_type_id, mob_collection):
@@ -158,28 +176,88 @@ def get_possible_achievements(state: EnvState) -> jnp.ndarray:
     has_furnace = is_near_furnace()
 
     possible_achievements = possible_achievements.at[Achievement.MAKE_WOOD_PICKAXE.value].set(
-        (state.inventory.wood >= 1) & (has_crafting_table) & (state.inventory.pickaxe < 1)
+        jnp.logical_and(
+            jnp.logical_and(
+                state.inventory.wood >= 1,
+                has_crafting_table
+            ),
+            state.inventory.pickaxe < 1
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.MAKE_WOOD_SWORD.value].set(
-        (state.inventory.wood >= 1) & (has_crafting_table) & (state.inventory.sword < 1)
+        jnp.logical_and(
+            jnp.logical_and(
+                state.inventory.wood >= 1,
+                has_crafting_table
+            ),
+            state.inventory.sword < 1
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.MAKE_STONE_PICKAXE.value].set(
-        (state.inventory.wood >= 1) & (state.inventory.stone >= 1) & 
-        (has_crafting_table) & (state.inventory.pickaxe < 2)
+        jnp.logical_and(
+            jnp.logical_and(
+                jnp.logical_and(
+                    state.inventory.wood >= 1,
+                    state.inventory.stone >= 1
+                ),
+                has_crafting_table
+            ),
+            state.inventory.pickaxe < 2
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.MAKE_STONE_SWORD.value].set(
-        (state.inventory.wood >= 1) & (state.inventory.stone >= 1) & 
-        (has_crafting_table) & (state.inventory.sword < 2)
+        jnp.logical_and(
+            jnp.logical_and(
+                jnp.logical_and(
+                    state.inventory.wood >= 1,
+                    state.inventory.stone >= 1
+                ),
+                has_crafting_table
+            ),
+            state.inventory.sword < 2
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.MAKE_IRON_PICKAXE.value].set(
-        (state.inventory.wood >= 1) & (state.inventory.stone >= 1) & 
-        (state.inventory.iron >= 1) & (state.inventory.coal >= 1) &
-        (has_crafting_table) & (has_furnace) & (state.inventory.pickaxe < 3)
+        jnp.logical_and(
+            jnp.logical_and(
+                jnp.logical_and(
+                    jnp.logical_and(
+                        jnp.logical_and(
+                            state.inventory.wood >= 1,
+                            state.inventory.stone >= 1
+                        ),
+                        jnp.logical_and(
+                            state.inventory.iron >= 1,
+                            state.inventory.coal >= 1
+                        )
+                    ),
+                    has_crafting_table
+                ),
+                has_furnace
+            ),
+            state.inventory.pickaxe < 3
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.MAKE_IRON_SWORD.value].set(
-        (state.inventory.wood >= 1) & (state.inventory.stone >= 1) & 
-        (state.inventory.iron >= 1) & (state.inventory.coal >= 1) &
-        (has_crafting_table) & (has_furnace) & (state.inventory.sword < 3)
+        jnp.logical_and(
+            jnp.logical_and(
+                jnp.logical_and(
+                    jnp.logical_and(
+                        jnp.logical_and(
+                            state.inventory.wood >= 1,
+                            state.inventory.stone >= 1
+                        ),
+                        jnp.logical_and(
+                            state.inventory.iron >= 1,
+                            state.inventory.coal >= 1
+                        )
+                    ),
+                    has_crafting_table
+                ),
+                has_furnace
+            ),
+            state.inventory.sword < 3
+        )
     )
 
     # Placement possibilities
@@ -214,71 +292,141 @@ def get_possible_achievements(state: EnvState) -> jnp.ndarray:
     )
 
     # Combat-related possibilities (including spells)
-    has_weapon = (state.inventory.sword > 0) | (state.inventory.bow > 0 & state.inventory.arrows > 0) | (
-        (state.learned_spells[0] | state.learned_spells[1]) & state.player_mana >= 1
+    has_weapon = jnp.logical_or(
+        state.inventory.sword > 0,
+        jnp.logical_or(
+            jnp.logical_and(
+                state.inventory.bow > 0,
+                state.inventory.arrows > 0
+            ),
+            jnp.logical_and(
+                jnp.logical_or(
+                    state.learned_spells[0],
+                    state.learned_spells[1]
+                ),
+                state.player_mana >= 1
+            )
+        )
     )
 
     # Melee mobs (using exact Achievement enum values)
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_ZOMBIE.value].set(
-        check_mob_nearby(0, state.melee_mobs) & has_weapon
+        jnp.logical_and(
+            check_mob_nearby(0, state.melee_mobs),
+            has_weapon
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_GNOME_WARRIOR.value].set(
-        check_mob_nearby(1, state.melee_mobs) & has_weapon
+        jnp.logical_and(
+            check_mob_nearby(1, state.melee_mobs),
+            has_weapon
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_ORC_SOLIDER.value].set(
-        check_mob_nearby(2, state.melee_mobs) & has_weapon
+        jnp.logical_and(
+            check_mob_nearby(2, state.melee_mobs),
+            has_weapon
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_LIZARD.value].set(
-        check_mob_nearby(3, state.melee_mobs) & has_weapon
+        jnp.logical_and(
+            check_mob_nearby(3, state.melee_mobs),
+            has_weapon
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_KNIGHT.value].set(
-        check_mob_nearby(4, state.melee_mobs) & has_weapon
+        jnp.logical_and(
+            check_mob_nearby(4, state.melee_mobs),
+            has_weapon
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_TROLL.value].set(
-        check_mob_nearby(5, state.melee_mobs) & has_weapon
+        jnp.logical_and(
+            check_mob_nearby(5, state.melee_mobs),
+            has_weapon
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_PIGMAN.value].set(
-        check_mob_nearby(6, state.melee_mobs) & has_weapon
+        jnp.logical_and(
+            check_mob_nearby(6, state.melee_mobs),
+            has_weapon
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_FROST_TROLL.value].set(
-        check_mob_nearby(7, state.melee_mobs) & has_weapon
+        jnp.logical_and(
+            check_mob_nearby(7, state.melee_mobs),
+            has_weapon
+        )
     )
 
     # Ranged mobs
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_SKELETON.value].set(
-        check_mob_nearby(0, state.ranged_mobs) & has_weapon
+        jnp.logical_and(
+            check_mob_nearby(0, state.ranged_mobs),
+            has_weapon
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_GNOME_ARCHER.value].set(
-        check_mob_nearby(1, state.ranged_mobs) & has_weapon
+        jnp.logical_and(
+            check_mob_nearby(1, state.ranged_mobs),
+            has_weapon
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_ORC_MAGE.value].set(
-        check_mob_nearby(2, state.ranged_mobs) & has_weapon
+        jnp.logical_and(
+            check_mob_nearby(2, state.ranged_mobs),
+            has_weapon
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_KOBOLD.value].set(
-        check_mob_nearby(3, state.ranged_mobs) & has_weapon
+        jnp.logical_and(
+            check_mob_nearby(3, state.ranged_mobs),
+            has_weapon
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_ARCHER.value].set(
-        check_mob_nearby(4, state.ranged_mobs) & has_weapon
+        jnp.logical_and(
+            check_mob_nearby(4, state.ranged_mobs),
+            has_weapon
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_DEEP_THING.value].set(
-        check_mob_nearby(5, state.ranged_mobs) & has_weapon
+        jnp.logical_and(
+            check_mob_nearby(5, state.ranged_mobs),
+            has_weapon
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_FIRE_ELEMENTAL.value].set(
-        check_mob_nearby(6, state.ranged_mobs) & has_weapon
+        jnp.logical_and(
+            check_mob_nearby(6, state.ranged_mobs),
+            has_weapon
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_ICE_ELEMENTAL.value].set(
-        check_mob_nearby(7, state.ranged_mobs) & has_weapon
+        jnp.logical_and(
+            check_mob_nearby(7, state.ranged_mobs),
+            has_weapon
+        )
     )
 
     # Passive mobs (for eating)
     possible_achievements = possible_achievements.at[Achievement.EAT_COW.value].set(
-        check_mob_nearby(0, state.passive_mobs)
+        jnp.logical_and(
+            check_mob_nearby(0, state.passive_mobs),
+            has_weapon
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.EAT_BAT.value].set(
-        check_mob_nearby(1, state.passive_mobs)
+        jnp.logical_and(
+            check_mob_nearby(1, state.passive_mobs),
+            has_weapon
+        )
     )
     possible_achievements = possible_achievements.at[Achievement.EAT_SNAIL.value].set(
-        check_mob_nearby(2, state.passive_mobs)
+        jnp.logical_and(
+            check_mob_nearby(2, state.passive_mobs),
+            has_weapon
+        )
     )
     return possible_achievements
 
@@ -596,10 +744,11 @@ class CraftaxSymbolicEnvNoAutoReset(EnvironmentNoAutoReset):
         return self.get_obs(state, dummy_achievements, dummy_achievements, params), state
 
     def get_obs(self, state: EnvState, achievements: chex.Array, achievement_coefficients: chex.Array, params: EnvParams):
+        achievable = get_possible_achievements(state)
         task_w = jnp.concatenate(
             (achievement_coefficients,
-             jnp.zeros_like(achievement_coefficients)))
-        achievable = get_possible_achievements(state)
+             jnp.zeros(len(achievable), dtype=achievement_coefficients.dtype)))
+
         return Observation(
             image=render_craftax_symbolic(state),
             achievable=achievable,

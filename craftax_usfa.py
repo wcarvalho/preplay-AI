@@ -108,11 +108,10 @@ def make_craftax_agent(
         rng: jax.random.PRNGKey) -> Tuple[nn.Module, Params, vbb.AgentResetFn]:
 
     # just 1 task
-    import ipdb; ipdb.set_trace()
-    train_tasks = jnp.expand_dims(example_timestep.observation.task_w, axis=0)
+    train_tasks = jnp.expand_dims(example_timestep.observation.task_w, axis=-2)
 
     sf_head = SfGpiHead(
-        num_actions=env.num_actions(env_params),
+        num_actions=env.action_space(env_params).n,
         state_features_dim=example_timestep.observation.task_w.shape[-1],
         nsamples=config.get('NSAMPLES', 1),
         eval_task_support=config.get('EVAL_TASK_SUPPORT', 'train'),

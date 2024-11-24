@@ -44,7 +44,7 @@ from jaxneurorl import utils
 from jaxneurorl import loggers
 
 import alphazero
-import qlearning
+import qlearning_housemaze
 import housemaze_usfa
 import offtask_dyna
 import networks
@@ -102,10 +102,10 @@ def get_qlearning_fns(config, num_categories=10_000,):
       )
 
   return AlgorithmConstructor(
-    make_agent=qlearning.make_housemaze_agent,
-    make_optimizer=qlearning.make_optimizer,
-    make_loss_fn_class=qlearning.make_loss_fn_class,
-    make_actor=qlearning.make_actor,
+    make_agent=qlearning_housemaze.make_housemaze_agent,
+    make_optimizer=qlearning_housemaze.make_optimizer,
+    make_loss_fn_class=qlearning_housemaze.make_loss_fn_class,
+    make_actor=qlearning_housemaze.make_actor,
   )
 
 def get_sf_fns(config, env, env_params, num_categories=10_000,):
@@ -204,7 +204,7 @@ def get_dynaq_fns(
         q_values = preds.q_vals
         assert q_values.shape[0] == epsilons.shape[0]
         sim_rng = jax.random.split(sim_rng, q_values.shape[0])
-        return jax.vmap(qlearning.epsilon_greedy_act, in_axes=(0, 0, 0))(
+        return jax.vmap(qlearning_housemaze.epsilon_greedy_act, in_axes=(0, 0, 0))(
             q_values, epsilons, sim_rng)
 
   else:
@@ -354,12 +354,12 @@ def run_single(
       make_train = functools.partial(
           vbb.make_train,
           make_agent=functools.partial(
-             qlearning.make_housemaze_agent,
+             qlearning_housemaze.make_housemaze_agent,
              ObsEncoderCls=HouzemazeObsEncoder,
              ),
-          make_optimizer=qlearning.make_optimizer,
-          make_loss_fn_class=qlearning.make_loss_fn_class,
-          make_actor=qlearning.make_actor,
+          make_optimizer=qlearning_housemaze.make_optimizer,
+          make_loss_fn_class=qlearning_housemaze.make_loss_fn_class,
+          make_actor=qlearning_housemaze.make_actor,
           make_logger=functools.partial(
             make_logger,
             render_fn=housemaze_render_fn,
@@ -367,7 +367,7 @@ def run_single(
             get_task_name=get_task_name,
             action_names=action_names,
             learner_log_extra=functools.partial(
-              qlearning.learner_log_extra,
+              qlearning_housemaze.learner_log_extra,
               config=config,
               action_names=action_names,
               extract_task_info=extract_task_info,
@@ -418,7 +418,7 @@ def run_single(
               get_task_name=get_task_name,
               action_names=action_names,
               learner_log_extra=functools.partial(
-                  qlearning.learner_log_extra,
+                  qlearning_housemaze.learner_log_extra,
                   config=config,
                   action_names=action_names,
                   extract_task_info=extract_task_info,
@@ -518,7 +518,7 @@ def run_single(
             q_values = preds.q_vals
             assert q_values.shape[0] == epsilons.shape[0]
             sim_rng = jax.random.split(sim_rng, q_values.shape[0])
-            return jax.vmap(qlearning.epsilon_greedy_act, in_axes=(0, 0, 0))(
+            return jax.vmap(qlearning_housemaze.epsilon_greedy_act, in_axes=(0, 0, 0))(
                q_values, epsilons, sim_rng)
 
       else:
@@ -558,7 +558,7 @@ def run_single(
             online_coeff=config['ONLINE_COEFF'],
             dyna_coeff=config.get('DYNA_COEFF', 1.0),
             ),
-          make_optimizer=qlearning.make_optimizer,
+          make_optimizer=qlearning_housemaze.make_optimizer,
           make_actor=offtask_dyna.make_actor,
           make_logger=functools.partial(
             make_logger,
@@ -629,10 +629,12 @@ def sweep(search: str = ''):
             'goal': 'maximize',
         },
         'parameters': {
-            "SEED": {'values': list(range(1,3))},
+            "SEED": {'values': list(range(1,2))},
             "env.exp": {'values': ['exp2']},
-            "GAMMA": {'values': [.99, .993]},
-            "STEP_COST": {'values': [.005, .001]},
+            "GAMMA": {'values': [.99, .992]},
+            "STEP_COST": {'values': [.0001]},
+            "NUM_Q_LAYERS": {'values': [1, 2, 3]},
+            "Q_HIDDEN_DIM": {'values': [512, 1024]},
         },
         'overrides': ['alg=ql', 'rlenv=housemaze','user=wilka'],
         'group': 'ql-big-6',
@@ -644,7 +646,7 @@ def sweep(search: str = ''):
             'goal': 'maximize',
         },
         'parameters': {
-            "SEED": {'values': list(range(1,3))},
+            "SEED": {'values': list(range(1,2))},
             "env.exp": {'values': ['exp2']},
             "STEP_COST": {'values': [.01, .005, .001]},
         },
@@ -676,10 +678,12 @@ def sweep(search: str = ''):
         },
         'parameters': {
             'ALG': {'values': ['dynaq_shared']},
-            "SEED": {'values': list(range(1,3))},
+            "SEED": {'values': list(range(1,2))},
             "env.exp": {'values': ['exp2']},
-            "GAMMA": {'values': [.99, .993]},
-            "STEP_COST": {'values': [.005, .001]},
+            "GAMMA": {'values': [.99, .992]},
+            "STEP_COST": {'values': [.0001]},
+            "NUM_Q_LAYERS": {'values': [1, 2, 3]},
+            "Q_HIDDEN_DIM": {'values': [512, 1024]},
         },
         'overrides': ['alg=dyna', 'rlenv=housemaze', 'user=wilka'],
         'group': 'dynaq-big-6',

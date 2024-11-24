@@ -6,12 +6,12 @@ JAX_DISABLE_JIT=1 \
 HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue craftax_trainer.py \
   app.debug=True \
   app.wandb=False \
-  app.search=ql
+  app.search=usfa
 
 RUNNING ON SLURM:
 python craftax_trainer.py \
   app.parallel=slurm \
-  app.search=pqn
+  app.search=usfa
 """
 import os
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
@@ -55,7 +55,7 @@ import housemaze_experiments
 import craftax_observer
 import networks
 import offtask_dyna
-import qlearning
+import qlearning_craftax
 import craftax_usfa as usfa
 
 @struct.dataclass
@@ -141,8 +141,8 @@ class OptimisticResetVecEnvWrapper(object):
         reset_indexes = reset_indexes.at[being_reset].set(
             jnp.arange(self.num_resets))
 
-        obs_re = jax.tree_map(lambda x: x[reset_indexes], obs_re)
-        state_re = jax.tree_map(lambda x: x[reset_indexes], state_re)
+        obs_re = jax.tree.map(lambda x: x[reset_indexes], obs_re)
+        state_re = jax.tree.map(lambda x: x[reset_indexes], state_re)
 
         # Auto-reset environment based on termination
         def auto_reset(done, state_re, state_st, obs_re, obs_st):
@@ -161,11 +161,18 @@ class OptimisticResetVecEnvWrapper(object):
         return obs, state, reward, done, info
 
 
-def craftax_experience_logger(train_state, observer_state,
-                              key: str = 'train', **kwargs):
+def craftax_experience_logger(
+      train_state, observer_state,
+      key: str = 'train',
+      num_seeds: int = None,
+      **kwargs):
+
     def callback(ts, os):
         # main
         end = min(os.idx + 1, len(os.episode_lengths))
+
+        key = f'{key}-{num_seeds}' if num_seeds is not None else key
+        import pdb; pdb.set_trace()
         metrics = {
             f'{key}/avg_episode_length': os.episode_lengths[:end].mean(),
             f'{key}/avg_episode_return': os.episode_returns[:end].mean(),
@@ -189,7 +196,8 @@ def make_logger(
   return loggers.Logger(
       gradient_logger=loggers.default_gradient_logger,
       learner_logger=loggers.default_learner_logger,
-      experience_logger=craftax_experience_logger,
+      experience_logger=partial(craftax_experience_logger,
+                                num_seeds=config.get('NUM_ENV_SEEDS', None)),
       learner_log_extra=learner_log_extra,
   )
 
@@ -213,6 +221,7 @@ def run_single(
     elif config['ENV'] == 'craftax-gen':
       from craftax_env import CraftaxSymbolicEnvNoAutoReset
       config['STRUCTURED_INPUTS'] = True
+      config['NUM_ENV_SEEDS'] = config.get('NUM_ENV_SEEDS', 10_000)
 
       env = CraftaxSymbolicEnvNoAutoReset()
       env_params = env.default_params.replace(
@@ -242,10 +251,10 @@ def run_single(
         train_fn = vbb.make_train(
           config=config,
           env=env,
-          make_agent=qlearning.make_agent,
-          make_optimizer=qlearning.make_optimizer,
-          make_loss_fn_class=qlearning.make_loss_fn_class,
-          make_actor=qlearning.make_actor,
+          make_agent=qlearning_craftax.make_craftax_agent,
+          make_optimizer=qlearning_craftax.make_optimizer,
+          make_loss_fn_class=qlearning_craftax.make_loss_fn_class,
+          make_actor=qlearning_craftax.make_actor,
           make_logger=make_logger,
           train_env_params=env_params,
           test_env_params=test_env_params,
@@ -327,8 +336,8 @@ def sweep(search: str = ''):
         'parameters': {
             "ENV": {'values': ['craftax-gen']},
             "TOTAL_TIMESTEPS": {'values': [int(1e7)]},
-            "NUM_ENV_SEEDS": {'values': [100, 1_000, 10_000]},
-            #"BUFFER_SIZE": {'values': [50_000,]},
+            "NUM_ENV_SEEDS": {'values': [100, 10_000]},
+            #"AUX_COEFF": {'values': [1.0, .1, .01, .001]},
             #"NUM_ENVS": {'values': [32, 64]},
         },
         'overrides': ['alg=ql', 'rlenv=craftax', 'user=wilka'],
