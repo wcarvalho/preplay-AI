@@ -28,7 +28,7 @@ from jaxneurorl.agents import value_based_pqn as vpq
 from jaxneurorl.agents import value_based_basics as vbb
 from typing import Any, Callable, Dict, Union, Optional
 from craftax.craftax_env import make_craftax_env_from_name
-
+from craftax.craftax.constants import Achievement
 
 import jax
 import chex
@@ -227,15 +227,34 @@ def craftax_experience_logger(
 
     key = f'{key}-{num_seeds}' if num_seeds is not None else key
     def callback(ts, os, traj):
-        end = min(os.idx + 1, len(os.episode_lengths))
+        # [Time, Num Envs, Achievements]
+        log_state = traj.timestep.state
+        achievements = traj.timestep.state.env_state.achievements
+        done = traj.timestep.last()
+        achievements = achievements * done * 100.0
+
+        ###################
+        # Compute length, return, $ max_score
+        ###################
+        infos = {}
+        infos["0.avg_episode_return"] = log_state.returned_episode_returns
+        infos["0.avg_episode_length"] = log_state.returned_episode_lengths
+        for achievement in Achievement:
+          name = f"Achievements/{achievement.name.lower()}"
+          infos[f"1.{name}"] = achievements[achievement.value]
+
+        infos["timestep"] = log_state.timestep
+        infos["returned_episode"] = done
+        metrics = jax.tree_map(
+                lambda x: (x * infos["returned_episode"]).sum()
+                / infos["returned_episode"].sum(),
+                infos,
+            )
+        metrics = {f'{key}/{k}': v for k, v in metrics.items()}
+
+        import ipdb; ipdb.set_trace()
+
         import pdb; pdb.set_trace()
-        metrics = {
-            f'{key}/avg_episode_length': os.episode_lengths[:end].mean(),
-            f'{key}/avg_episode_return': os.episode_returns[:end].mean(),
-            f'{key}/avg_%_max_score': os.episode_returns[:end].mean()/MAX_SCORE,
-            f'{key}/num_actor_steps': ts.timesteps,
-            f'{key}/num_learner_updates': ts.n_updates,
-        }
         if wandb.run is not None:
           wandb.log(metrics)
 
@@ -288,11 +307,8 @@ def run_single(
     else:
       raise NotImplementedError(config["ENV"])
 
-    env = LogWrapper(env)
-    env = TimestepWrapper(env, autoreset=False)
-
     vec_env = OptimisticResetVecEnvWrapper(
-        env,
+        TimestepWrapper(LogWrapper(env), autoreset=False),
         num_envs=config["NUM_ENVS"],
         reset_ratio=min(config["OPTIMISTIC_RESET_RATIO"], config["NUM_ENVS"]),
     )
