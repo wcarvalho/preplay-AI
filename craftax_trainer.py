@@ -237,7 +237,7 @@ def craftax_experience_logger(
         # Compute length, return, $ max_score
         ###################
         infos = {}
-        infos["0.avg_episode_return"] = log_state.returned_episode_returns
+        infos["0.avg_episode_return"] = log_state.returned_episode_returns*100.0
         infos["0.avg_episode_length"] = log_state.returned_episode_lengths
         for achievement in Achievement:
           name = f"Achievements/{achievement.name.lower()}"
