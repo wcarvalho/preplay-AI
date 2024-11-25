@@ -13,8 +13,8 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
         target_sf = target_preds.sf  # [T+1, B, N, A, C]
 
         # NOTE: main change was to concat these
-        achievable = data.timestep.observation.achievable
-        achievements = data.timestep.observation.achievements
+        achievable = data.timestep.observation.achievable.astype(online_sf.dtype)
+        achievements = data.timestep.observation.achievements.astype(online_sf.dtype)
         cumulants = jnp.concatenate((achievable, achievements), axis=-1)
         cumulants = cumulants.astype(online_sf.dtype)
         cumulants = cumulants - self.step_cost

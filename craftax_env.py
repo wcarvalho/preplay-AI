@@ -31,7 +31,7 @@ class EnvParams:
     max_attribute: int = 5
 
     god_mode: bool = False
-    reset_seeds: chex.Array = jnp.arange(10_000)
+    reset_seeds: Tuple[int, ...] = tuple(range(10_000))  
 
     fractal_noise_angles: tuple[int, int, int, int] = (None, None, None, None)
 
@@ -735,7 +735,7 @@ class CraftaxSymbolicEnvNoAutoReset(EnvironmentNoAutoReset):
         self, rng: chex.PRNGKey, params: EnvParams
     ) -> Tuple[chex.Array, EnvState]:
         """NOTE: main change is to select world seed from a set of seeds"""
-        reset_seeds = params.reset_seeds
+        reset_seeds = jnp.asarray(params.reset_seeds)
         rng, _rng = jax.random.split(rng)
         selected_seed = jax.random.choice(_rng, reset_seeds)
         world_rng = jax.random.PRNGKey(selected_seed)

@@ -167,12 +167,10 @@ def craftax_experience_logger(
       num_seeds: int = None,
       **kwargs):
 
+    key = f'{key}-{num_seeds}' if num_seeds is not None else key
     def callback(ts, os):
-        # main
         end = min(os.idx + 1, len(os.episode_lengths))
 
-        key = f'{key}-{num_seeds}' if num_seeds is not None else key
-        import pdb; pdb.set_trace()
         metrics = {
             f'{key}/avg_episode_length': os.episode_lengths[:end].mean(),
             f'{key}/avg_episode_return': os.episode_returns[:end].mean(),
@@ -192,7 +190,6 @@ def make_logger(
         learner_log_extra: Optional[Callable[[Any], Any]] = None
 ):
 
-  del config, env, env_params
   return loggers.Logger(
       gradient_logger=loggers.default_gradient_logger,
       learner_logger=loggers.default_learner_logger,
@@ -209,14 +206,14 @@ def run_single(
     config["TEST_NUM_ENVS"] = config.get("TEST_NUM_ENVS", None) or config["NUM_ENVS"]
 
     if config['ENV'] == 'classic':
-      env = make_craftax_env_from_name("Craftax-Classic-Symbolic-v1", auto_reset=False)
-      env_params = env.default_params
-      test_env_params = env.default_params
+      vec_env = make_craftax_env_from_name("Craftax-Classic-Symbolic-v1", auto_reset=False)
+      env_params = vec_env.default_params
+      test_env_params = vec_env.default_params
 
     elif config['ENV'] == 'craftax':
-      env = make_craftax_env_from_name("Craftax-Symbolic-v1", auto_reset=False)
-      env_params = env.default_params
-      test_env_params = env.default_params
+      vec_env = make_craftax_env_from_name("Craftax-Symbolic-v1", auto_reset=False)
+      env_params = vec_env.default_params
+      test_env_params = vec_env.default_params
 
     elif config['ENV'] == 'craftax-gen':
       from craftax_env import CraftaxSymbolicEnvNoAutoReset
@@ -224,33 +221,34 @@ def run_single(
       config['NUM_ENV_SEEDS'] = config.get('NUM_ENV_SEEDS', 10_000)
 
       env = CraftaxSymbolicEnvNoAutoReset()
+      
       env_params = env.default_params.replace(
-         reset_seeds=jnp.arange(config['NUM_ENV_SEEDS']))
+         reset_seeds=tuple(np.arange(config['NUM_ENV_SEEDS'])))
       test_env_params = env.default_params.replace(
-         reset_seeds=jnp.arange(config['NUM_ENV_SEEDS'], config['NUM_ENV_SEEDS'] + config['TEST_NUM_ENVS']))
+         reset_seeds=tuple(np.arange(config['NUM_ENV_SEEDS'], config['NUM_ENV_SEEDS'] + config['TEST_NUM_ENVS'])))
 
     else:
       raise NotImplementedError(config["ENV"])
   
 
-    env = OptimisticResetVecEnvWrapper(
+    vec_env = OptimisticResetVecEnvWrapper(
         env,
         num_envs=config["NUM_ENVS"],
         reset_ratio=min(config["OPTIMISTIC_RESET_RATIO"], config["NUM_ENVS"]),
     )
-    test_env = OptimisticResetVecEnvWrapper(
+    vec_test_env = OptimisticResetVecEnvWrapper(
         env,
         num_envs=config["TEST_NUM_ENVS"],
         reset_ratio=min(config["OPTIMISTIC_RESET_RATIO"], config["TEST_NUM_ENVS"]),
     )
-    env = TimestepWrapper(env, autoreset=False)
-    test_env = TimestepWrapper(test_env, autoreset=False)
+    vec_env = TimestepWrapper(vec_env, autoreset=False)
+    vec_test_env = TimestepWrapper(vec_test_env, autoreset=False)
 
 
     if config['ALG'] == 'qlearning':
         train_fn = vbb.make_train(
           config=config,
-          env=env,
+          env=vec_env,
           make_agent=qlearning_craftax.make_craftax_agent,
           make_optimizer=qlearning_craftax.make_optimizer,
           make_loss_fn_class=qlearning_craftax.make_loss_fn_class,
@@ -265,7 +263,7 @@ def run_single(
         constructor = get_pqn_fns(config)
         train_fn = vpq.make_train(
           config=config,
-          env=env,
+          env=vec_env,
           make_agent=constructor.make_agent,
           make_optimizer=constructor.make_optimizer,
           make_loss_fn_class=constructor.make_loss_fn_class,
@@ -279,7 +277,7 @@ def run_single(
     elif config['ALG'] == 'usfa':
         train_fn = vbb.make_train(
           config=config,
-          env=env,
+          env=vec_env,
           make_agent=usfa.make_craftax_agent,
           make_optimizer=usfa.make_optimizer,
           make_loss_fn_class=usfa.make_loss_fn_class,
@@ -290,6 +288,53 @@ def run_single(
           ObserverCls=craftax_observer.Observer,
           vmap_env=False,
         )
+    elif config['ALG'] == 'alphazero':
+      import mctx
+      from jaxneurorl.agents import alphazero
+      import alphazero_craftax
+      max_value = config.get('MAX_VALUE', 10)
+      num_bins = config['NUM_BINS']
+
+      discretizer = utils.Discretizer(
+          max_value=max_value,
+          num_bins=num_bins,
+          min_value=-max_value)
+
+      num_train_simulations = config.get('NUM_SIMULATIONS', 4)
+
+      mcts_policy = functools.partial(
+          mctx.gumbel_muzero_policy,
+          max_depth=config.get('MAX_SIM_DEPTH', None),
+          num_simulations=num_train_simulations,
+          gumbel_scale=config.get('GUMBEL_SCALE', 1.0))
+      eval_mcts_policy = functools.partial(
+          mctx.gumbel_muzero_policy,
+          max_depth=config.get('MAX_SIM_DEPTH', None),
+          num_simulations=config.get(
+            'NUM_EVAL_SIMULATIONS', num_train_simulations),
+          gumbel_scale=config.get('GUMBEL_SCALE', 1.0))
+
+      train_fn = vbb.make_train(
+          config=config,
+          env=vec_env,
+          make_agent=functools.partial(alphazero_craftax.make_agent,
+            model_env=TimestepWrapper(env, autoreset=False)),
+          make_optimizer=alphazero.make_optimizer,
+          make_loss_fn_class=functools.partial(
+              alphazero.make_loss_fn_class,
+              discretizer=discretizer),
+          make_actor=functools.partial(
+              alphazero.make_actor,
+              discretizer=discretizer,
+              mcts_policy=mcts_policy,
+              eval_mcts_policy=eval_mcts_policy),
+          make_logger=make_logger,
+          train_env_params=env_params,
+          test_env_params=test_env_params,
+          ObserverCls=craftax_observer.Observer,
+          vmap_env=False,
+      )
+
     else:
       raise NotImplementedError(config['ALG'])
     
@@ -334,14 +379,12 @@ def sweep(search: str = ''):
             'goal': 'maximize',
         },
         'parameters': {
-            "ENV": {'values': ['craftax-gen']},
-            "TOTAL_TIMESTEPS": {'values': [int(1e7)]},
             "NUM_ENV_SEEDS": {'values': [100, 10_000]},
             #"AUX_COEFF": {'values': [1.0, .1, .01, .001]},
             #"NUM_ENVS": {'values': [32, 64]},
         },
-        'overrides': ['alg=ql', 'rlenv=craftax', 'user=wilka'],
-        'group': 'ql-2',
+        'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
+        'group': 'ql-3',
     }
   elif search == 'pqn':
     sweep_config = {
@@ -350,7 +393,6 @@ def sweep(search: str = ''):
             'goal': 'maximize',
         },
         'parameters': {
-            "ENV": {'values': ['craftax-gen']},
             "FIXED_EPSILON": {'values': [0, 2]},
             "LAMBDA": {'values': [.95, .5]},
             "MAX_GRAD_NORM": {'values': [.5, 10]},
@@ -358,7 +400,7 @@ def sweep(search: str = ''):
             "LR": {'values': [.001, .0003]},
             "NUM_ENVS": {'values': [256]},
         },
-        'overrides': ['alg=pqn-craftax', 'rlenv=craftax', 'user=wilka'],
+        'overrides': ['alg=pqn-craftax', 'rlenv=craftax-10m', 'user=wilka'],
         'group': 'pqn-7',
     }
   elif search == 'usfa':
@@ -368,10 +410,23 @@ def sweep(search: str = ''):
             'goal': 'maximize',
         },
         'parameters': {
-            "ENV": {'values': ['craftax-gen']},
+            "NUM_ENV_SEEDS": {'values': [100, 10_000]},
         },
-        'overrides': ['alg=usfa-craftax', 'rlenv=craftax', 'user=wilka'],
+        'overrides': ['alg=usfa', 'rlenv=craftax-10m', 'user=wilka'],
         'group': 'usfa-1',
+    }
+  elif search == 'alphazero':
+    sweep_config = {
+        'metric': {
+            'name': 'evaluator_performance/0.0 avg_episode_return',
+            'goal': 'maximize',
+        },
+        'parameters': {
+            "NUM_ENV_SEEDS": {'values': [100, 10_000]},
+            "NUM_SIMULATIONS": {'values': [2, 4]},
+        },
+        'overrides': ['alg=alphazero', 'rlenv=craftax-10m', 'user=wilka'],
+        'group': 'alphazero-1',
     }
   else:
     raise NotImplementedError(search)
