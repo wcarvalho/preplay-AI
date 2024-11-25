@@ -6,7 +6,7 @@ JAX_DISABLE_JIT=1 \
 HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue craftax_trainer.py \
   app.debug=True \
   app.wandb=False \
-  app.search=usfa
+  app.search=ql
 
 RUNNING ON SLURM:
 python craftax_trainer.py \
@@ -231,11 +231,9 @@ def craftax_experience_logger(
         log_state = traj.timestep.state
         achievements = traj.timestep.state.env_state.achievements
         done = traj.timestep.last()
-        achievements = achievements * done * 100.0
 
-        ###################
-        # Compute length, return, $ max_score
-        ###################
+        achievements = achievements * done[:,:,None] * 100.0
+
         infos = {}
         infos["0.avg_episode_return"] = log_state.returned_episode_returns*100.0
         infos["0.avg_episode_length"] = log_state.returned_episode_lengths
@@ -243,18 +241,15 @@ def craftax_experience_logger(
           name = f"Achievements/{achievement.name.lower()}"
           infos[f"1.{name}"] = achievements[achievement.value]
 
-        infos["timestep"] = log_state.timestep
+        #infos["timestep"] = log_state.timestep
         infos["returned_episode"] = done
         metrics = jax.tree_map(
                 lambda x: (x * infos["returned_episode"]).sum()
-                / infos["returned_episode"].sum(),
+                / (1e-5+infos["returned_episode"].sum()),
                 infos,
             )
         metrics = {f'{key}/{k}': v for k, v in metrics.items()}
 
-        import ipdb; ipdb.set_trace()
-
-        import pdb; pdb.set_trace()
         if wandb.run is not None:
           wandb.log(metrics)
 
