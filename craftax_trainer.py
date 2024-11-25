@@ -31,6 +31,7 @@ from craftax.craftax_env import make_craftax_env_from_name
 
 
 import jax
+import chex
 from flax import struct
 import functools
 import jax.numpy as jnp
@@ -56,7 +57,8 @@ import craftax_observer
 import networks
 import offtask_dyna
 import qlearning_craftax
-import craftax_usfa as usfa
+import qlearning_sf_aux_craftax
+import usfa_craftax as usfa
 
 @struct.dataclass
 class AlgorithmConstructor:
@@ -83,6 +85,63 @@ def get_pqn_fns(config):
       make_loss_fn_class=pqn.make_loss_fn_class,
       make_actor=pqn.make_actor,
   )
+
+@struct.dataclass
+class LogEnvState:
+    env_state: Any
+    episode_returns: float
+    episode_lengths: int
+    returned_episode_returns: float
+    returned_episode_lengths: int
+    timestep: int
+
+class GymnaxWrapper(object):
+    """Base class for Gymnax wrappers."""
+
+    def __init__(self, env):
+        self._env = env
+
+    # provide proxy access to regular attributes of wrapped object
+    def __getattr__(self, name):
+        return getattr(self._env, name)
+
+class LogWrapper(GymnaxWrapper):
+    """Log the episode returns and lengths."""
+
+    def __init__(self, env):
+        super().__init__(env)
+
+    @partial(jax.jit, static_argnums=(0, 2))
+    def reset(self, key: chex.PRNGKey, params=None):
+        obs, env_state = self._env.reset(key, params)
+        state = LogEnvState(env_state, 0.0, 0, 0.0, 0, 0)
+        return obs, state
+
+    @partial(jax.jit, static_argnums=(0, 4))
+    def step(
+        self,
+        key: chex.PRNGKey,
+        state,
+        action: Union[int, float],
+        params=None,
+    ):
+        obs, env_state, reward, done, info = self._env.step(
+            key, state.env_state, action, params
+        )
+        new_episode_return = state.episode_returns + reward
+        new_episode_length = state.episode_lengths + 1
+        state = LogEnvState(
+            env_state=env_state,
+            episode_returns=new_episode_return * (1 - done),
+            episode_lengths=new_episode_length * (1 - done),
+            returned_episode_returns=state.returned_episode_returns * (1 - done)
+            + new_episode_return * done,
+            returned_episode_lengths=state.returned_episode_lengths * (1 - done)
+            + new_episode_length * done,
+            timestep=state.timestep + 1,
+        )
+
+        return obs, state, reward, done, info
 
 class OptimisticResetVecEnvWrapper(object):
     """
@@ -113,24 +172,27 @@ class OptimisticResetVecEnvWrapper(object):
     def reset(self, rng, params=None):
         rng, _rng = jax.random.split(rng)
         rngs = jax.random.split(_rng, self.num_envs)
-        obs, env_state = self.reset_fn(rngs, params)
-        return obs, env_state
+        timestep = self.reset_fn(rngs, params)
+        return timestep
 
     @partial(jax.jit, static_argnums=(0, 4))
-    def step(self, rng, state, action, params=None):
+    def step(self, rng, prior_timestep, action, params=None):
 
         rng, _rng = jax.random.split(rng)
         rngs = jax.random.split(_rng, self.num_envs)
-        obs_st, state_st, reward, done, info = self.step_fn(
-            rngs, state, action, params)
+        timestep_st = self.step_fn(
+            rngs, prior_timestep, action, params)
 
         rng, _rng = jax.random.split(rng)
         rngs = jax.random.split(_rng, self.num_resets)
-        obs_re, state_re = self.reset_fn(rngs, params)
+        timestep_re = self.reset_fn(rngs, params)
 
         rng, _rng = jax.random.split(rng)
         reset_indexes = jnp.arange(self.num_resets).repeat(self.reset_ratio)
 
+        # NOTE: CHANGE: if PRIOR timestep is last, then we are resetting
+        # before, if CURRENT timestep is last, then we are resetting
+        done = prior_timestep.last()
         being_reset = jax.random.choice(
             _rng,
             jnp.arange(self.num_envs),
@@ -141,36 +203,32 @@ class OptimisticResetVecEnvWrapper(object):
         reset_indexes = reset_indexes.at[being_reset].set(
             jnp.arange(self.num_resets))
 
-        obs_re = jax.tree.map(lambda x: x[reset_indexes], obs_re)
-        state_re = jax.tree.map(lambda x: x[reset_indexes], state_re)
+        timestep_re = jax.tree.map(lambda x: x[reset_indexes], timestep_re)
 
         # Auto-reset environment based on termination
-        def auto_reset(done, state_re, state_st, obs_re, obs_st):
-            state = jax.tree.map(
-                lambda x, y: jax.lax.select(done, x, y), state_re, state_st
-            )
-            obs = jax.tree.map(
-                lambda x, y: jax.lax.select(done, x, y), obs_re, obs_st
+        def auto_reset(done, timestep_re, timestep_st):
+            return jax.tree.map(
+                lambda x, y: jax.lax.select(done, x, y), timestep_re, timestep_st
             )
 
-            return state, obs
+        timestep = jax.vmap(auto_reset)(
+            done, timestep_re, timestep_st)
 
-        state, obs = jax.vmap(auto_reset)(
-            done, state_re, state_st, obs_re, obs_st)
-
-        return obs, state, reward, done, info
+        return timestep
 
 
 def craftax_experience_logger(
-      train_state, observer_state,
+      train_state,
+      observer_state,
       key: str = 'train',
       num_seeds: int = None,
+      trajectory: Optional[struct.PyTreeNode] = None,
       **kwargs):
 
     key = f'{key}-{num_seeds}' if num_seeds is not None else key
-    def callback(ts, os):
+    def callback(ts, os, traj):
         end = min(os.idx + 1, len(os.episode_lengths))
-
+        import pdb; pdb.set_trace()
         metrics = {
             f'{key}/avg_episode_length': os.episode_lengths[:end].mean(),
             f'{key}/avg_episode_return': os.episode_returns[:end].mean(),
@@ -181,7 +239,7 @@ def craftax_experience_logger(
         if wandb.run is not None:
           wandb.log(metrics)
 
-    jax.debug.callback(callback, train_state, observer_state)
+    jax.debug.callback(callback, train_state, observer_state, trajectory)
 
 def make_logger(
         config: dict,
@@ -195,7 +253,7 @@ def make_logger(
       learner_logger=loggers.default_learner_logger,
       experience_logger=partial(craftax_experience_logger,
                                 num_seeds=config.get('NUM_ENV_SEEDS', None)),
-      learner_log_extra=learner_log_extra,
+      learner_log_extra=partial(learner_log_extra, config=config) if learner_log_extra is not None else None,
   )
 
 def run_single(
@@ -221,7 +279,7 @@ def run_single(
       config['NUM_ENV_SEEDS'] = config.get('NUM_ENV_SEEDS', 10_000)
 
       env = CraftaxSymbolicEnvNoAutoReset()
-      
+
       env_params = env.default_params.replace(
          reset_seeds=tuple(np.arange(config['NUM_ENV_SEEDS'])))
       test_env_params = env.default_params.replace(
@@ -229,20 +287,15 @@ def run_single(
 
     else:
       raise NotImplementedError(config["ENV"])
-  
+
+    env = LogWrapper(env)
+    env = TimestepWrapper(env, autoreset=False)
 
     vec_env = OptimisticResetVecEnvWrapper(
         env,
         num_envs=config["NUM_ENVS"],
         reset_ratio=min(config["OPTIMISTIC_RESET_RATIO"], config["NUM_ENVS"]),
     )
-    vec_test_env = OptimisticResetVecEnvWrapper(
-        env,
-        num_envs=config["TEST_NUM_ENVS"],
-        reset_ratio=min(config["OPTIMISTIC_RESET_RATIO"], config["TEST_NUM_ENVS"]),
-    )
-    vec_env = TimestepWrapper(vec_env, autoreset=False)
-    vec_test_env = TimestepWrapper(vec_test_env, autoreset=False)
 
 
     if config['ALG'] == 'qlearning':
@@ -259,6 +312,21 @@ def run_single(
           ObserverCls=craftax_observer.Observer,
           vmap_env=False,
         )
+    elif config['ALG'] == 'qlearning_sf_aux':
+        train_fn = vbb.make_train(
+          config=config,
+          env=vec_env,
+          make_agent=qlearning_sf_aux_craftax.make_craftax_agent,
+          make_optimizer=qlearning_sf_aux_craftax.make_optimizer,
+          make_loss_fn_class=qlearning_sf_aux_craftax.make_loss_fn_class,
+          make_actor=qlearning_sf_aux_craftax.make_actor,
+          make_logger=make_logger,
+          train_env_params=env_params,
+          test_env_params=test_env_params,
+          ObserverCls=craftax_observer.Observer,
+          vmap_env=False,
+        )
+
     elif config['ALG'] == 'pqn':
         constructor = get_pqn_fns(config)
         train_fn = vpq.make_train(
@@ -282,7 +350,8 @@ def run_single(
           make_optimizer=usfa.make_optimizer,
           make_loss_fn_class=usfa.make_loss_fn_class,
           make_actor=usfa.make_actor,
-          make_logger=make_logger,
+          make_logger=partial(make_logger,
+                              learner_log_extra=usfa.learner_log_extra),
           train_env_params=env_params,
           test_env_params=test_env_params,
           ObserverCls=craftax_observer.Observer,
@@ -380,11 +449,11 @@ def sweep(search: str = ''):
         },
         'parameters': {
             "NUM_ENV_SEEDS": {'values': [100, 10_000]},
-            #"AUX_COEFF": {'values': [1.0, .1, .01, .001]},
+            #"AUX_COEFF": {'values': [1.0]},
             #"NUM_ENVS": {'values': [32, 64]},
         },
         'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'ql-3',
+        'group': 'ql-6',
     }
   elif search == 'pqn':
     sweep_config = {
@@ -411,9 +480,12 @@ def sweep(search: str = ''):
         },
         'parameters': {
             "NUM_ENV_SEEDS": {'values': [100, 10_000]},
+            "TX_PAIR": {'values': ['hyperbolic']},
+            #"NSAMPLES": {'values': [1, 5]},
+            "AUX_COEFF": {'values': [1.0, .1, .01]},
         },
         'overrides': ['alg=usfa', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'usfa-1',
+        'group': 'usfa-6',
     }
   elif search == 'alphazero':
     sweep_config = {
@@ -427,6 +499,20 @@ def sweep(search: str = ''):
         },
         'overrides': ['alg=alphazero', 'rlenv=craftax-10m', 'user=wilka'],
         'group': 'alphazero-1',
+    }
+  elif search == 'ql_sf':
+    sweep_config = {
+        'metric': {
+            'name': 'evaluator_performance/0.0 avg_episode_return',
+            'goal': 'maximize',
+        },
+        'parameters': {
+            "NUM_ENV_SEEDS": {'values': [100, 10_000]},
+            "ALG": {'values': ['qlearning_sf_aux']},
+            #"NUM_ENVS": {'values': [32, 64]},
+        },
+        'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
+        'group': 'ql-sf-2',
     }
   else:
     raise NotImplementedError(search)

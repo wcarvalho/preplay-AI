@@ -6,7 +6,7 @@ JAX_DISABLE_JIT=1 \
 HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue housemaze_trainer.py \
   app.debug=True \
   app.wandb=False \
-  app.search=usfa
+  app.search=ql
 
 RUNNING ON SLURM:
 python housemaze_trainer.py \

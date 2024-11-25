@@ -724,7 +724,11 @@ class CraftaxSymbolicEnvNoAutoReset(EnvironmentNoAutoReset):
         info["discount"] = self.discount(state, params)
 
         return (
-            lax.stop_gradient(self.get_obs(state, achievements, achievement_coefficients, params)),
+            lax.stop_gradient(self.get_obs(
+                state=state,
+                achievements=achievements,
+                achievement_coefficients=achievement_coefficients,
+                params=params)),
             lax.stop_gradient(state),
             reward,
             done,
@@ -744,6 +748,7 @@ class CraftaxSymbolicEnvNoAutoReset(EnvironmentNoAutoReset):
         return self.get_obs(state, dummy_achievements, dummy_achievements, params), state
 
     def get_obs(self, state: EnvState, achievements: chex.Array, achievement_coefficients: chex.Array, params: EnvParams):
+        del params
         achievable = get_possible_achievements(state)
         task_w = jnp.concatenate(
             (achievement_coefficients,
@@ -751,8 +756,8 @@ class CraftaxSymbolicEnvNoAutoReset(EnvironmentNoAutoReset):
 
         return Observation(
             image=render_craftax_symbolic(state),
-            achievable=achievable,
             achievements=achievements,
+            achievable=achievable,
             task_w=task_w)
 
     def is_terminal(self, state: EnvState, params: EnvParams) -> bool:
