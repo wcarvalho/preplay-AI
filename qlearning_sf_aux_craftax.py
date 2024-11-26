@@ -101,6 +101,8 @@ class R2D2LossFn(vbb.RecurrentLossFn):
 
   extract_q: Callable[[jax.Array], jax.Array] = lambda preds: preds.q_vals
   aux_coeff: float = 1.0
+  max_priority_weight: float = 0.9
+  importance_sampling_exponent: float = 0.6
 
 
   def error(self, data, online_preds, online_state, target_preds, target_state, steps, **kwargs):
@@ -184,10 +186,14 @@ class R2D2LossFn(vbb.RecurrentLossFn):
 
       target = jax.lax.stop_gradient(target)
       # [T, B, D], sum over achievements
-      achieve_loss = 0.5 * jnp.square(target - predictions).sum(-1)
+      aux_error = target - predictions
+      achieve_loss = 0.5 * jnp.square(aux_error).mean(-1)
+
+      batch_td_error = jnp.abs(batch_td_error) + self.aux_coeff*jnp.abs(aux_error).mean(-1)
 
       achieve_loss = achieve_loss.mean(axis=0)  # [B]
       metrics['0.achieve_loss'] = achieve_loss
+      metrics['0.full_td'] = batch_td_error
       batch_loss_mean = batch_loss_mean + self.aux_coeff*achieve_loss
 
     if self.logger.learner_log_extra is not None:
@@ -209,7 +215,7 @@ def make_loss_fn_class(config) -> vbb.RecurrentLossFn:
      discount=config['GAMMA'],
      tx_pair=rlax.SIGNED_HYPERBOLIC_PAIR if config.get('TX_PAIR', 'none') == 'hyperbolic' else rlax.IDENTITY_PAIR,
      step_cost=config.get('STEP_COST', 0.),
-     aux_coeff=config.get('AUX_COEFF', 1.0))
+     aux_coeff=config.get('AUX_COEFF', 0.001))
 
 def make_craftax_agent(
         config: dict,

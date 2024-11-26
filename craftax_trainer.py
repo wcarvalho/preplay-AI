@@ -225,35 +225,39 @@ def craftax_experience_logger(
       trajectory: Optional[struct.PyTreeNode] = None,
       **kwargs):
 
-    key = f'{key}-{num_seeds}' if num_seeds is not None else key
-    def callback(ts, os, traj):
-        # [Time, Num Envs, Achievements]
-        log_state = traj.timestep.state
-        achievements = traj.timestep.state.env_state.achievements
-        done = traj.timestep.last()
+    key_fn = lambda k: f'{k}-{num_seeds}' if num_seeds is not None else k
+    main_key = key_fn(key)
+    ach_key = key_fn('achievements')
 
-        achievements = achievements * done[:,:,None] * 100.0
+    log_state = trajectory.timestep.state
+    # [T, B, A]
+    achievements = trajectory.timestep.state.env_state.achievements
 
-        infos = {}
-        infos["0.avg_episode_return"] = log_state.returned_episode_returns*100.0
-        infos["0.avg_episode_length"] = log_state.returned_episode_lengths
-        for achievement in Achievement:
-          name = f"Achievements/{achievement.name.lower()}"
-          infos[f"1.{name}"] = achievements[achievement.value]
+    # [T, B]
+    done = trajectory.timestep.last()
 
-        #infos["timestep"] = log_state.timestep
-        infos["returned_episode"] = done
-        metrics = jax.tree_map(
-                lambda x: (x * infos["returned_episode"]).sum()
-                / (1e-5+infos["returned_episode"].sum()),
-                infos,
-            )
-        metrics = {f'{key}/{k}': v for k, v in metrics.items()}
+    achievements = achievements * done[:,:,None] * 100.0
 
+    infos = {}
+    infos[f"{main_key}/0.episode_return"] = log_state.returned_episode_returns
+    infos[f"{main_key}/0.score"] = (log_state.returned_episode_returns/MAX_SCORE)*100.0
+    infos[f"{main_key}/0.episode_length"] = log_state.returned_episode_lengths
+    for achievement in Achievement:
+      name = f"Achievements/{achievement.name.lower()}"
+      infos[f"{ach_key}/{name}"] = achievements[:, :, achievement.value]
+
+    metrics = jax.tree.map(
+            lambda x: (x * done).sum()
+            / (1e-5+done.sum()),
+            infos,
+        )
+    metrics[f'{main_key}/num_actor_steps'] = train_state.timesteps
+    metrics[f'{main_key}/num_learner_updates'] = train_state.n_updates
+    def callback(m):
         if wandb.run is not None:
-          wandb.log(metrics)
+          wandb.log(m)
 
-    jax.debug.callback(callback, train_state, observer_state, trajectory)
+    jax.debug.callback(callback, metrics)
 
 def make_logger(
         config: dict,
@@ -459,12 +463,31 @@ def sweep(search: str = ''):
             'goal': 'maximize',
         },
         'parameters': {
-            "NUM_ENV_SEEDS": {'values': [100, 10_000]},
-            #"AUX_COEFF": {'values': [1.0]},
-            #"NUM_ENVS": {'values': [32, 64]},
+            "NUM_ENV_SEEDS": {'values': [10_000]},
+            #"AUX_COEFF": {'values': [100., 10., 1.0, .1, .01, .001]},
+            "LEARNING_STARTS": {'values': [0]},
+            "TRAINING_INTERVAL": {'values': [1, 5]},
+            "FIXED_EPSILON": {'values': [2, 0]},
         },
         'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'ql-6',
+        'group': 'ql-11',
+    }
+  elif search == 'ql_sf':
+    sweep_config = {
+        'metric': {
+            'name': 'evaluator_performance/0.0 avg_episode_return',
+            'goal': 'maximize',
+        },
+        'parameters': {
+            "ALG": {'values': ['qlearning_sf_aux']},
+            "NUM_ENV_SEEDS": {'values': [10_000]},
+            "LEARNING_STARTS": {'values': [0]},
+            "TRAINING_INTERVAL": {'values': [1, 5]},
+            "FIXED_EPSILON": {'values': [2, 0]},
+            #"AUX_COEFF": {'values': [1.0, .1, .01, .001]},
+        },
+        'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
+        'group': 'ql-sf-7',
     }
   elif search == 'pqn':
     sweep_config = {
@@ -510,20 +533,6 @@ def sweep(search: str = ''):
         },
         'overrides': ['alg=alphazero', 'rlenv=craftax-10m', 'user=wilka'],
         'group': 'alphazero-1',
-    }
-  elif search == 'ql_sf':
-    sweep_config = {
-        'metric': {
-            'name': 'evaluator_performance/0.0 avg_episode_return',
-            'goal': 'maximize',
-        },
-        'parameters': {
-            "NUM_ENV_SEEDS": {'values': [100, 10_000]},
-            "ALG": {'values': ['qlearning_sf_aux']},
-            #"NUM_ENVS": {'values': [32, 64]},
-        },
-        'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'ql-sf-2',
     }
   else:
     raise NotImplementedError(search)
