@@ -13,7 +13,7 @@ from craftax.craftax.envs.common import log_achievements_to_info
 from craftax.environment_base.environment_bases import EnvironmentNoAutoReset
 from craftax.craftax.constants import *
 from craftax.craftax.game_logic import craftax_step, is_game_over
-from craftax.craftax.craftax_state import EnvState, StaticEnvParams
+from craftax.craftax.craftax_state import EnvState
 from craftax.craftax.renderer import render_craftax_symbolic
 from craftax.craftax.world_gen.world_gen import generate_world, generate_smoothworld, generate_dungeon, ALL_SMOOTHGEN_CONFIGS, ALL_DUNGEON_CONFIGS, Mobs, get_new_full_inventory, get_new_empty_inventory
 # NOTE: slight hack to import all game logic functions
@@ -31,9 +31,23 @@ class EnvParams:
     max_attribute: int = 5
 
     god_mode: bool = False
-    reset_seeds: Tuple[int, ...] = tuple(range(10_000))  
+    world_seeds: Tuple[int, ...] = tuple()  
 
     fractal_noise_angles: tuple[int, int, int, int] = (None, None, None, None)
+
+@struct.dataclass
+class StaticEnvParams:
+    map_size: Tuple[int, int] = (48, 48)
+    num_levels: int = 9
+
+    # Mobs
+    max_melee_mobs: int = 3
+    max_passive_mobs: int = 3
+    max_growing_plants: int = 10
+    max_ranged_mobs: int = 2
+    max_mob_projectiles: int = 3
+    max_player_projectiles: int = 3
+    use_precondition: bool = False
 
 dummy_achievements = jnp.zeros(
     len(ACHIEVEMENT_REWARD_MAP)+1,
@@ -68,7 +82,7 @@ class Observation(struct.PyTreeNode):
     task_w: chex.Array
 
 
-def get_possible_achievements(state: EnvState) -> jnp.ndarray:
+def get_possible_achievements(state: EnvState, use_precondition: bool = False) -> jnp.ndarray:
     """Returns a binary vector indicating which achievements are currently possible given the agent's observation."""
 
     # Get the visible map and items within observation range
@@ -116,27 +130,27 @@ def get_possible_achievements(state: EnvState) -> jnp.ndarray:
     ))
     has_stone_nearby = jnp.logical_and(
         jnp.any(visible_blocks == BlockType.STONE.value),
-        state.inventory.pickaxe >= 1
+        state.inventory.pickaxe >= 1 if use_precondition else True
     )
     has_coal_nearby = jnp.logical_and(
         jnp.any(visible_blocks == BlockType.COAL.value),
-        state.inventory.pickaxe >= 1
+        state.inventory.pickaxe >= 1 if use_precondition else True
     )
     has_iron_nearby = jnp.logical_and(
         jnp.any(visible_blocks == BlockType.IRON.value),
-        state.inventory.pickaxe >= 2
+        state.inventory.pickaxe >= 2 if use_precondition else True
     )
     has_diamond_nearby = jnp.logical_and(
         jnp.any(visible_blocks == BlockType.DIAMOND.value),
-        state.inventory.pickaxe >= 3
+        state.inventory.pickaxe >= 3 if use_precondition else True
     )
     has_sapphire_nearby = jnp.logical_and(
         jnp.any(visible_blocks == BlockType.SAPPHIRE.value),
-        state.inventory.pickaxe >= 4
+        state.inventory.pickaxe >= 4 if use_precondition else True
     )
     has_ruby_nearby = jnp.logical_and(
         jnp.any(visible_blocks == BlockType.RUBY.value),
-        state.inventory.pickaxe >= 4
+        state.inventory.pickaxe >= 4 if use_precondition else True
     )
 
     # Check for mobs in visible range
@@ -155,13 +169,6 @@ def get_possible_achievements(state: EnvState) -> jnp.ndarray:
         )
         return jnp.any(is_visible)
 
-    # Helper function to check for crafting table
-    def is_near_crafting_table():
-        return jnp.any(visible_blocks == BlockType.CRAFTING_TABLE.value)
-    
-    def is_near_furnace():
-        return jnp.any(visible_blocks == BlockType.FURNACE.value)
-
     # Resource collection
     possible_achievements = possible_achievements.at[Achievement.COLLECT_WOOD.value].set(has_tree_nearby)
     possible_achievements = possible_achievements.at[Achievement.COLLECT_STONE.value].set(has_stone_nearby)
@@ -171,6 +178,13 @@ def get_possible_achievements(state: EnvState) -> jnp.ndarray:
     possible_achievements = possible_achievements.at[Achievement.COLLECT_SAPPHIRE.value].set(has_sapphire_nearby)
     possible_achievements = possible_achievements.at[Achievement.COLLECT_RUBY.value].set(has_ruby_nearby)
 
+    # Helper function to check for crafting table
+    def is_near_crafting_table():
+        return jnp.any(visible_blocks == BlockType.CRAFTING_TABLE.value)
+    
+    def is_near_furnace():
+        return jnp.any(visible_blocks == BlockType.FURNACE.value)
+
     # Crafting possibilities (based on inventory and crafting table)
     has_crafting_table = is_near_crafting_table()
     has_furnace = is_near_furnace()
@@ -178,7 +192,7 @@ def get_possible_achievements(state: EnvState) -> jnp.ndarray:
     possible_achievements = possible_achievements.at[Achievement.MAKE_WOOD_PICKAXE.value].set(
         jnp.logical_and(
             jnp.logical_and(
-                state.inventory.wood >= 1,
+                state.inventory.wood >= 1 if use_precondition else True,
                 has_crafting_table
             ),
             state.inventory.pickaxe < 1
@@ -187,7 +201,7 @@ def get_possible_achievements(state: EnvState) -> jnp.ndarray:
     possible_achievements = possible_achievements.at[Achievement.MAKE_WOOD_SWORD.value].set(
         jnp.logical_and(
             jnp.logical_and(
-                state.inventory.wood >= 1,
+                state.inventory.wood >= 1 if use_precondition else True,
                 has_crafting_table
             ),
             state.inventory.sword < 1
@@ -197,8 +211,8 @@ def get_possible_achievements(state: EnvState) -> jnp.ndarray:
         jnp.logical_and(
             jnp.logical_and(
                 jnp.logical_and(
-                    state.inventory.wood >= 1,
-                    state.inventory.stone >= 1
+                    state.inventory.wood >= 1 if use_precondition else True,
+                    state.inventory.stone >= 1 if use_precondition else True
                 ),
                 has_crafting_table
             ),
@@ -209,8 +223,8 @@ def get_possible_achievements(state: EnvState) -> jnp.ndarray:
         jnp.logical_and(
             jnp.logical_and(
                 jnp.logical_and(
-                    state.inventory.wood >= 1,
-                    state.inventory.stone >= 1
+                    state.inventory.wood >= 1 if use_precondition else True,
+                    state.inventory.stone >= 1 if use_precondition else True
                 ),
                 has_crafting_table
             ),
@@ -223,12 +237,12 @@ def get_possible_achievements(state: EnvState) -> jnp.ndarray:
                 jnp.logical_and(
                     jnp.logical_and(
                         jnp.logical_and(
-                            state.inventory.wood >= 1,
-                            state.inventory.stone >= 1
+                            state.inventory.wood >= 1 if use_precondition else True,
+                            state.inventory.stone >= 1 if use_precondition else True
                         ),
                         jnp.logical_and(
-                            state.inventory.iron >= 1,
-                            state.inventory.coal >= 1
+                            state.inventory.iron >= 1 if use_precondition else True,
+                            state.inventory.coal >= 1 if use_precondition else True
                         )
                     ),
                     has_crafting_table
@@ -244,12 +258,12 @@ def get_possible_achievements(state: EnvState) -> jnp.ndarray:
                 jnp.logical_and(
                     jnp.logical_and(
                         jnp.logical_and(
-                            state.inventory.wood >= 1,
-                            state.inventory.stone >= 1
+                            state.inventory.wood >= 1 if use_precondition else True,
+                            state.inventory.stone >= 1 if use_precondition else True
                         ),
                         jnp.logical_and(
-                            state.inventory.iron >= 1,
-                            state.inventory.coal >= 1
+                            state.inventory.iron >= 1 if use_precondition else True,
+                            state.inventory.coal >= 1 if use_precondition else True
                         )
                     ),
                     has_crafting_table
@@ -262,16 +276,16 @@ def get_possible_achievements(state: EnvState) -> jnp.ndarray:
 
     # Placement possibilities
     possible_achievements = possible_achievements.at[Achievement.PLACE_TABLE.value].set(
-        state.inventory.wood >= 4
+        state.inventory.wood >= 4 if use_precondition else True
     )
     possible_achievements = possible_achievements.at[Achievement.PLACE_STONE.value].set(
-        state.inventory.stone > 0
+        state.inventory.stone > 0 if use_precondition else True
     )
     possible_achievements = possible_achievements.at[Achievement.PLACE_FURNACE.value].set(
-        state.inventory.stone >= 8
+        state.inventory.stone >= 8 if use_precondition else True
     )
     possible_achievements = possible_achievements.at[Achievement.PLACE_TORCH.value].set(
-        state.inventory.torches > 0
+        state.inventory.torches > 0 if use_precondition else True
     )
 
     # Helper function to check for blocks in visible and lit areas
@@ -288,7 +302,7 @@ def get_possible_achievements(state: EnvState) -> jnp.ndarray:
     possible_achievements = possible_achievements.at[Achievement.EAT_PLANT.value].set(
         has_plant_nearby)
     possible_achievements = possible_achievements.at[Achievement.DRINK_POTION.value].set(
-        jnp.any(state.inventory.potions > 0)
+        jnp.any(state.inventory.potions > 0 if use_precondition else True)
     )
 
     # Combat-related possibilities (including spells)
@@ -296,8 +310,8 @@ def get_possible_achievements(state: EnvState) -> jnp.ndarray:
         state.inventory.sword > 0,
         jnp.logical_or(
             jnp.logical_and(
-                state.inventory.bow > 0,
-                state.inventory.arrows > 0
+                state.inventory.bow > 0 if use_precondition else True,
+                state.inventory.arrows > 0 if use_precondition else True
             ),
             jnp.logical_and(
                 jnp.logical_or(
@@ -739,17 +753,25 @@ class CraftaxSymbolicEnvNoAutoReset(EnvironmentNoAutoReset):
         self, rng: chex.PRNGKey, params: EnvParams
     ) -> Tuple[chex.Array, EnvState]:
         """NOTE: main change is to select world seed from a set of seeds"""
-        reset_seeds = jnp.asarray(params.reset_seeds)
-        rng, _rng = jax.random.split(rng)
-        selected_seed = jax.random.choice(_rng, reset_seeds)
-        world_rng = jax.random.PRNGKey(selected_seed)
+        if params.world_seeds:
+          reset_seeds = jnp.asarray(params.world_seeds)
+          rng, _rng = jax.random.split(rng)
+          selected_seed = jax.random.choice(_rng, reset_seeds)
+          world_rng = jax.random.PRNGKey(selected_seed)
+        else:
+          rng, world_rng = jax.random.split(rng)
         state = generate_world(world_rng, params, self.static_env_params)
 
         return self.get_obs(state, dummy_achievements, dummy_achievements, params), state
 
     def get_obs(self, state: EnvState, achievements: chex.Array, achievement_coefficients: chex.Array, params: EnvParams):
         del params
-        achievable = get_possible_achievements(state)
+        achievable = jnp.concatenate((
+          get_possible_achievements(state, use_precondition=self.static_env_params.use_precondition),
+          # 1 more for health (will always be 0)
+          jnp.zeros([1], dtype=jnp.int32)
+        ))
+        
         task_w = jnp.concatenate(
             (achievement_coefficients,
              jnp.zeros(len(achievable), dtype=achievement_coefficients.dtype)))

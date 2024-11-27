@@ -840,7 +840,7 @@ class DynaAgentEnvModel(nn.Module):
             rng_, rng__ = jax.random.split(rng_)
             predictions, _ = model.apply_model(
                 state, action, rng__)
-            carry = (predictions.state, rng)
+            carry = (predictions.state, rng_)
             return carry, predictions
 
         scan = nn.scan(

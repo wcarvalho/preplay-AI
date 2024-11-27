@@ -46,7 +46,7 @@ from jaxneurorl import loggers
 import alphazero
 import qlearning_housemaze
 import housemaze_usfa
-import offtask_dyna
+import multitask_preplay_housemaze
 import networks
 import housemaze_observer as humansf_observers
 import housemaze_experiments
@@ -231,17 +231,17 @@ def get_dynaq_fns(
 
   return AlgorithmConstructor(
     make_agent=functools.partial(
-        offtask_dyna.make_agent,
+        multitask_preplay_housemaze.make_agent,
         ObsEncoderCls=HouzemazeObsEncoder),
-    make_optimizer=offtask_dyna.make_optimizer,
+    make_optimizer=multitask_preplay_housemaze.make_optimizer,
     make_loss_fn_class=functools.partial(
-        offtask_dyna.make_loss_fn_class,
+        multitask_preplay_housemaze.make_loss_fn_class,
         make_init_offtask_timestep=make_init_offtask_timestep,
         simulation_policy=simulation_policy,
         online_coeff=config['ONLINE_COEFF'],
         dyna_coeff=config.get('DYNA_COEFF', 1.0),
         ),
-    make_actor=offtask_dyna.make_actor,
+    make_actor=multitask_preplay_housemaze.make_actor,
   )
 
 def extract_task_info(timestep: multitask_env.TimeStep):
@@ -545,21 +545,21 @@ def run_single(
       make_train = functools.partial(
           vbb.make_train,
           make_agent=functools.partial(
-            offtask_dyna.make_agent,
+            multitask_preplay_housemaze.make_agent,
             ObsEncoderCls=HouzemazeObsEncoder,
             model_env_params=test_env_params.replace(
                p_test_sample_train=jnp.array(.5),
             )
             ),
           make_loss_fn_class=functools.partial(
-            offtask_dyna.make_loss_fn_class,
+            multitask_preplay_housemaze.make_loss_fn_class,
             make_init_offtask_timestep=make_init_offtask_timestep,
             simulation_policy=simulation_policy,
             online_coeff=config['ONLINE_COEFF'],
             dyna_coeff=config.get('DYNA_COEFF', 1.0),
             ),
           make_optimizer=qlearning_housemaze.make_optimizer,
-          make_actor=offtask_dyna.make_actor,
+          make_actor=multitask_preplay_housemaze.make_actor,
           make_logger=functools.partial(
             make_logger,
             render_fn=housemaze_render_fn,
@@ -567,7 +567,7 @@ def run_single(
             get_task_name=get_task_name,
             action_names=action_names,
             learner_log_extra=functools.partial(
-              offtask_dyna.learner_log_extra,
+              multitask_preplay_housemaze.learner_log_extra,
               config=config,
               action_names=action_names,
               extract_task_info=extract_task_info,
@@ -685,7 +685,7 @@ def sweep(search: str = ''):
             "NUM_Q_LAYERS": {'values': [1, 2, 3]},
             "Q_HIDDEN_DIM": {'values': [512, 1024]},
         },
-        'overrides': ['alg=dyna', 'rlenv=housemaze', 'user=wilka'],
+        'overrides': ['alg=preplay', 'rlenv=housemaze', 'user=wilka'],
         'group': 'dynaq-big-6',
     }
   #elif search == 'pqn':
@@ -739,7 +739,7 @@ def sweep(search: str = ''):
   #          ]},
   #          #'LR_LINEAR_DECAY': {'values': [False, True]},
   #      },
-  #      'overrides': ['alg=dyna_replay_split',
+  #      'overrides': ['alg=preplay_replay_split',
   #                    'rlenv=housemaze',
   #                    'user=wilka'],
   #      'group': 'dynaq-29',
@@ -754,7 +754,7 @@ def sweep(search: str = ''):
   #          #'TOTAL_TIMESTEPS': {'values': [5e6]},
   #          'DYNA_COEFF': {'values': [1, .1]},
   #      },
-  #      'overrides': ['alg=dyna_replay_split',
+  #      'overrides': ['alg=preplay_replay_split',
   #                    'rlenv=housemaze',
   #                    'user=wilka'],
   #      'group': 'dynaq-15',

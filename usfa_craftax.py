@@ -317,7 +317,7 @@ def learner_log_extra(
         max_len = min(config.get("MAX_EPISODE_LOG_LEN", 40), len(rewards))
         for idx in range(max_len):
             index = lambda y: jax.tree_map(lambda x: x[idx], y)
-            obs_image = render_fn(index(d_['data'].timestep.state))
+            obs_image = render_fn(index(d_['data'].timestep.state.env_state))
             obs_images.append(obs_image)
 
         # ------------
