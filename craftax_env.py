@@ -276,16 +276,16 @@ def get_possible_achievements(state: EnvState, use_precondition: bool = False) -
 
     # Placement possibilities
     possible_achievements = possible_achievements.at[Achievement.PLACE_TABLE.value].set(
-        state.inventory.wood >= 4 if use_precondition else True
+        state.inventory.wood >= 4
     )
     possible_achievements = possible_achievements.at[Achievement.PLACE_STONE.value].set(
-        state.inventory.stone > 0 if use_precondition else True
+        state.inventory.stone > 0
     )
     possible_achievements = possible_achievements.at[Achievement.PLACE_FURNACE.value].set(
-        state.inventory.stone >= 8 if use_precondition else True
+        state.inventory.stone >= 8
     )
     possible_achievements = possible_achievements.at[Achievement.PLACE_TORCH.value].set(
-        state.inventory.torches > 0 if use_precondition else True
+        state.inventory.torches > 0
     )
 
     # Helper function to check for blocks in visible and lit areas
@@ -302,7 +302,7 @@ def get_possible_achievements(state: EnvState, use_precondition: bool = False) -
     possible_achievements = possible_achievements.at[Achievement.EAT_PLANT.value].set(
         has_plant_nearby)
     possible_achievements = possible_achievements.at[Achievement.DRINK_POTION.value].set(
-        jnp.any(state.inventory.potions > 0 if use_precondition else True)
+        jnp.any(state.inventory.potions > 0)
     )
 
     # Combat-related possibilities (including spells)
@@ -310,8 +310,8 @@ def get_possible_achievements(state: EnvState, use_precondition: bool = False) -
         state.inventory.sword > 0,
         jnp.logical_or(
             jnp.logical_and(
-                state.inventory.bow > 0 if use_precondition else True,
-                state.inventory.arrows > 0 if use_precondition else True
+                state.inventory.bow > 0,
+                state.inventory.arrows > 0
             ),
             jnp.logical_and(
                 jnp.logical_or(
@@ -753,7 +753,7 @@ class CraftaxSymbolicEnvNoAutoReset(EnvironmentNoAutoReset):
         self, rng: chex.PRNGKey, params: EnvParams
     ) -> Tuple[chex.Array, EnvState]:
         """NOTE: main change is to select world seed from a set of seeds"""
-        if params.world_seeds:
+        if params.world_seeds is not None:
           reset_seeds = jnp.asarray(params.world_seeds)
           rng, _rng = jax.random.split(rng)
           selected_seed = jax.random.choice(_rng, reset_seeds)
