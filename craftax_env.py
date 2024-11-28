@@ -753,7 +753,7 @@ class CraftaxSymbolicEnvNoAutoReset(EnvironmentNoAutoReset):
         self, rng: chex.PRNGKey, params: EnvParams
     ) -> Tuple[chex.Array, EnvState]:
         """NOTE: main change is to select world seed from a set of seeds"""
-        if params.world_seeds is not None:
+        if params.world_seeds is not None and len(params.world_seeds) > 0:
           reset_seeds = jnp.asarray(params.world_seeds)
           rng, _rng = jax.random.split(rng)
           selected_seed = jax.random.choice(_rng, reset_seeds)

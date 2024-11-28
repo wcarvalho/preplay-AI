@@ -360,7 +360,7 @@ def run_single(
           model_env=env,
           make_logger=partial(
              make_logger,
-            # learner_log_extra=qlearning_craftax.learner_log_extra
+             learner_log_extra=multitask_preplay_craftax.learner_log_extra
           ),
           train_env_params=env_params,
           test_env_params=test_env_params,
@@ -490,15 +490,13 @@ def sweep(search: str = ''):
         },
         'parameters': {
             #"ENV": {'values': ['craftax']},
+            "SEED": {'values': list(range(1,3))},
             "NUM_ENV_SEEDS": {'values': [0]},
             #"USE_PRECONDITION": {'values': [100., 10., 1.0, .1, .01, .001]},
-            "LEARNING_STARTS": {'values': [0]},
-            "TRAINING_INTERVAL": {'values': [1, 5]},
-            "FIXED_EPSILON": {'values': [0]},
-            "TOTAL_TIMESTEPS": {'values': [1_000_000]},
+            "USE_PRECONDITION": {'values': [True]},
         },
-        'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'ql-11',
+        'overrides': ['alg=ql', 'rlenv=craftax-1m', 'user=wilka'],
+        'group': 'ql-13',
     }
   elif search == 'ql_sf':
     sweep_config = {
@@ -509,37 +507,13 @@ def sweep(search: str = ''):
         'parameters': {
             "ALG": {'values': ['qlearning_sf_aux']},
             #"ENV": {'values': ['craftax']},
+            "SEED": {'values': list(range(1,3))},
             "NUM_ENV_SEEDS": {'values': [0]},
-            "LEARNING_STARTS": {'values': [0]},
-            "TRAINING_INTERVAL": {'values': [1, 5]},
-            "FIXED_EPSILON": {'values': [0]},
-            "TOTAL_TIMESTEPS": {'values': [1_000_000]},
+            "USE_PRECONDITION": {'values': [True, False]},
             #"AUX_COEFF": {'values': [1.0, .1, .01, .001]},
         },
-        'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'ql-sf-7',
-    }
-  elif search == 'preplay':
-    sweep_config = {
-        'metric': {
-            'name': 'evaluator_performance/0.0 avg_episode_return',
-            'goal': 'maximize',
-        },
-        'parameters': {
-            "ALG": {'values': ['preplay']},
-            "NUM_ENV_SEEDS": {'values': [0]},
-            #"ENV": {'values': ['craftax']},
-            #"NUM_ENV_SEEDS": {'values': [0]},
-            #"LEARNING_STARTS": {'values': [0]},
-            #"TRAINING_INTERVAL": {'values': [1, 5]},
-            "OFFTASK_COEFF": {'values': [1.0, .1, .01, .0]},
-            #"TOTAL_BATCH_SIZE": {'values': [1280, 640]},
-            "NUM_SIMULATIONS": {'values': [2, 10]},
-            "SIMULATION_LENGTH": {'values': [5]},
-            
-        },
-        'overrides': ['alg=preplay', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'ql-sf-7',
+        'overrides': ['alg=ql', 'rlenv=craftax-1m', 'user=wilka'],
+        'group': 'ql-sf-9',
     }
   elif search == 'dyna':
     sweep_config = {
@@ -549,20 +523,31 @@ def sweep(search: str = ''):
         },
         'parameters': {
             "ALG": {'values': ['dyna']},
+            "SEED": {'values': list(range(1,3))},
             "NUM_ENV_SEEDS": {'values': [0]},
-            #"ENV": {'values': ['craftax']},
-            #"NUM_ENV_SEEDS": {'values': [0]},
-            #"LEARNING_STARTS": {'values': [0]},
-            #"TRAINING_INTERVAL": {'values': [1, 5]},
-            "DYNA_COEFF": {'values': [1.0, .1, .01, .0]},
-            #"TOTAL_BATCH_SIZE": {'values': [1280, 640]},
             "NUM_SIMULATIONS": {'values': [2, 10]},
-            "SIMULATION_LENGTH": {'values': [5]},
-            
         },
-        'overrides': ['alg=dyna', 'rlenv=craftax-10m', 'user=wilka'],
+        'overrides': ['alg=dyna', 'rlenv=craftax-1m', 'user=wilka'],
+        'group': 'dyna-1',
+    }
+  elif search == 'preplay':
+    sweep_config = {
+        'metric': {
+            'name': 'evaluator_performance/0.0 avg_episode_return',
+            'goal': 'maximize',
+        },
+        'parameters': {
+            "ALG": {'values': ['preplay']},
+            "SEED": {'values': list(range(1,3))},
+            "NUM_ENV_SEEDS": {'values': [0]},
+            "USE_PRECONDITION": {'values': [True, False]},
+            "OFFTASK_COEFF": {'values': [1.0, .1, .01]},
+            "NUM_SIMULATIONS": {'values': [2, 10]},
+        },
+        'overrides': ['alg=preplay', 'rlenv=craftax-1m', 'user=wilka'],
         'group': 'ql-sf-7',
     }
+
   elif search == 'pqn':
     sweep_config = {
         'metric': {
@@ -577,7 +562,7 @@ def sweep(search: str = ''):
             "LR": {'values': [.001, .0003]},
             "NUM_ENVS": {'values': [256]},
         },
-        'overrides': ['alg=pqn-craftax', 'rlenv=craftax-10m', 'user=wilka'],
+        'overrides': ['alg=pqn-craftax', 'rlenv=craftax-1m', 'user=wilka'],
         'group': 'pqn-7',
     }
   elif search == 'usfa':
@@ -592,7 +577,7 @@ def sweep(search: str = ''):
             #"NSAMPLES": {'values': [1, 5]},
             "AUX_COEFF": {'values': [1.0, .1, .01]},
         },
-        'overrides': ['alg=usfa', 'rlenv=craftax-10m', 'user=wilka'],
+        'overrides': ['alg=usfa', 'rlenv=craftax-1m', 'user=wilka'],
         'group': 'usfa-6',
     }
   elif search == 'alphazero':
@@ -605,7 +590,7 @@ def sweep(search: str = ''):
             "NUM_ENV_SEEDS": {'values': [100, 10_000]},
             "NUM_SIMULATIONS": {'values': [2, 4]},
         },
-        'overrides': ['alg=alphazero', 'rlenv=craftax-10m', 'user=wilka'],
+        'overrides': ['alg=alphazero', 'rlenv=craftax-1m', 'user=wilka'],
         'group': 'alphazero-1',
     }
   else:
