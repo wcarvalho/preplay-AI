@@ -895,7 +895,6 @@ def learner_log_extra(
 
     def callback(d):
         log_data(**d, key='dyna')
-
     # this will be the value after update is applied
     n_updates = data['n_updates'] + 1
     is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
@@ -908,7 +907,7 @@ def learner_log_extra(
       #   B=0 (1st batch sample)
       #   N=index(t_min) (simulation with lowest temperaturee)
       dyna_data = jax.tree_map(lambda x: x[0, 0, :, sim_idx], data['dyna'])
-
+      
       jax.lax.cond(
           is_log_time,
           lambda d: jax.debug.callback(callback, d),
@@ -1050,6 +1049,7 @@ def make_agent(
             out_dim=env.action_space(env_params).n,
             activation=config['ACTIVATION'],
             activate_final=False,
+            use_bias=True,
             ),
         q_fn_subtask=MLP(
             hidden_dim=config.get('Q_HIDDEN_DIM', 512),
@@ -1057,6 +1057,7 @@ def make_agent(
             out_dim=env.action_space(env_params).n,
             activation=config['ACTIVATION'],
             activate_final=False,
+            use_bias=True,
             ),
         env=model_env,
         env_params=model_env_params,

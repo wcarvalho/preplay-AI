@@ -120,6 +120,7 @@ class CraftaxObsEncoder(nn.Module):
             self.hidden_dim,
             self.num_layers,
             norm_type=self.norm_type,
+            use_bias=True,
             activation=self.activation)(obs, train)
 
         return outputs

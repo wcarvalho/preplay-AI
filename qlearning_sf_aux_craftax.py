@@ -249,11 +249,15 @@ def make_craftax_agent(
         q_fn=MLP(
            hidden_dim=config.get('Q_HIDDEN_DIM', 512),
            num_layers=config.get('NUM_Q_LAYERS', 2),
-           out_dim=env.action_space(env_params).n),
+           out_dim=env.action_space(env_params).n,
+           use_bias=True,
+           ),
         achieve_fn=MLP(
            hidden_dim=config.get('Q_HIDDEN_DIM', 512),
            num_layers=config.get('NUM_Q_LAYERS', 2),
-           out_dim=n_achieve)
+           out_dim=n_achieve,
+           use_bias=True,
+           )
     )
 
     rng, _rng = jax.random.split(rng)
