@@ -496,7 +496,7 @@ def sweep(search: str = ''):
             "USE_PRECONDITION": {'values': [True]},
         },
         'overrides': ['alg=ql', 'rlenv=craftax-1m', 'user=wilka'],
-        'group': 'ql-13',
+        'group': 'ql-12',
     }
   elif search == 'ql_sf':
     sweep_config = {
@@ -528,7 +528,7 @@ def sweep(search: str = ''):
             "NUM_SIMULATIONS": {'values': [2, 10]},
         },
         'overrides': ['alg=dyna', 'rlenv=craftax-1m', 'user=wilka'],
-        'group': 'dyna-1',
+        'group': 'dyna-2',
     }
   elif search == 'preplay':
     sweep_config = {
@@ -541,11 +541,11 @@ def sweep(search: str = ''):
             "SEED": {'values': list(range(1,3))},
             "NUM_ENV_SEEDS": {'values': [0]},
             "USE_PRECONDITION": {'values': [True, False]},
-            "OFFTASK_COEFF": {'values': [1.0, .1, .01]},
+            "OFFTASK_COEFF": {'values': [1.0]},
             "NUM_SIMULATIONS": {'values': [2, 10]},
         },
         'overrides': ['alg=preplay', 'rlenv=craftax-1m', 'user=wilka'],
-        'group': 'ql-sf-7',
+        'group': 'ql-sf-8',
     }
 
   elif search == 'pqn':

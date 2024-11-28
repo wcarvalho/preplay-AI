@@ -384,6 +384,7 @@ class MultitaskPreplay(vbb.RecurrentLossFn):
   online_coeff: float = 1.0
   dyna_coeff: float = 1.0
   offtask_coeff: float = 1.0
+  importance_sampling_exponent: float = 0.6
 
   simulation_policy: SimPolicy = None
 
@@ -893,30 +894,26 @@ def learner_log_extra(
         plt.close(fig)
 
     def callback(d):
-        n_updates = d.pop('n_updates')
-        # [T, B] --> [T]
-        if 'online' in d:
-            d['online'] = jax.tree_map(lambda x: x[:, 0], d['online'])
-            log_data(**d['online'], key='online')
-        if 'dyna' in d:
-            # [T, B, K, N] --> [K]
-            # K = the simulation length
-            # get entire simulation, starting at:
-            #   T=0 (1st time-point)
-            #   B=0 (1st batch sample)
-            #   N=index(t_min) (simulation with lowest temperaturee)
-            d['dyna'] = jax.tree_map(lambda x: x[0, 0, :, sim_idx], d['dyna'])
-            log_data(**d['dyna'], key='dyna')
+        log_data(**d, key='dyna')
 
     # this will be the value after update is applied
     n_updates = data['n_updates'] + 1
     is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
 
-    jax.lax.cond(
-        is_log_time,
-        lambda d: jax.debug.callback(callback, d),
-        lambda d: None,
-        data)
+    if 'dyna' in data:
+      # [T, B, K, N] --> [K]
+      # K = the simulation length
+      # get entire simulation, starting at:
+      #   T=0 (1st time-point)
+      #   B=0 (1st batch sample)
+      #   N=index(t_min) (simulation with lowest temperaturee)
+      dyna_data = jax.tree_map(lambda x: x[0, 0, :, sim_idx], data['dyna'])
+
+      jax.lax.cond(
+          is_log_time,
+          lambda d: jax.debug.callback(callback, d),
+          lambda d: None,
+          dyna_data)
 
 
 
