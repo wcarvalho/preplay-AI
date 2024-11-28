@@ -17,6 +17,8 @@ import flax
 import rlax
 from gymnax.environments import environment
 import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')
 
 
 from visualizer import plot_frames

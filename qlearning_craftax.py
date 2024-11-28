@@ -16,6 +16,8 @@ from flax import struct
 import jax.numpy as jnp
 from gymnax.environments import environment
 import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')
 
 
 from jaxneurorl.agents.basics import TimeStep

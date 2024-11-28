@@ -16,6 +16,9 @@ from gymnax.environments import environment
 import numpy as np
 import rlax
 import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')
+
 import wandb
 
 from jaxneurorl import losses
@@ -602,7 +605,7 @@ class MultitaskPreplay(vbb.RecurrentLossFn):
       num_classes = x_t.observation.achievable.shape[-1]
       achievable = achievable/achievable.sum()
       goals = distrax.Categorical(probs=achievable).sample(
-          seed=rng_, shape=(self.num_simulations,))
+          seed=rng_, sample_shape=(self.num_simulations,))
       goals = jax.nn.one_hot(goals, num_classes=num_classes)
 
       # ---------------------------
@@ -622,7 +625,7 @@ class MultitaskPreplay(vbb.RecurrentLossFn):
           num_simulations=self.num_simulations,
           policy_fn=self.simulation_policy,
           q_fn=self.network.subtask_q_fn,
-          goal=goal,
+          goal=goals,
         )
       offtask_online_preds = sim_outputs_t.predictions
       non_terminal = timesteps_t.discount
@@ -639,7 +642,7 @@ class MultitaskPreplay(vbb.RecurrentLossFn):
       offtask_target_preds = apply_rnn_and_q(
           h_tm1=h_tm1_target_repeated,
           timesteps=timesteps_t,
-          task=goal,
+          task=goals,
           rng=rng_,
           network=self.network,
           params=target_params,
@@ -648,7 +651,7 @@ class MultitaskPreplay(vbb.RecurrentLossFn):
 
       achievements = timesteps_t.observation.achievements
       # [T, K, D] * [1, K, D] --> [T, K]
-      offtask_reward = (achievements * goal[None]).sum(-1)
+      offtask_reward = (achievements * goals[None]).sum(-1)
 
       offtask_td_error, offtask_loss_mean, offtask_metrics, offtask_log_info = self.loss_fn(
           timestep=timesteps_t,
@@ -668,7 +671,7 @@ class MultitaskPreplay(vbb.RecurrentLossFn):
       main_online_preds = apply_rnn_and_q(
           h_tm1=h_tm1_online_repeated,
           timesteps=timesteps_t,
-          task=goal*0,  # NOTE: goal will be ignored
+          task=goals*0,  # NOTE: goal will be ignored
           rng=rng_,
           network=self.network,
           params=params,
@@ -678,7 +681,7 @@ class MultitaskPreplay(vbb.RecurrentLossFn):
       main_target_preds = apply_rnn_and_q(
           h_tm1=h_tm1_target_repeated,
           timesteps=timesteps_t,
-          task=goal*0,  # NOTE: goal will be ignored
+          task=goals*0,  # NOTE: goal will be ignored
           rng=rng_,
           network=self.network,
           params=target_params,
@@ -705,8 +708,8 @@ class MultitaskPreplay(vbb.RecurrentLossFn):
 
     else:
       # dummy goal that will be ignored
-      goal = jnp.zeros_like(x_t.observation.achievable)
-      goal = repeat(goal, self.num_simulations)
+      goals = jnp.zeros_like(x_t.observation.achievable)
+      goals = repeat(goals, self.num_simulations)
 
       rng, rng_ = jax.random.split(rng)
       timesteps_t, sim_outputs_t = simulate_n_trajectories(
@@ -719,7 +722,7 @@ class MultitaskPreplay(vbb.RecurrentLossFn):
           num_simulations=self.num_simulations,
           policy_fn=self.simulation_policy,
           q_fn=self.network.reg_q_fn,
-          goal=goal,
+          goal=goals,
         )
       online_preds = sim_outputs_t.predictions
       non_terminal = timesteps_t.discount
@@ -734,7 +737,7 @@ class MultitaskPreplay(vbb.RecurrentLossFn):
       target_preds = apply_rnn_and_q(
           h_tm1=h_tm1_target_repeated,
           timesteps=timesteps_t,
-          task=goal,
+          task=goals,
           rng=rng_,
           network=self.network,
           params=target_params,
@@ -807,7 +810,6 @@ def learner_log_extra(
         # only use data from batch dim = 0
         # [T, B, ...] --> # [T, ...]
 
-        import pdb; pdb.set_trace()
         discounts = timesteps.discount
         rewards = timesteps.reward
         q_values_taken = rlax.batched_index(q_values, actions)
