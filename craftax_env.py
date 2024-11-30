@@ -80,6 +80,7 @@ class Observation(struct.PyTreeNode):
     achievable: chex.Array
     achievements: chex.Array
     task_w: chex.Array
+    previous_action: Optional[chex.Array] = None
 
 
 def get_possible_achievements(state: EnvState, use_precondition: bool = False) -> jnp.ndarray:
@@ -742,7 +743,8 @@ class CraftaxSymbolicEnvNoAutoReset(EnvironmentNoAutoReset):
                 state=state,
                 achievements=achievements,
                 achievement_coefficients=achievement_coefficients,
-                params=params)),
+                params=params,
+                previous_action=action)),
             lax.stop_gradient(state),
             reward,
             done,
@@ -762,9 +764,21 @@ class CraftaxSymbolicEnvNoAutoReset(EnvironmentNoAutoReset):
           rng, world_rng = jax.random.split(rng)
         state = generate_world(world_rng, params, self.static_env_params)
 
-        return self.get_obs(state, dummy_achievements, dummy_achievements, params), state
+        obs = self.get_obs(
+            state,
+            dummy_achievements,
+            dummy_achievements,
+            params,
+            jnp.zeros((), dtype=jnp.int32)  # scalar
+        )
+        return obs, state
 
-    def get_obs(self, state: EnvState, achievements: chex.Array, achievement_coefficients: chex.Array, params: EnvParams):
+    def get_obs(self,
+                state: EnvState,
+                achievements: chex.Array,
+                achievement_coefficients: chex.Array,
+                params: EnvParams,
+                previous_action: Optional[chex.Array] = None):
         del params
         achievable = jnp.concatenate((
           get_possible_achievements(state, use_precondition=self.static_env_params.use_precondition),
@@ -780,7 +794,8 @@ class CraftaxSymbolicEnvNoAutoReset(EnvironmentNoAutoReset):
             image=render_craftax_symbolic(state),
             achievements=achievements,
             achievable=achievable,
-            task_w=task_w)
+            task_w=task_w,
+            previous_action=previous_action)
 
     def is_terminal(self, state: EnvState, params: EnvParams) -> bool:
         return is_game_over(state, params, self.static_env_params)

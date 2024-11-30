@@ -113,15 +113,23 @@ class CraftaxObsEncoder(nn.Module):
             raise NotImplementedError(self.norm_type)
 
         if self.structured_inputs:
-            obs = norm(obs.image)
+            image = norm(obs.image)
         else:
-            obs = norm(obs)
+            image = norm(obs)
 
         outputs = MLP(
-            self.hidden_dim,
-            self.num_layers,
+            hidden_dim=self.hidden_dim,
+            num_layers=self.num_layers,
             norm_type=self.norm_type,
             use_bias=self.use_bias,
-            activation=self.activation)(obs, train)
+            activation=self.activation)(image, train)
 
+        if obs.previous_action is not None:
+            action = jax.nn.one_hot(obs.previous_action, 43)
+            # common trick for one-hot encodings, same as nn.Embed
+            # main benefit comes from adding action
+            kernel_init = nn.initializers.variance_scaling(1.0, 'fan_in', 'normal', out_axis=0)
+            action = nn.Dense(128, kernel_init=kernel_init)(action)
+            outputs = jnp.concatenate((outputs, action), axis=-1)
+        
         return outputs

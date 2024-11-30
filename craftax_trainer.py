@@ -499,7 +499,7 @@ def sweep(search: str = ''):
   if search == 'ql':
     sweep_config = {
         'metric': {
-            'name': 'evaluator_performance/0.0 avg_episode_return',
+            'name': 'evaluator_performance-0/0.score',
             'goal': 'maximize',
         },
         'parameters': {
@@ -515,7 +515,7 @@ def sweep(search: str = ''):
   elif search == 'ql_sf':
     sweep_config = {
         'metric': {
-            'name': 'evaluator_performance/0.0 avg_episode_return',
+            'name': 'evaluator_performance-0/0.score',
             'goal': 'maximize',
         },
         'parameters': {
@@ -532,23 +532,25 @@ def sweep(search: str = ''):
   elif search == 'dyna':
     sweep_config = {
         'metric': {
-            'name': 'evaluator_performance/0.0 avg_episode_return',
+            'name': 'evaluator_performance-0/0.score',
             'goal': 'maximize',
         },
         'parameters': {
             "ALG": {'values': ['dyna']},
-            "SEED": {'values': list(range(1,2))},
+            "SEED": {'values': list(range(1,3))},
             "NUM_ENV_SEEDS": {'values': [0]},
             "IMPORTANCE_SAMPLING_EXPONENT": {'values': [0, .6]},
             "MAX_PRIORITY_WEIGHT": {'values': [0, .9]},
+            "EPSILON_ANNEAL_TIME": {'values': [5e5, 1e6]},
+            "WINDOW_SIZE": {'values': [20, 40]},
         },
         'overrides': ['alg=dyna', 'rlenv=craftax-1m', 'user=wilka'],
-        'group': 'dyna-9-matched-eps',
+        'group': 'dyna-11-search-bug-fix',
     }
   elif search == 'preplay':
     sweep_config = {
       'metric': {
-          'name': 'evaluator_performance/0.0 avg_episode_return',
+          'name': 'evaluator_performance-0/0.score',
           'goal': 'maximize',
       },
       'parameters': {
@@ -568,7 +570,7 @@ def sweep(search: str = ''):
   elif search == 'pqn':
     sweep_config = {
         'metric': {
-            'name': 'evaluator_performance/0.0 avg_episode_return',
+            'name': 'evaluator_performance-0/0.score',
             'goal': 'maximize',
         },
         'parameters': {
@@ -585,7 +587,7 @@ def sweep(search: str = ''):
   elif search == 'usfa':
     sweep_config = {
         'metric': {
-            'name': 'evaluator_performance/0.0 avg_episode_return',
+            'name': 'evaluator_performance-0/0.score',
             'goal': 'maximize',
         },
         'parameters': {
@@ -600,7 +602,7 @@ def sweep(search: str = ''):
   elif search == 'alphazero':
     sweep_config = {
         'metric': {
-            'name': 'evaluator_performance/0.0 avg_episode_return',
+            'name': 'evaluator_performance-0/0.score',
             'goal': 'maximize',
         },
         'parameters': {
