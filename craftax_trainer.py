@@ -537,13 +537,13 @@ def sweep(search: str = ''):
         },
         'parameters': {
             "ALG": {'values': ['dyna']},
-            "SEED": {'values': list(range(1,3))},
+            "SEED": {'values': list(range(1,2))},
             "NUM_ENV_SEEDS": {'values': [0]},
             "IMPORTANCE_SAMPLING_EXPONENT": {'values': [0, .6]},
             "MAX_PRIORITY_WEIGHT": {'values': [0, .9]},
         },
         'overrides': ['alg=dyna', 'rlenv=craftax-1m', 'user=wilka'],
-        'group': 'dyna-8',
+        'group': 'dyna-9-matched-eps',
     }
   elif search == 'preplay':
     sweep_config = {

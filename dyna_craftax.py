@@ -69,11 +69,19 @@ def concat_pytrees(tree1, tree2, **kwargs):
     return jax.tree_map(lambda x, y: jnp.concatenate((x, y), **kwargs), tree1, tree2)
 
 def add_time(v): return jax.tree_map(lambda x: x[None], v)
+
 def concat_first_rest(first, rest):
     first = add_time(first)  # [N, ...] --> [1, N, ...]
     # rest: [T, N, ...]
     # output: [T+1, N, ...]
     return jax.vmap(concat_pytrees, 1, 1)(first, rest)
+
+def concat_start_sims(start, simulations):
+    # concat where vmap over simulation dimension
+    # need this since have 1 start path, but multiple simulations
+    concat_ = lambda a, b: jnp.concatenate((a, b))
+    concat_ = jax.vmap(concat_, (None, 1), 1)
+    return jax.tree.map(concat_, start, simulations)
 
 
 def make_optimizer(config: dict) -> optax.GradientTransformation:
@@ -471,8 +479,8 @@ class DynaLossFn(vbb.RecurrentLossFn):
         all_log_info['dyna'] = dyna_log_info
 
     if self.logger.learner_log_extra is not None:
-        self.logger.learner_log_extra(all_log_info)
-    
+      self.logger.learner_log_extra(all_log_info)
+
     return td_error, batch_loss, all_metrics
 
   def dyna_loss_fn(
@@ -504,18 +512,11 @@ class DynaLossFn(vbb.RecurrentLossFn):
         policy_fn=self.simulation_policy,
         q_fn=self.network.reg_q_fn,
         goal=None)
-    def concat_start_sims(start, simulations):
-        # concat where vmap over simulation dimension
-        # need this since have 1 start path, but multiple simulations
-        concat_ = lambda a, b: jnp.concatenate((a, b))
-        concat_ = jax.vmap(concat_, (None, 1), 1)
-        return jax.tree.map(concat_, start, simulations)
 
     # first do a rollowing window
     # T' = T-window_size+1
     # K = window_size
     # [T, ...] --> [T', K, ...]
-    original_actions = actions
     actions = jax.tree.map(roll, actions)
     timesteps = jax.tree.map(roll, timesteps)
     h_online = jax.tree.map(roll, h_online)
@@ -754,9 +755,9 @@ def learner_log_extra(
     is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
 
     if 'dyna' in data:
-      # [Time, Batch, Num Simuations]
-      dyna_data = jax.tree.map(lambda x: x[0, 0, 0], data['dyna'])
-      
+      # [Batch, Time (including sim), Num Simuations]
+      dyna_data = jax.tree.map(lambda x: x[0, :, 0], data['dyna'])
+
       jax.lax.cond(
           is_log_time,
           lambda d: jax.debug.callback(callback, d),
@@ -933,6 +934,7 @@ def make_train(**kwargs):
     rng = jax.random.PRNGKey(config["SEED"])
 
     epsilon_setting = config['SIM_EPSILON_SETTING']
+    num_simulations = config['NUM_SIMULATIONS']
     if epsilon_setting == 1:
       # ACME default
       # range of ~(0.001, .1)
@@ -944,7 +946,6 @@ def make_train(**kwargs):
         # very random
         vals = np.ones(256)*0.9
 
-    num_simulations = config['NUM_SIMULATIONS']
     epsilons = jax.random.choice(
         rng, vals, shape=(num_simulations - 1,))
     epsilons = jnp.concatenate((jnp.zeros(1), epsilons))
