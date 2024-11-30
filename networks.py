@@ -97,6 +97,7 @@ class CraftaxObsEncoder(nn.Module):
     norm_type: str = "batch_norm"
     activation: str = 'relu'
     structured_inputs: bool = False
+    use_bias: bool = True
 
     @nn.compact
     def __call__(self, obs: Observation, train: bool = False):
@@ -120,7 +121,7 @@ class CraftaxObsEncoder(nn.Module):
             self.hidden_dim,
             self.num_layers,
             norm_type=self.norm_type,
-            use_bias=True,
+            use_bias=self.use_bias,
             activation=self.activation)(obs, train)
 
         return outputs

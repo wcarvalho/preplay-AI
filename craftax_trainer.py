@@ -52,9 +52,9 @@ from jaxneurorl.agents import value_based_pqn as pqn
 from jaxneurorl.agents import value_based_basics as vbb
 from jaxneurorl.wrappers import TimestepWrapper
 
-import housemaze_experiments
 import craftax_observer
 import networks
+import dyna_craftax
 import multitask_preplay_craftax
 import qlearning_craftax
 import qlearning_sf_aux_craftax
@@ -353,7 +353,21 @@ def run_single(
           ObserverCls=craftax_observer.Observer,
           vmap_env=False,
         )
-    elif config['ALG'] in ['preplay', 'dyna']:
+    elif config['ALG'] in ['dyna']:
+        train_fn = dyna_craftax.make_train(
+          config=config,
+          env=vec_env,
+          model_env=env,
+          make_logger=partial(
+             make_logger,
+             learner_log_extra=dyna_craftax.learner_log_extra
+          ),
+          train_env_params=env_params,
+          test_env_params=test_env_params,
+          ObserverCls=craftax_observer.Observer,
+          vmap_env=False,
+        )
+    elif config['ALG'] in ['preplay']:
         train_fn = multitask_preplay_craftax.make_train(
           config=config,
           env=vec_env,
@@ -525,27 +539,30 @@ def sweep(search: str = ''):
             "ALG": {'values': ['dyna']},
             "SEED": {'values': list(range(1,3))},
             "NUM_ENV_SEEDS": {'values': [0]},
-            "NUM_SIMULATIONS": {'values': [2, 10]},
+            "IMPORTANCE_SAMPLING_EXPONENT": {'values': [0, .6]},
+            "MAX_PRIORITY_WEIGHT": {'values': [0, .9]},
         },
         'overrides': ['alg=dyna', 'rlenv=craftax-1m', 'user=wilka'],
-        'group': 'dyna-2',
+        'group': 'dyna-8',
     }
   elif search == 'preplay':
     sweep_config = {
-        'metric': {
-            'name': 'evaluator_performance/0.0 avg_episode_return',
-            'goal': 'maximize',
-        },
-        'parameters': {
-            "ALG": {'values': ['preplay']},
-            "SEED": {'values': list(range(1,3))},
-            "NUM_ENV_SEEDS": {'values': [0]},
-            "USE_PRECONDITION": {'values': [True, False]},
-            "OFFTASK_COEFF": {'values': [1.0]},
-            "NUM_SIMULATIONS": {'values': [2, 10]},
-        },
-        'overrides': ['alg=preplay', 'rlenv=craftax-1m', 'user=wilka'],
-        'group': 'ql-sf-8',
+      'metric': {
+          'name': 'evaluator_performance/0.0 avg_episode_return',
+          'goal': 'maximize',
+      },
+      'parameters': {
+          "ALG": {'values': ['preplay']},
+          "SEED": {'values': list(range(1,2))},
+          "NUM_ENV_SEEDS": {'values': [0]},
+          "USE_PRECONDITION": {'values': [True]},
+          "OFFTASK_COEFF": {'values': [1.0, .1]},
+          "NUM_SIMULATIONS": {'values': [2, 10]},
+          "USE_BIAS": {'values': [False, True]},
+          "SIM_EPSILON_SETTING": {'values': [2]},
+      },
+      'overrides': ['alg=preplay', 'rlenv=craftax-1m', 'user=wilka'],
+      'group': 'preplay-4',
     }
 
   elif search == 'pqn':

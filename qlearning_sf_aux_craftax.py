@@ -211,11 +211,13 @@ class R2D2LossFn(vbb.RecurrentLossFn):
 
 def make_loss_fn_class(config) -> vbb.RecurrentLossFn:
   return functools.partial(
-     R2D2LossFn,
-     discount=config['GAMMA'],
-     tx_pair=rlax.SIGNED_HYPERBOLIC_PAIR if config.get('TX_PAIR', 'none') == 'hyperbolic' else rlax.IDENTITY_PAIR,
-     step_cost=config.get('STEP_COST', 0.),
-     aux_coeff=config.get('AUX_COEFF', 0.001))
+    R2D2LossFn,
+    discount=config['GAMMA'],
+    tx_pair=rlax.SIGNED_HYPERBOLIC_PAIR if config.get('TX_PAIR', 'none') == 'hyperbolic' else rlax.IDENTITY_PAIR,
+    importance_sampling_exponent=config.get('IMPORTANCE_SAMPLING_EXPONENT', 0.6),
+    max_priority_weight=config.get('MAX_PRIORITY_WEIGHT', 0.9),
+    step_cost=config.get('STEP_COST', 0.),
+    aux_coeff=config.get('AUX_COEFF', 0.001))
 
 def make_craftax_agent(
         config: dict,
@@ -243,20 +245,21 @@ def make_craftax_agent(
           num_layers=config['NUM_MLP_LAYERS'],
           activation=config['ACTIVATION'],
           norm_type=config.get('NORM_TYPE', 'none'),
-          structured_inputs=config.get('STRUCTURED_INPUTS', False)
+          structured_inputs=config.get('STRUCTURED_INPUTS', False),
+          use_bias=config.get('USE_BIAS', True),
           ),
         rnn=rnn,
         q_fn=MLP(
            hidden_dim=config.get('Q_HIDDEN_DIM', 512),
            num_layers=config.get('NUM_Q_LAYERS', 2),
            out_dim=env.action_space(env_params).n,
-           use_bias=True,
+           use_bias=config.get('USE_BIAS', True),
            ),
         achieve_fn=MLP(
            hidden_dim=config.get('Q_HIDDEN_DIM', 512),
            num_layers=config.get('NUM_Q_LAYERS', 2),
            out_dim=n_achieve,
-           use_bias=True,
+           use_bias=config.get('USE_BIAS', True),
            )
     )
 
