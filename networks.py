@@ -117,12 +117,15 @@ class CraftaxObsEncoder(nn.Module):
         else:
             image = norm(obs)
 
-        outputs = MLP(
-            hidden_dim=self.hidden_dim,
-            num_layers=self.num_layers,
-            norm_type=self.norm_type,
-            use_bias=self.use_bias,
-            activation=self.activation)(image, train)
+        if self.num_layers == 1:
+            outputs = nn.Dense(self.hidden_dim, use_bias=self.use_bias)(image)
+        else:
+            outputs = MLP(
+              hidden_dim=self.hidden_dim,
+              num_layers=self.num_layers,
+              norm_type=self.norm_type,
+              use_bias=self.use_bias,
+              activation=self.activation)(image, train)
 
         if obs.previous_action is not None:
             action = jax.nn.one_hot(obs.previous_action, 43)

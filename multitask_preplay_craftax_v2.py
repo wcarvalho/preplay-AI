@@ -307,7 +307,7 @@ def apply_rnn_and_q(
     return preds
 
 @struct.dataclass
-class DynaLossFn(vbb.RecurrentLossFn):
+class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
 
   """Loss function for multitask preplay.
 
@@ -321,6 +321,8 @@ class DynaLossFn(vbb.RecurrentLossFn):
   dyna_coeff: float = 1.0
   max_priority_weight: float = 0.9
   importance_sampling_exponent: float = 0.6
+  num_offtask_goals: int = 5
+  offtask_coeff: float = 1.0
 
   simulation_policy: SimPolicy = None
 
@@ -457,7 +459,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
         x_t = data.timestep
 
         dyna_loss_fn = functools.partial(
-            self.dyna_loss_fn,
+            self.preplay_loss_fn,
             params=params,
             target_params=target_params)
 
@@ -483,7 +485,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
 
     return td_error, batch_loss, all_metrics
 
-  def dyna_loss_fn(
+  def preplay_loss_fn(
     self,
     timesteps: TimeStep,
     actions: jax.Array,
@@ -510,8 +512,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
         num_steps=self.simulation_length,
         num_simulations=self.num_simulations,
         policy_fn=self.simulation_policy,
-        q_fn=self.network.reg_q_fn,
-        goal=None)
+        )
 
     # first do a rollowing window
     # T' = T-window_size+1
@@ -522,24 +523,39 @@ class DynaLossFn(vbb.RecurrentLossFn):
     h_online = jax.tree.map(roll, h_online)
     h_target = jax.tree.map(roll, h_target)
 
-    def dyna_loss_fn_(t, a, h_on, h_tar, key):
+    def dyna_loss_fn_(t, a, h_on, h_tar, g, key):
       """
 
       Args:
-        t (jax.Array): [window_size, ...]
-        h_on (jax.Array): [window_size, ...]
-        h_tar (jax.Array): [window_size, ...]
-        key (jax.random.PRNGKey): [2]
+        t (jax.Array): [window_size, ...] timesteps leading up to simulation
+        a (jax.Array): [window_size] actions leading up to simulation
+        h_on (jax.Array): [window_size, D] rnn-states leading up to simulation
+        h_tar (jax.Array): [window_size, D] rnn-states leading up to simulation
+        g (jax.Array): [num_offtask_goals, ...] off-task goals
+        key (jax.random.PRNGKey): [2], random key for simulation
       """
+
+      # use same goal for all simulations
+      # [G] --> [num_sims, G]
+      g = repeat(g, self.num_simulations)
+
+      #########################################
       # get simulations starting from final timestep in window
+      #########################################
       key, key_ = jax.random.split(key)
       # [sim_length, num_sim, ...]
+      last = lambda y: jax.tree.map(lambda x: x[-1], y)
       next_t, sim_outputs_t = simulate(
-          h_tm1=jax.tree.map(lambda x: x[-1], h_on),
-          x_t=jax.tree.map(lambda x: x[-1], t),
+          h_tm1=last(h_on),    # [D]
+          x_t=last(t),         # [D, ...]
           rng=key_,
+          q_fn=self.network.subtask_q_fn,
+          goal=g,                                       # [num_sims, G]
         )
 
+      #########################################
+      # run RNN + Off-task Q-network over simulation data
+      #########################################
       # we replace last, because last action from data 
       # is different than action from simulation
       # [window_size + sim_length, num_sims, ...]
@@ -550,31 +566,33 @@ class DynaLossFn(vbb.RecurrentLossFn):
       # NOTE: we're recomputing RNN but easier to read this way...
       # TODO: reuse RNN online param computations for speed (probably not worth it)
       key, key_ = jax.random.split(key)
-      h_htm1 = jax.tree.map(lambda x: x[0], h_on)
-      h_htm1 = repeat(h_htm1, self.num_simulations)
+      h_tm1_online_repeated = jax.tree.map(lambda x: x[0], h_on)
+      h_tm1_online_repeated = repeat(h_tm1_online_repeated, self.num_simulations)
       online_preds = apply_rnn_and_q(
-          h_tm1=h_htm1,
-          timesteps=all_t,
-          task=None,
+          h_tm1=h_tm1_online_repeated,   # [num_sims, D]
+          timesteps=all_t,               # [T', num_sims, ...]
+          task=g,                        # [num_sims, G]
           rng=key_,
           network=self.network,
           params=params,
-          q_fn=self.network.reg_q_fn,
+          q_fn=self.network.subtask_q_fn,
       )
 
       key, key_ = jax.random.split(key)
-      h_htm1 = jax.tree.map(lambda x: x[0], h_tar)
-      h_htm1 = repeat(h_htm1, self.num_simulations)
+      h_tm1_target_repeated = jax.tree.map(lambda x: x[0], h_tar)
+      h_tm1_target_repeated = repeat(h_tm1_target_repeated, self.num_simulations)
       target_preds = apply_rnn_and_q(
-          h_tm1=h_htm1,
+          h_tm1=h_tm1_target_repeated,
           timesteps=all_t,
-          task=None,
+          task=g,
           rng=key_,
           network=self.network,
           params=target_params,
-          q_fn=self.network.reg_q_fn,
+          q_fn=self.network.subtask_q_fn,
       )
-
+      #########################################
+      # Get Off-task loss
+      #########################################
       non_terminal = all_t.discount
       # either termination or truncation
       is_last_t = make_float(all_t.last())
@@ -583,7 +601,51 @@ class DynaLossFn(vbb.RecurrentLossFn):
       term_cumsum_t = jnp.cumsum(is_last_t, 0)
       loss_mask_t = make_float((term_cumsum_t + non_terminal) < 2)
 
-      batch_td_error, batch_loss_mean, metrics, log_info = self.loss_fn(
+      achievements = all_t.observation.achievements
+      # [T, K, D] * [1, K, D] --> [T, K]
+      offtask_reward = (achievements * g[None]).sum(-1)
+      offtask_batch_td_error, offtask_batch_loss_mean, offtask_metrics, offtask_log_info = self.loss_fn(
+          timestep=all_t,
+          online_preds=online_preds,
+          target_preds=target_preds,
+          actions=all_a,
+          rewards=offtask_reward,
+          is_last=is_last_t,
+          non_terminal=all_t.discount,
+          loss_mask=loss_mask_t,
+      )
+
+      #########################################
+      # run RNN + main Q-network over simulation data
+      #########################################
+
+      # NOTE: we're recomputing RNN but easier to read this way...
+      # TODO: reuse RNN online param computations for speed (probably not worth it)
+      key, key_ = jax.random.split(key)
+      online_preds = apply_rnn_and_q(
+          h_tm1=h_tm1_online_repeated,
+          timesteps=all_t,
+          task=g*0,  # NOTE: goal will be ignored
+          rng=key_,
+          network=self.network,
+          params=params,
+          q_fn=self.network.reg_q_fn,
+      )
+
+      key, key_ = jax.random.split(key)
+      target_preds = apply_rnn_and_q(
+          h_tm1=h_tm1_target_repeated,
+          timesteps=all_t,
+          task=g*0,  # NOTE: goal will be ignored
+          rng=key_,
+          network=self.network,
+          params=target_params,
+          q_fn=self.network.reg_q_fn,
+      )
+      #########################################
+      # Get Main task loss
+      #########################################
+      main_batch_td_error, main_batch_loss_mean, main_metrics, _ = self.loss_fn(
           timestep=all_t,
           online_preds=online_preds,
           target_preds=target_preds,
@@ -593,17 +655,54 @@ class DynaLossFn(vbb.RecurrentLossFn):
           non_terminal=all_t.discount,
           loss_mask=loss_mask_t,
       )
+
+      batch_td_error = self.offtask_coeff*jnp.abs(offtask_batch_td_error) + jnp.abs(main_batch_td_error)
+      batch_loss_mean = self.offtask_coeff*offtask_batch_loss_mean + main_batch_loss_mean
+      metrics = {
+          **{f'{k}/offtask': v for k, v in offtask_metrics.items()},
+          **main_metrics,
+      }
+      log_info = offtask_log_info
       return batch_td_error, batch_loss_mean, metrics, log_info
 
+    def preplay_loss_fn_(t, a, h_on, h_tar, key):
+      """
+
+      Args:
+        t (jax.Array): [T', ...]
+        h_on (jax.Array): [T', ...]
+        h_tar (jax.Array): [T', ...]
+        key (jax.random.PRNGKey): [2]
+      """
+      # sample goals available at last timestep in window
+      achievable = t.observation.achievable.astype(jnp.float32) + 1e-5
+      achievable = jax.tree.map(lambda x: x[-1], achievable)
+      num_classes = t.observation.achievable.shape[-1]
+      achievable = achievable/achievable.sum()
+
+      # sample a different goal for each timestep in window
+      # [num_offtask_goals]
+      key, key_ = jax.random.split(key)
+      goals = distrax.Categorical(probs=achievable).sample(
+        seed=key_, sample_shape=(self.num_offtask_goals))
+
+      # [num_offtask_goals, G]
+      goals = jax.nn.one_hot(goals, num_classes=num_classes)
+      
+      return jax.vmap(
+         dyna_loss_fn_,
+         in_axes=(None, None, None, None, 0, 0)
+         )(t, a, h_on, h_tar, goals, jax.random.split(key, self.num_offtask_goals))
+
     # vmap over individual windows
-    # TD ERROR: [window_size, T + sim_length, num_sim]
-    # Loss: [window_size, num_sim, ...]
+    # TD ERROR: [T', num_goals, T + sim_length, num_sim]
+    # Loss: [T', num_goals, num_sim, ...]
     batch_td_error, batch_loss_mean, metrics, log_info = jax.vmap(
-      dyna_loss_fn_, (1, 1, 1, 1, 0), 0)(
-        timesteps,       # [T, W, ...]
-        actions,         # [T, W]
-        h_online,        # [T, W, D]
-        h_target,        # [T, W, D]
+      preplay_loss_fn_, (1, 1, 1, 1, 0), 0)(
+        timesteps,       # [T', W, ...]
+        actions,         # [T', W]
+        h_online,        # [T', W, D]
+        h_target,        # [T', W, D]
         jax.random.split(rng, self.window_size),            # [W, 2]
       )
 
@@ -614,9 +713,9 @@ class DynaLossFn(vbb.RecurrentLossFn):
 
     return batch_td_error, batch_loss_mean, metrics, log_info
 
-def make_loss_fn_class(config, **kwargs) -> DynaLossFn:
+def make_loss_fn_class(config, **kwargs) -> MultitaskPreplayLossFn:
   return functools.partial(
-    DynaLossFn,
+    MultitaskPreplayLossFn,
     discount=config['GAMMA'],
     lambda_=config.get('TD_LAMBDA', .9),
     online_coeff=config.get('ONLINE_COEFF', 1.0),
@@ -625,6 +724,8 @@ def make_loss_fn_class(config, **kwargs) -> DynaLossFn:
     simulation_length=config.get('SIMULATION_LENGTH', 5),
     importance_sampling_exponent=config.get('IMPORTANCE_SAMPLING_EXPONENT', 0.6),
     max_priority_weight=config.get('MAX_PRIORITY_WEIGHT', 0.9),
+    offtask_coeff=config.get('OFFTASK_COEFF', 1.0),
+    num_offtask_goals=config.get('NUM_OFFTASK_GOALS', 10),
     step_cost=config.get("STEP_COST", 0.),
     window_size=config.get('WINDOW_SIZE', 20),
     **kwargs
@@ -757,8 +858,8 @@ def learner_log_extra(
     is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
 
     if 'dyna' in data:
-      # [Batch, Env Time, Sim Time, Num Simuations]
-      dyna_data = jax.tree.map(lambda x: x[0, 0, :, 0], data['dyna'])
+      # [Batch, Env Time, Num Goals, T+Sim, Num Simuations]
+      dyna_data = jax.tree.map(lambda x: x[0, 0, 0, :, 0], data['dyna'])
 
       jax.lax.cond(
           is_log_time,
@@ -906,7 +1007,7 @@ def make_agent(
             ),
         q_fn_subtask=MLP(
             hidden_dim=config.get('Q_HIDDEN_DIM', 512),
-            num_layers=config.get('NUM_Q_LAYERS', 1),
+            num_layers=config.get('NUM_ACH_LAYERS', 1),
             out_dim=env.action_space(env_params).n,
             activation=config['ACTIVATION'],
             activate_final=False,

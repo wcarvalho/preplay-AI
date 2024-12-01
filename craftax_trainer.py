@@ -55,7 +55,7 @@ from jaxneurorl.wrappers import TimestepWrapper
 import craftax_observer
 import networks
 import dyna_craftax
-import multitask_preplay_craftax
+import multitask_preplay_craftax_v2
 import qlearning_craftax
 import qlearning_sf_aux_craftax
 import usfa_craftax as usfa
@@ -322,143 +322,110 @@ def run_single(
 
 
     if config['ALG'] == 'qlearning':
-        train_fn = vbb.make_train(
-          config=config,
-          env=vec_env,
-          make_agent=qlearning_craftax.make_craftax_agent,
-          make_optimizer=qlearning_craftax.make_optimizer,
-          make_loss_fn_class=qlearning_craftax.make_loss_fn_class,
-          make_actor=qlearning_craftax.make_actor,
-          make_logger=partial(
-             make_logger,
-             learner_log_extra=qlearning_craftax.learner_log_extra),
-          train_env_params=env_params,
-          test_env_params=test_env_params,
-          ObserverCls=craftax_observer.Observer,
-          vmap_env=False,
-        )
-    elif config['ALG'] == 'qlearning_sf_aux':
-        train_fn = vbb.make_train(
-          config=config,
-          env=vec_env,
-          make_agent=qlearning_sf_aux_craftax.make_craftax_agent,
-          make_optimizer=qlearning_sf_aux_craftax.make_optimizer,
-          make_loss_fn_class=qlearning_sf_aux_craftax.make_loss_fn_class,
-          make_actor=qlearning_sf_aux_craftax.make_actor,
-          make_logger=partial(
-             make_logger,
-             learner_log_extra=qlearning_craftax.learner_log_extra),
-          train_env_params=env_params,
-          test_env_params=test_env_params,
-          ObserverCls=craftax_observer.Observer,
-          vmap_env=False,
-        )
-    elif config['ALG'] in ['dyna']:
-        train_fn = dyna_craftax.make_train(
-          config=config,
-          env=vec_env,
-          model_env=env,
-          make_logger=partial(
-             make_logger,
-             learner_log_extra=dyna_craftax.learner_log_extra
-          ),
-          train_env_params=env_params,
-          test_env_params=test_env_params,
-          ObserverCls=craftax_observer.Observer,
-          vmap_env=False,
-        )
-    elif config['ALG'] in ['preplay']:
-        train_fn = multitask_preplay_craftax.make_train(
-          config=config,
-          env=vec_env,
-          model_env=env,
-          make_logger=partial(
-             make_logger,
-             learner_log_extra=multitask_preplay_craftax.learner_log_extra
-          ),
-          train_env_params=env_params,
-          test_env_params=test_env_params,
-          ObserverCls=craftax_observer.Observer,
-          vmap_env=False,
-        )
-
-    elif config['ALG'] == 'pqn':
-        constructor = get_pqn_fns(config)
-        train_fn = vpq.make_train(
-          config=config,
-          env=vec_env,
-          make_agent=constructor.make_agent,
-          make_optimizer=constructor.make_optimizer,
-          make_loss_fn_class=constructor.make_loss_fn_class,
-          make_actor=constructor.make_actor,
-          make_logger=make_logger,
-          train_env_params=env_params,
-          test_env_params=test_env_params,
-          ObserverCls=craftax_observer.Observer,
-          vmap_env=False,
-        )
-    elif config['ALG'] == 'usfa':
-        train_fn = vbb.make_train(
-          config=config,
-          env=vec_env,
-          make_agent=usfa.make_craftax_agent,
-          make_optimizer=usfa.make_optimizer,
-          make_loss_fn_class=usfa.make_loss_fn_class,
-          make_actor=usfa.make_actor,
-          make_logger=partial(make_logger,
-                              learner_log_extra=usfa.learner_log_extra),
-          train_env_params=env_params,
-          test_env_params=test_env_params,
-          ObserverCls=craftax_observer.Observer,
-          vmap_env=False,
-        )
-    elif config['ALG'] == 'alphazero':
-      import mctx
-      from jaxneurorl.agents import alphazero
-      import alphazero_craftax
-      max_value = config.get('MAX_VALUE', 10)
-      num_bins = config['NUM_BINS']
-
-      discretizer = utils.Discretizer(
-          max_value=max_value,
-          num_bins=num_bins,
-          min_value=-max_value)
-
-      num_train_simulations = config.get('NUM_SIMULATIONS', 4)
-
-      mcts_policy = functools.partial(
-          mctx.gumbel_muzero_policy,
-          max_depth=config.get('MAX_SIM_DEPTH', None),
-          num_simulations=num_train_simulations,
-          gumbel_scale=config.get('GUMBEL_SCALE', 1.0))
-      eval_mcts_policy = functools.partial(
-          mctx.gumbel_muzero_policy,
-          max_depth=config.get('MAX_SIM_DEPTH', None),
-          num_simulations=config.get(
-            'NUM_EVAL_SIMULATIONS', num_train_simulations),
-          gumbel_scale=config.get('GUMBEL_SCALE', 1.0))
-
       train_fn = vbb.make_train(
-          config=config,
-          env=vec_env,
-          make_agent=functools.partial(alphazero_craftax.make_agent,
-            model_env=TimestepWrapper(env, autoreset=False)),
-          make_optimizer=alphazero.make_optimizer,
-          make_loss_fn_class=functools.partial(
-              alphazero.make_loss_fn_class,
-              discretizer=discretizer),
-          make_actor=functools.partial(
-              alphazero.make_actor,
-              discretizer=discretizer,
-              mcts_policy=mcts_policy,
-              eval_mcts_policy=eval_mcts_policy),
-          make_logger=make_logger,
-          train_env_params=env_params,
-          test_env_params=test_env_params,
-          ObserverCls=craftax_observer.Observer,
-          vmap_env=False,
+        config=config,
+        env=vec_env,
+        make_agent=qlearning_craftax.make_craftax_agent,
+        make_optimizer=qlearning_craftax.make_optimizer,
+        make_loss_fn_class=qlearning_craftax.make_loss_fn_class,
+        make_actor=qlearning_craftax.make_actor,
+        make_logger=partial(
+            make_logger,
+            learner_log_extra=qlearning_craftax.learner_log_extra),
+        train_env_params=env_params,
+        test_env_params=test_env_params,
+        ObserverCls=craftax_observer.Observer,
+        vmap_env=False,
       )
-
+    elif config['ALG'] == 'qlearning_sf_aux':
+      train_fn = vbb.make_train(
+        config=config,
+        env=vec_env,
+        make_agent=qlearning_sf_aux_craftax.make_craftax_agent,
+        make_optimizer=qlearning_sf_aux_craftax.make_optimizer,
+        make_loss_fn_class=qlearning_sf_aux_craftax.make_loss_fn_class,
+        make_actor=qlearning_sf_aux_craftax.make_actor,
+        make_logger=partial(
+            make_logger,
+            learner_log_extra=qlearning_craftax.learner_log_extra),
+        train_env_params=env_params,
+        test_env_params=test_env_params,
+        ObserverCls=craftax_observer.Observer,
+        vmap_env=False,
+      )
+    elif config['ALG'] in ['dyna']:
+      train_fn = dyna_craftax.make_train(
+        config=config,
+        env=vec_env,
+        model_env=env,
+        make_logger=partial(
+            make_logger,
+            learner_log_extra=dyna_craftax.learner_log_extra
+        ),
+        train_env_params=env_params,
+        test_env_params=test_env_params,
+        ObserverCls=craftax_observer.Observer,
+        vmap_env=False,
+      )
+    elif config['ALG'] in ['preplay']:
+      train_fn = multitask_preplay_craftax_v2.make_train(
+        config=config,
+        env=vec_env,
+        model_env=env,
+        make_logger=partial(
+            make_logger,
+            learner_log_extra=multitask_preplay_craftax_v2.learner_log_extra
+        ),
+        train_env_params=env_params,
+        test_env_params=test_env_params,
+        ObserverCls=craftax_observer.Observer,
+        vmap_env=False,
+      )
+    elif config['ALG'] == 'pqn':
+      constructor = get_pqn_fns(config)
+      train_fn = vpq.make_train(
+        config=config,
+        env=vec_env,
+        make_agent=constructor.make_agent,
+        make_optimizer=constructor.make_optimizer,
+        make_loss_fn_class=constructor.make_loss_fn_class,
+        make_actor=constructor.make_actor,
+        make_logger=make_logger,
+        train_env_params=env_params,
+        test_env_params=test_env_params,
+        ObserverCls=craftax_observer.Observer,
+        vmap_env=False,
+      )
+    elif config['ALG'] == 'usfa':
+      train_fn = vbb.make_train(
+        config=config,
+        env=vec_env,
+        make_agent=usfa.make_craftax_agent,
+        make_optimizer=usfa.make_optimizer,
+        make_loss_fn_class=usfa.make_loss_fn_class,
+        make_actor=usfa.make_actor,
+        make_logger=partial(make_logger,
+                            learner_log_extra=usfa.learner_log_extra),
+        train_env_params=env_params,
+        test_env_params=test_env_params,
+        ObserverCls=craftax_observer.Observer,
+        vmap_env=False,
+      )
+    elif config['ALG'] == 'alphazero':
+      import alphazero_craftax
+      train_fn = alphazero_craftax.make_train(
+        config=config,
+        env=vec_env,
+        model_env=env,
+        make_logger=partial(
+            make_logger,
+            learner_log_extra=alphazero_craftax.learner_log_extra
+        ),
+        train_env_params=env_params,
+        test_env_params=test_env_params,
+        ObserverCls=craftax_observer.Observer,
+        vmap_env=False,
+      )
     else:
       raise NotImplementedError(config['ALG'])
     
@@ -510,7 +477,7 @@ def sweep(search: str = ''):
             "USE_PRECONDITION": {'values': [True]},
         },
         'overrides': ['alg=ql', 'rlenv=craftax-1m', 'user=wilka'],
-        'group': 'ql-12',
+        'group': 'ql-13',
     }
   elif search == 'ql_sf':
     sweep_config = {
@@ -527,7 +494,7 @@ def sweep(search: str = ''):
             #"AUX_COEFF": {'values': [1.0, .1, .01, .001]},
         },
         'overrides': ['alg=ql', 'rlenv=craftax-1m', 'user=wilka'],
-        'group': 'ql-sf-9',
+        'group': 'ql-sf-10',
     }
   elif search == 'dyna':
     sweep_config = {
@@ -539,13 +506,13 @@ def sweep(search: str = ''):
             "ALG": {'values': ['dyna']},
             "SEED": {'values': list(range(1,3))},
             "NUM_ENV_SEEDS": {'values': [0]},
-            "IMPORTANCE_SAMPLING_EXPONENT": {'values': [0, .6]},
-            "MAX_PRIORITY_WEIGHT": {'values': [0, .9]},
-            "EPSILON_ANNEAL_TIME": {'values': [5e5, 1e6]},
-            "WINDOW_SIZE": {'values': [20, 40]},
+            "WINDOW_SIZE": {'values': [40]},
+            "MLP_LAYERS": {'values': [0, 1]},
+            "EPSILON_ANNEAL_TIME": {'values': [5e5, 2.5e5]},
+            "FIXED_EPSILON": {'values': [0, 1, 2]},
         },
         'overrides': ['alg=dyna', 'rlenv=craftax-1m', 'user=wilka'],
-        'group': 'dyna-11-search-bug-fix',
+        'group': 'dyna-12-search',
     }
   elif search == 'preplay':
     sweep_config = {
@@ -558,13 +525,14 @@ def sweep(search: str = ''):
           "SEED": {'values': list(range(1,2))},
           "NUM_ENV_SEEDS": {'values': [0]},
           "USE_PRECONDITION": {'values': [True]},
+          "WINDOW_SIZE": {'values': [20, 25, 30, 35, 40]},
           "OFFTASK_COEFF": {'values': [1.0, .1]},
-          "NUM_SIMULATIONS": {'values': [2, 10]},
-          "USE_BIAS": {'values': [False, True]},
-          "SIM_EPSILON_SETTING": {'values': [2]},
+          "NUM_OFFTASK_GOALS": {'values': [2, 5]},
+          "NUM_ACH_LAYERS": {'values': [0, 3]},
+          "SIM_EPSILON_SETTING": {'values': [1, 2, 3]},
       },
       'overrides': ['alg=preplay', 'rlenv=craftax-1m', 'user=wilka'],
-      'group': 'preplay-4',
+      'group': 'preplay-5-search',
     }
 
   elif search == 'pqn':
@@ -606,11 +574,13 @@ def sweep(search: str = ''):
             'goal': 'maximize',
         },
         'parameters': {
-            "NUM_ENV_SEEDS": {'values': [100, 10_000]},
-            "NUM_SIMULATIONS": {'values': [2, 4]},
+            "NUM_ENV_SEEDS": {'values': [0]},
+            "NUM_SIMULATIONS": {'values': [2]},
+            "NUM_MLP_LAYERS": {'values': [1]},
+            "AGENT_RNN_DIM": {'values': [256, 512]},
         },
         'overrides': ['alg=alphazero', 'rlenv=craftax-1m', 'user=wilka'],
-        'group': 'alphazero-1',
+        'group': 'alphazero-2',
     }
   else:
     raise NotImplementedError(search)

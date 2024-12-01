@@ -106,7 +106,7 @@ class AlphaZeroAgent(nn.Module):
         return self.__call__(state.rnn_state, next_timestep, rng_)
 
 
-def make_agent(
+def make_craftax_agent(
         config: dict,
         env: environment.Environment,
         env_params: environment.EnvParams,
@@ -148,3 +148,44 @@ def make_agent(
           method=agent.initialize_carry)
 
     return agent, network_params, reset_fn
+
+def make_train(**kwargs):
+  config = kwargs['config']
+
+  max_value = config.get('MAX_VALUE', 10)
+  num_bins = config['NUM_BINS']
+
+  discretizer = utils.Discretizer(
+      max_value=max_value,
+      num_bins=num_bins,
+      min_value=-max_value)
+
+  num_train_simulations = config.get('NUM_SIMULATIONS', 4)
+
+  mcts_policy = functools.partial(
+      mctx.gumbel_muzero_policy,
+      max_depth=config.get('MAX_SIM_DEPTH', None),
+      num_simulations=num_train_simulations,
+      gumbel_scale=config.get('GUMBEL_SCALE', 1.0))
+  eval_mcts_policy = functools.partial(
+      mctx.gumbel_muzero_policy,
+      max_depth=config.get('MAX_SIM_DEPTH', None),
+      num_simulations=config.get(
+        'NUM_EVAL_SIMULATIONS', num_train_simulations),
+      gumbel_scale=config.get('GUMBEL_SCALE', 1.0))
+
+  return vbb.make_train(
+    make_agent=functools.partial(
+        make_craftax_agent,
+        model_env=kwargs.pop('model_env')),
+    make_loss_fn_class=functools.partial(
+      make_loss_fn_class,
+      discretizer=discretizer),
+    make_optimizer=make_optimizer,
+    make_actor=functools.partial(
+      make_actor,
+      discretizer=discretizer,
+      mcts_policy=mcts_policy,
+      eval_mcts_policy=eval_mcts_policy),
+    **kwargs,
+)
