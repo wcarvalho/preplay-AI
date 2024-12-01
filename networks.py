@@ -92,6 +92,7 @@ class CraftaxObsEncoder(nn.Module):
     - observation encoder: CNN over binary inputs
     - MLP with truncated-normal-initialized Linear layer as initial layer for other inputs
     """
+    action_dim: int = None
     hidden_dim: int = 512
     num_layers: int = 0
     norm_type: str = "batch_norm"
@@ -128,7 +129,7 @@ class CraftaxObsEncoder(nn.Module):
               activation=self.activation)(image, train)
 
         if obs.previous_action is not None:
-            action = jax.nn.one_hot(obs.previous_action, 43)
+            action = jax.nn.one_hot(obs.previous_action, self.action_dim or 50)
             # common trick for one-hot encodings, same as nn.Embed
             # main benefit comes from adding action
             kernel_init = nn.initializers.variance_scaling(1.0, 'fan_in', 'normal', out_axis=0)

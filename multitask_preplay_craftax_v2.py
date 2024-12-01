@@ -84,6 +84,27 @@ def concat_start_sims(start, simulations):
     return jax.tree.map(concat_, start, simulations)
 
 
+def is_truncated(timestep):
+  non_terminal = timestep.discount
+  # either termination or truncation
+  is_last = make_float(timestep.last())
+
+  # truncated is discount=1 on AND is last
+  truncated = (non_terminal+is_last) > 1
+  return make_float(1-truncated)
+
+
+def simulation_finished_mask(initial_mask, next_timesteps):
+  # get mask
+  non_terminal = next_timesteps.discount[1:]
+  # either termination or truncation
+  is_last_t = make_float(next_timesteps.last()[1:])
+
+  # time-step of termination and everything afterwards is masked out
+  term_cumsum_t = jnp.cumsum(is_last_t, 0)
+  loss_mask_t = make_float((term_cumsum_t + non_terminal) < 2)
+  return concat_start_sims(initial_mask, loss_mask_t)
+
 def make_optimizer(config: dict) -> optax.GradientTransformation:
   num_updates = int(config["NUM_UPDATES"] + config.get("NUM_EXTRA_REPLAY", 0))
 
@@ -409,14 +430,8 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
     ## Q-learning loss on batch of data
     ##################
 
-    # prepare data
-    non_terminal = data.timestep.discount
-    # either termination or truncation
-    is_last = make_float(data.timestep.last())
-
     # truncated is discount on AND is last
-    truncated = (non_terminal+is_last) > 1
-    loss_mask = make_float(1-truncated)
+    loss_mask = is_truncated(data.timestep)
 
     all_metrics = {}
     all_log_info = {
@@ -430,8 +445,8 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
             target_preds=target_preds,
             actions=data.action,
             rewards=data.reward,
-            is_last=is_last,
-            non_terminal=non_terminal,
+            is_last=make_float(data.timestep.last()),
+            non_terminal=data.timestep.discount,
             loss_mask=loss_mask,
             )
         # first label online loss with online
@@ -464,12 +479,13 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
             target_params=target_params)
 
         # vmap over batch
-        dyna_loss_fn = jax.vmap(dyna_loss_fn, (1, 1, 1, 1, 0), 0)
+        dyna_loss_fn = jax.vmap(dyna_loss_fn, (1, 1, 1, 1, 1, 0), 0)
         _, dyna_batch_loss, dyna_metrics, dyna_log_info = dyna_loss_fn(
                     x_t,
                     data.action,
                     h_tm1_online,
                     h_tm1_target,
+                    loss_mask,
                     jax.random.split(key_grad, B),
                 )
         batch_loss += self.dyna_coeff*dyna_batch_loss
@@ -491,6 +507,7 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
     actions: jax.Array,
     h_online: jax.Array,
     h_target: jax.Array,
+    loss_mask: jax.Array,
     rng: jax.random.PRNGKey,
     params,
     target_params,
@@ -522,8 +539,9 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
     timesteps = jax.tree.map(roll, timesteps)
     h_online = jax.tree.map(roll, h_online)
     h_target = jax.tree.map(roll, h_target)
+    loss_mask = jax.tree.map(roll, loss_mask)
 
-    def dyna_loss_fn_(t, a, h_on, h_tar, g, key):
+    def dyna_loss_fn_(t, a, h_on, h_tar, l_mask, any_achievable, g, key):
       """
 
       Args:
@@ -531,6 +549,8 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
         a (jax.Array): [window_size] actions leading up to simulation
         h_on (jax.Array): [window_size, D] rnn-states leading up to simulation
         h_tar (jax.Array): [window_size, D] rnn-states leading up to simulation
+        l_mask (jax.Array): [window_size] loss mask
+        any_achievable (jax.Array): [] boolean indicating if any achievable goal
         g (jax.Array): [num_offtask_goals, ...] off-task goals
         key (jax.random.PRNGKey): [2], random key for simulation
       """
@@ -593,28 +613,29 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
       #########################################
       # Get Off-task loss
       #########################################
-      non_terminal = all_t.discount
-      # either termination or truncation
-      is_last_t = make_float(all_t.last())
+      all_t_mask = simulation_finished_mask(l_mask, next_t)
 
-      # time-step of termination and everything afterwards is masked out
-      term_cumsum_t = jnp.cumsum(is_last_t, 0)
-      loss_mask_t = make_float((term_cumsum_t + non_terminal) < 2)
-
-      achievements = all_t.observation.achievements
+      achievements = all_t.observation.achievements.astype(jnp.float32)
+      coeff = g.astype(jnp.float32)
       # [T, K, D] * [1, K, D] --> [T, K]
-      offtask_reward = (achievements * g[None]).sum(-1)
+      offtask_reward = (achievements * coeff[None]).sum(-1)
+
       offtask_batch_td_error, offtask_batch_loss_mean, offtask_metrics, offtask_log_info = self.loss_fn(
           timestep=all_t,
           online_preds=online_preds,
           target_preds=target_preds,
           actions=all_a,
           rewards=offtask_reward,
-          is_last=is_last_t,
+          is_last=make_float(all_t.last()),
           non_terminal=all_t.discount,
-          loss_mask=loss_mask_t,
+          loss_mask=all_t_mask,
       )
 
+      # only use loss if any achievable goal
+      offtask_batch_loss_mean = offtask_batch_loss_mean * any_achievable[None]
+      offtask_batch_td_error = offtask_batch_td_error * any_achievable[None]
+      offtask_log_info['goal'] = g
+      offtask_log_info['any_achievable'] = any_achievable
       #########################################
       # run RNN + main Q-network over simulation data
       #########################################
@@ -651,9 +672,9 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
           target_preds=target_preds,
           actions=all_a,
           rewards=all_t.reward,
-          is_last=is_last_t,
+          is_last=make_float(all_t.last()),
           non_terminal=all_t.discount,
-          loss_mask=loss_mask_t,
+          loss_mask=all_t_mask,
       )
 
       batch_td_error = self.offtask_coeff*jnp.abs(offtask_batch_td_error) + jnp.abs(main_batch_td_error)
@@ -665,7 +686,7 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
       log_info = offtask_log_info
       return batch_td_error, batch_loss_mean, metrics, log_info
 
-    def preplay_loss_fn_(t, a, h_on, h_tar, key):
+    def preplay_loss_fn_(t, a, h_on, h_tar, l_mask, key):
       """
 
       Args:
@@ -675,8 +696,10 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
         key (jax.random.PRNGKey): [2]
       """
       # sample goals available at last timestep in window
-      achievable = t.observation.achievable.astype(jnp.float32) + 1e-5
+      achievable = t.observation.achievable.astype(jnp.float32)
       achievable = jax.tree.map(lambda x: x[-1], achievable)
+      any_achievable = achievable.sum() > .1
+      achievable += 1e-5
       num_classes = t.observation.achievable.shape[-1]
       achievable = achievable/achievable.sum()
 
@@ -688,21 +711,25 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
 
       # [num_offtask_goals, G]
       goals = jax.nn.one_hot(goals, num_classes=num_classes)
-      
+
       return jax.vmap(
          dyna_loss_fn_,
-         in_axes=(None, None, None, None, 0, 0)
-         )(t, a, h_on, h_tar, goals, jax.random.split(key, self.num_offtask_goals))
+         in_axes=(None, None, None, None, None, None, 0, 0)
+         )(t, a, h_on, h_tar, l_mask,
+           any_achievable,
+           goals,
+           jax.random.split(key, self.num_offtask_goals))
 
     # vmap over individual windows
     # TD ERROR: [T', num_goals, T + sim_length, num_sim]
     # Loss: [T', num_goals, num_sim, ...]
     batch_td_error, batch_loss_mean, metrics, log_info = jax.vmap(
-      preplay_loss_fn_, (1, 1, 1, 1, 0), 0)(
+      preplay_loss_fn_, (1, 1, 1, 1, 1, 0), 0)(
         timesteps,       # [T', W, ...]
         actions,         # [T', W]
         h_online,        # [T', W, D]
         h_target,        # [T', W, D]
+        loss_mask,       # [T', W]
         jax.random.split(rng, self.window_size),            # [W, 2]
       )
 
@@ -739,7 +766,7 @@ def get_in_episode(timestep):
   in_episode = (term_cumsum + non_terminal) < 2
   return in_episode
 
-from craftax.craftax.constants import Action, BLOCK_PIXEL_SIZE_IMG
+from craftax.craftax.constants import Action, BLOCK_PIXEL_SIZE_IMG, Achievement
 from craftax.craftax.renderer import render_craftax_pixels
 from visualizer import plot_frames
 
@@ -764,6 +791,8 @@ def learner_log_extra(
         q_values: np.array,
         q_loss: np.array,
         q_target: np.array,
+        goal: np.array,
+        any_achievable: np.array,
         ):
         # Extract the relevant data
         # only use data from batch dim = 0
@@ -835,8 +864,12 @@ def learner_log_extra(
         actions_taken = [Action(a).name for a in actions]
 
         def index(t, idx): return jax.tree.map(lambda x: x[idx], t)
+
+        goal_idx = goal.argmax(-1)
+        achievement = Achievement(goal_idx).name
         def panel_title_fn(timesteps, i):
-            title = f't={i}\n'
+            title = f'{achievement}. Pos: {int(any_achievable)}'
+            title += f't={i}\n'
             title += f'{actions_taken[i]}\n'
             title += f'r={timesteps.reward[i]}, $\\gamma={timesteps.discount[i]}$'
             return title
@@ -851,23 +884,29 @@ def learner_log_extra(
                 {f"learner_example/{key}/trajectory": wandb.Image(fig)})
         plt.close(fig)
 
-    def callback(d):
-        log_data(**d, key='dyna')
+    def callback(d, g, any_achievable):
+        log_data(**d, goal=g, any_achievable=any_achievable, key='dyna')
     # this will be the value after update is applied
     n_updates = data['n_updates'] + 1
     is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
 
     if 'dyna' in data:
+      # [Batch, Env Time, Num Goals, Num Simuations]
+      goal = data['dyna'].pop('goal')
+      goal = goal[0, 0, 0, 0]
+
+      # [Batch, Env Time, Num Goals]
+      any_achievable = data['dyna'].pop('any_achievable')
+      any_achievable = any_achievable[0, 0, 0]
+
       # [Batch, Env Time, Num Goals, T+Sim, Num Simuations]
       dyna_data = jax.tree.map(lambda x: x[0, 0, 0, :, 0], data['dyna'])
 
       jax.lax.cond(
           is_log_time,
-          lambda d: jax.debug.callback(callback, d),
+          lambda d: jax.debug.callback(callback, d, goal, any_achievable),
           lambda d: None,
           dyna_data)
-
-
 
 
 class DynaAgentEnvModel(nn.Module):
@@ -995,6 +1034,7 @@ def make_agent(
           norm_type=config.get('NORM_TYPE', 'none'),
           structured_inputs=config.get('STRUCTURED_INPUTS', False),
           use_bias=config.get('USE_BIAS', True),
+          action_dim=env.action_space(env_params).n,
           ),
         rnn=rnn,
         q_fn=MLP(
@@ -1007,7 +1047,7 @@ def make_agent(
             ),
         q_fn_subtask=MLP(
             hidden_dim=config.get('Q_HIDDEN_DIM', 512),
-            num_layers=config.get('NUM_ACH_LAYERS', 1),
+            num_layers=config.get('NUM_AUX_LAYERS', 0),
             out_dim=env.action_space(env_params).n,
             activation=config['ACTIVATION'],
             activate_final=False,

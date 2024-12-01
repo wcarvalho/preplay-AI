@@ -49,9 +49,7 @@ class StaticEnvParams:
     max_player_projectiles: int = 3
     use_precondition: bool = False
 
-dummy_achievements = jnp.zeros(
-    len(ACHIEVEMENT_REWARD_MAP)+1,
-    dtype=jnp.float32)
+dummy_achievements = jnp.zeros(len(ACHIEVEMENT_REWARD_MAP)+1, dtype=jnp.float32)
 
 def get_map_obs_shape():
     num_mob_classes = 5
@@ -443,6 +441,11 @@ def get_possible_achievements(state: EnvState, use_precondition: bool = False) -
             has_weapon
         )
     )
+    possible_achievements = jnp.concatenate((
+        possible_achievements,
+        # 1 more for health (will always be 0)
+        jnp.zeros([1], dtype=jnp.int32)
+    ))
     return possible_achievements
 
 
@@ -765,11 +768,11 @@ class CraftaxSymbolicEnvNoAutoReset(EnvironmentNoAutoReset):
         state = generate_world(world_rng, params, self.static_env_params)
 
         obs = self.get_obs(
-            state,
-            dummy_achievements,
-            dummy_achievements,
-            params,
-            jnp.zeros((), dtype=jnp.int32)  # scalar
+            state=state,
+            achievements=dummy_achievements,
+            achievement_coefficients=dummy_achievements,
+            params=params,
+            previous_action=jnp.zeros((), dtype=jnp.int32)  # scalar
         )
         return obs, state
 
@@ -780,15 +783,14 @@ class CraftaxSymbolicEnvNoAutoReset(EnvironmentNoAutoReset):
                 params: EnvParams,
                 previous_action: Optional[chex.Array] = None):
         del params
-        achievable = jnp.concatenate((
-          get_possible_achievements(state, use_precondition=self.static_env_params.use_precondition),
-          # 1 more for health (will always be 0)
-          jnp.zeros([1], dtype=jnp.int32)
-        ))
-        
+        achievable = get_possible_achievements(
+            state=state,
+            use_precondition=self.static_env_params.use_precondition)
+        assert achievable.shape == achievements.shape, 'these should have the exact same shape'
+
         task_w = jnp.concatenate(
             (achievement_coefficients,
-             jnp.zeros(len(achievable), dtype=achievement_coefficients.dtype)))
+             jnp.zeros(achievable.shape, dtype=achievement_coefficients.dtype)))
 
         return Observation(
             image=render_craftax_symbolic(state),

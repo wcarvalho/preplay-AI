@@ -16,7 +16,7 @@ python craftax_trainer.py \
 import os
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 
-MAX_SCORE = 226
+MAX_SCORE = 226.0
 
 
 import wandb
@@ -54,6 +54,7 @@ from jaxneurorl.wrappers import TimestepWrapper
 
 import craftax_observer
 import networks
+import alphazero_craftax
 import dyna_craftax
 import multitask_preplay_craftax_v2
 import qlearning_craftax
@@ -114,7 +115,8 @@ class LogWrapper(GymnaxWrapper):
     @partial(jax.jit, static_argnums=(0, 2))
     def reset(self, key: chex.PRNGKey, params=None):
         obs, env_state = self._env.reset(key, params)
-        state = LogEnvState(env_state, 0.0, 0, 0.0, 0, 0)
+        # NOTE: change, technically episode length is 1 here, not 0
+        state = LogEnvState(env_state, 0.0, 1, 0.0, 0, 0)
         return obs, state
 
     @partial(jax.jit, static_argnums=(0, 4))
@@ -125,22 +127,28 @@ class LogWrapper(GymnaxWrapper):
         action: Union[int, float],
         params=None,
     ):
+        """
+        # NOTE: MAJOR change from original code is that they assume that finishing an episode leads to the first state of the next episode in the same index.
+        In this codebase, when you finish an episode, you see the first state of the next episode in the NEXT index.
+        """
+        
         obs, env_state, reward, done, info = self._env.step(
             key, state.env_state, action, params
         )
         new_episode_return = state.episode_returns + reward
         new_episode_length = state.episode_lengths + 1
+        done_float = done.astype(jnp.float32)
+        done_int = done.astype(jnp.int32)
         state = LogEnvState(
             env_state=env_state,
-            episode_returns=new_episode_return * (1 - done),
-            episode_lengths=new_episode_length * (1 - done),
-            returned_episode_returns=state.returned_episode_returns * (1 - done)
-            + new_episode_return * done,
-            returned_episode_lengths=state.returned_episode_lengths * (1 - done)
-            + new_episode_length * done,
+            episode_returns=new_episode_return * (1 - done_float),
+            episode_lengths=new_episode_length * (1 - done_int),
+            returned_episode_returns=(state.returned_episode_returns * (1 - done_float)
+            + new_episode_return * done_float),
+            returned_episode_lengths=state.returned_episode_lengths * (1 - done_int)
+            + new_episode_length * done_int,
             timestep=state.timestep + 1,
         )
-
         return obs, state, reward, done, info
 
 class OptimisticResetVecEnvWrapper(object):
@@ -225,6 +233,9 @@ def craftax_experience_logger(
       trajectory: Optional[struct.PyTreeNode] = None,
       **kwargs):
 
+    ############################################################
+    # LogWrapper logging
+    ############################################################
     key_fn = lambda k: f'{k}-{num_seeds}' if num_seeds is not None else k
     main_key = key_fn(key)
     ach_key = key_fn(f'{key}-achievements')
@@ -253,11 +264,36 @@ def craftax_experience_logger(
         )
     metrics[f'{main_key}/num_actor_steps'] = train_state.timesteps
     metrics[f'{main_key}/num_learner_updates'] = train_state.n_updates
-    def callback(m):
+
+    ############################################################
+    # Observer logging
+    ############################################################
+
+    def callback(m, idx, lengths, returns):
+        # NOTE: WRONG. observation logic is wrong
+        #length_means = []
+        #return_means = []
+        #for env in range(lengths.shape[1]):
+        #  end = min(idx[env] + 1, len(lengths[:, env]))
+        #  length_means.append(lengths[:, env][:end].mean())
+        #  return_means.append(returns[:, env][:end].mean())
+
+        #key = key_fn('observer')
+
+        #m.update({
+        #    f'{key}/0.episode_length': np.mean(length_means),
+        #    f'{key}/0.episode_return': np.mean(return_means),
+        #    f'{key}/0.score': (np.mean(return_means)/MAX_SCORE)*100.0,
+        #})
         if wandb.run is not None:
           wandb.log(m)
 
-    jax.debug.callback(callback, metrics)
+    jax.debug.callback(
+       callback,
+       metrics,
+       observer_state.idx,
+       observer_state.episode_lengths,
+       observer_state.episode_returns)
 
 def make_logger(
         config: dict,
@@ -313,12 +349,17 @@ def run_single(
     else:
       raise NotImplementedError(config["ENV"])
 
-    env = TimestepWrapper(LogWrapper(env), autoreset=False)
-    vec_env = OptimisticResetVecEnvWrapper(
-        env,
-        num_envs=config["NUM_ENVS"],
-        reset_ratio=min(config["OPTIMISTIC_RESET_RATIO"], config["NUM_ENVS"]),
-    )
+    if config["OPTIMISTIC_RESET_RATIO"] == 1:
+      vec_env = env = TimestepWrapper(LogWrapper(env), autoreset=True)
+      vmap_env = True
+    else:
+      env = TimestepWrapper(LogWrapper(env), autoreset=False)
+      vec_env = OptimisticResetVecEnvWrapper(
+          env,
+          num_envs=config["NUM_ENVS"],
+          reset_ratio=min(config["OPTIMISTIC_RESET_RATIO"], config["NUM_ENVS"]),
+      )
+      vmap_env = False
 
 
     if config['ALG'] == 'qlearning':
@@ -335,7 +376,7 @@ def run_single(
         train_env_params=env_params,
         test_env_params=test_env_params,
         ObserverCls=craftax_observer.Observer,
-        vmap_env=False,
+        vmap_env=vmap_env,
       )
     elif config['ALG'] == 'qlearning_sf_aux':
       train_fn = vbb.make_train(
@@ -351,7 +392,7 @@ def run_single(
         train_env_params=env_params,
         test_env_params=test_env_params,
         ObserverCls=craftax_observer.Observer,
-        vmap_env=False,
+        vmap_env=vmap_env,
       )
     elif config['ALG'] in ['dyna']:
       train_fn = dyna_craftax.make_train(
@@ -365,7 +406,21 @@ def run_single(
         train_env_params=env_params,
         test_env_params=test_env_params,
         ObserverCls=craftax_observer.Observer,
-        vmap_env=False,
+        vmap_env=vmap_env,
+      )
+    elif config['ALG'] == 'alphazero':
+      train_fn = alphazero_craftax.make_train(
+          config=config,
+          env=vec_env,
+          model_env=env,
+          make_logger=partial(
+              make_logger,
+              learner_log_extra=alphazero_craftax.learner_log_extra
+          ),
+          train_env_params=env_params,
+          test_env_params=test_env_params,
+          ObserverCls=craftax_observer.Observer,
+          vmap_env=vmap_env,
       )
     elif config['ALG'] in ['preplay']:
       train_fn = multitask_preplay_craftax_v2.make_train(
@@ -379,7 +434,7 @@ def run_single(
         train_env_params=env_params,
         test_env_params=test_env_params,
         ObserverCls=craftax_observer.Observer,
-        vmap_env=False,
+        vmap_env=vmap_env,
       )
     elif config['ALG'] == 'pqn':
       constructor = get_pqn_fns(config)
@@ -394,7 +449,7 @@ def run_single(
         train_env_params=env_params,
         test_env_params=test_env_params,
         ObserverCls=craftax_observer.Observer,
-        vmap_env=False,
+        vmap_env=vmap_env,
       )
     elif config['ALG'] == 'usfa':
       train_fn = vbb.make_train(
@@ -409,26 +464,11 @@ def run_single(
         train_env_params=env_params,
         test_env_params=test_env_params,
         ObserverCls=craftax_observer.Observer,
-        vmap_env=False,
-      )
-    elif config['ALG'] == 'alphazero':
-      import alphazero_craftax
-      train_fn = alphazero_craftax.make_train(
-        config=config,
-        env=vec_env,
-        model_env=env,
-        make_logger=partial(
-            make_logger,
-            learner_log_extra=alphazero_craftax.learner_log_extra
-        ),
-        train_env_params=env_params,
-        test_env_params=test_env_params,
-        ObserverCls=craftax_observer.Observer,
-        vmap_env=False,
+        vmap_env=vmap_env,
       )
     else:
       raise NotImplementedError(config['ALG'])
-    
+
     start_time = time.time()
     train_vjit = jax.jit(jax.vmap(train_fn))
 
@@ -471,10 +511,9 @@ def sweep(search: str = ''):
         },
         'parameters': {
             #"ENV": {'values': ['craftax']},
-            "SEED": {'values': list(range(1,3))},
+            "SEED": {'values': list(range(1,2))},
             "NUM_ENV_SEEDS": {'values': [0]},
-            #"USE_PRECONDITION": {'values': [100., 10., 1.0, .1, .01, .001]},
-            "USE_PRECONDITION": {'values': [True]},
+            "USE_PRECONDITION": {'values': [False, True]},
         },
         'overrides': ['alg=ql', 'rlenv=craftax-1m', 'user=wilka'],
         'group': 'ql-13',
@@ -488,7 +527,7 @@ def sweep(search: str = ''):
         'parameters': {
             "ALG": {'values': ['qlearning_sf_aux']},
             #"ENV": {'values': ['craftax']},
-            "SEED": {'values': list(range(1,3))},
+            "SEED": {'values': list(range(1,2))},
             "NUM_ENV_SEEDS": {'values': [0]},
             "USE_PRECONDITION": {'values': [True, False]},
             #"AUX_COEFF": {'values': [1.0, .1, .01, .001]},
@@ -504,12 +543,8 @@ def sweep(search: str = ''):
         },
         'parameters': {
             "ALG": {'values': ['dyna']},
-            "SEED": {'values': list(range(1,3))},
+            "SEED": {'values': list(range(1,2))},
             "NUM_ENV_SEEDS": {'values': [0]},
-            "WINDOW_SIZE": {'values': [40]},
-            "MLP_LAYERS": {'values': [0, 1]},
-            "EPSILON_ANNEAL_TIME": {'values': [5e5, 2.5e5]},
-            "FIXED_EPSILON": {'values': [0, 1, 2]},
         },
         'overrides': ['alg=dyna', 'rlenv=craftax-1m', 'user=wilka'],
         'group': 'dyna-12-search',
@@ -524,12 +559,8 @@ def sweep(search: str = ''):
           "ALG": {'values': ['preplay']},
           "SEED": {'values': list(range(1,2))},
           "NUM_ENV_SEEDS": {'values': [0]},
-          "USE_PRECONDITION": {'values': [True]},
-          "WINDOW_SIZE": {'values': [20, 25, 30, 35, 40]},
-          "OFFTASK_COEFF": {'values': [1.0, .1]},
-          "NUM_OFFTASK_GOALS": {'values': [2, 5]},
-          "NUM_ACH_LAYERS": {'values': [0, 3]},
-          "SIM_EPSILON_SETTING": {'values': [1, 2, 3]},
+          "WINDOW_SIZE": {'values': [20, 30, 40]},
+          "SIMULATION_LENGTH": {'values': [10, 15, 20]},
       },
       'overrides': ['alg=preplay', 'rlenv=craftax-1m', 'user=wilka'],
       'group': 'preplay-5-search',
