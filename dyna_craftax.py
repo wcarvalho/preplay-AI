@@ -84,6 +84,27 @@ def concat_start_sims(start, simulations):
     return jax.tree.map(concat_, start, simulations)
 
 
+def is_truncated(timestep):
+  non_terminal = timestep.discount
+  # either termination or truncation
+  is_last = make_float(timestep.last())
+
+  # truncated is discount=1 on AND is last
+  truncated = (non_terminal+is_last) > 1
+  return make_float(1-truncated)
+
+def simulation_finished_mask(initial_mask, next_timesteps):
+  # get mask
+  non_terminal = next_timesteps.discount[1:]
+  # either termination or truncation
+  is_last_t = make_float(next_timesteps.last()[1:])
+
+  # time-step of termination and everything afterwards is masked out
+  term_cumsum_t = jnp.cumsum(is_last_t, 0)
+  loss_mask_t = make_float((term_cumsum_t + non_terminal) < 2)
+  return concat_start_sims(initial_mask, loss_mask_t)
+
+
 def make_optimizer(config: dict) -> optax.GradientTransformation:
   num_updates = int(config["NUM_UPDATES"] + config.get("NUM_EXTRA_REPLAY", 0))
 
@@ -406,15 +427,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
     ##################
     ## Q-learning loss on batch of data
     ##################
-
-    # prepare data
-    non_terminal = data.timestep.discount
-    # either termination or truncation
-    is_last = make_float(data.timestep.last())
-
-    # truncated is discount on AND is last
-    truncated = (non_terminal+is_last) > 1
-    loss_mask = make_float(1-truncated)
+    loss_mask = is_truncated(data.timestep)
 
     all_metrics = {}
     all_log_info = {
@@ -428,8 +441,8 @@ class DynaLossFn(vbb.RecurrentLossFn):
             target_preds=target_preds,
             actions=data.action,
             rewards=data.reward,
-            is_last=is_last,
-            non_terminal=non_terminal,
+            is_last=make_float(data.timestep.last()),
+            non_terminal=data.timestep.discount,
             loss_mask=loss_mask,
             )
         # first label online loss with online
@@ -462,12 +475,13 @@ class DynaLossFn(vbb.RecurrentLossFn):
             target_params=target_params)
 
         # vmap over batch
-        dyna_loss_fn = jax.vmap(dyna_loss_fn, (1, 1, 1, 1, 0), 0)
+        dyna_loss_fn = jax.vmap(dyna_loss_fn, (1, 1, 1, 1, 1, 0), 0)
         _, dyna_batch_loss, dyna_metrics, dyna_log_info = dyna_loss_fn(
                     x_t,
                     data.action,
                     h_tm1_online,
                     h_tm1_target,
+                    loss_mask,
                     jax.random.split(key_grad, B),
                 )
         batch_loss += self.dyna_coeff*dyna_batch_loss
@@ -489,6 +503,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
     actions: jax.Array,
     h_online: jax.Array,
     h_target: jax.Array,
+    loss_mask: jax.Array,
     rng: jax.random.PRNGKey,
     params,
     target_params,
@@ -521,8 +536,9 @@ class DynaLossFn(vbb.RecurrentLossFn):
     timesteps = jax.tree.map(roll, timesteps)
     h_online = jax.tree.map(roll, h_online)
     h_target = jax.tree.map(roll, h_target)
+    loss_mask = jax.tree.map(roll, loss_mask)
 
-    def dyna_loss_fn_(t, a, h_on, h_tar, key):
+    def dyna_loss_fn_(t, a, h_on, h_tar, l_mask, key):
       """
 
       Args:
@@ -546,6 +562,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
       all_but_last = lambda y: jax.tree.map(lambda x: x[:-1], y)
       all_t = concat_start_sims(all_but_last(t), next_t)
       all_a = concat_start_sims(all_but_last(a), sim_outputs_t.actions)
+
 
       # NOTE: we're recomputing RNN but easier to read this way...
       # TODO: reuse RNN online param computations for speed (probably not worth it)
@@ -575,13 +592,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
           q_fn=self.network.reg_q_fn,
       )
 
-      non_terminal = all_t.discount
-      # either termination or truncation
-      is_last_t = make_float(all_t.last())
-
-      # time-step of termination and everything afterwards is masked out
-      term_cumsum_t = jnp.cumsum(is_last_t, 0)
-      loss_mask_t = make_float((term_cumsum_t + non_terminal) < 2)
+      all_t_mask = simulation_finished_mask(l_mask, next_t)
 
       batch_td_error, batch_loss_mean, metrics, log_info = self.loss_fn(
           timestep=all_t,
@@ -589,9 +600,9 @@ class DynaLossFn(vbb.RecurrentLossFn):
           target_preds=target_preds,
           actions=all_a,
           rewards=all_t.reward,
-          is_last=is_last_t,
+          is_last=make_float(all_t.last()),
           non_terminal=all_t.discount,
-          loss_mask=loss_mask_t,
+          loss_mask=all_t_mask,
       )
       return batch_td_error, batch_loss_mean, metrics, log_info
 
@@ -599,11 +610,12 @@ class DynaLossFn(vbb.RecurrentLossFn):
     # TD ERROR: [window_size, T + sim_length, num_sim]
     # Loss: [window_size, num_sim, ...]
     batch_td_error, batch_loss_mean, metrics, log_info = jax.vmap(
-      dyna_loss_fn_, (1, 1, 1, 1, 0), 0)(
+      dyna_loss_fn_, (1, 1, 1, 1, 1, 0), 0)(
         timesteps,       # [T, W, ...]
         actions,         # [T, W]
         h_online,        # [T, W, D]
         h_target,        # [T, W, D]
+        loss_mask,       # [T, W]
         jax.random.split(rng, self.window_size),            # [W, 2]
       )
 
@@ -779,7 +791,6 @@ class DynaAgentEnvModel(nn.Module):
     observation_encoder: nn.Module
     rnn: vbb.ScannedRNN
     q_fn: nn.Module
-    q_fn_subtask: nn.Module
     env: environment.Environment
     env_params: environment.EnvParams
 
@@ -790,10 +801,6 @@ class DynaAgentEnvModel(nn.Module):
         batch_dims = (x.reward.shape[0],)
         rnn_state = self.initialize_carry(rng, batch_dims)
         predictions, rnn_state = self.__call__(rnn_state, x, rng)
-        #dummy_action = jnp.zeros(batch_dims, dtype=jnp.int32)
-        #self.apply_model(predictions.state, dummy_action, rng)
-        task = jnp.zeros_like(x.observation.achievable)
-        self.subtask_q_fn(rnn_state[1], task)
 
     def initialize_carry(self, *args, **kwargs):
         """Initializes the RNN state."""
@@ -817,10 +824,6 @@ class DynaAgentEnvModel(nn.Module):
         # just so both have same signature
         del task
         return self.q_fn(rnn_out)
-
-    def subtask_q_fn(self, rnn_out, task):
-        inp = jnp.concatenate((rnn_out, task), axis=-1)
-        return self.q_fn_subtask(inp)
 
     def unroll(self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey) -> Tuple[Predictions, RnnState]:
         # rnn_state: [B]
@@ -894,17 +897,10 @@ def make_agent(
           norm_type=config.get('NORM_TYPE', 'none'),
           structured_inputs=config.get('STRUCTURED_INPUTS', False),
           use_bias=config.get('USE_BIAS', True),
+          action_dim=env.action_space(env_params).n,
           ),
         rnn=rnn,
         q_fn=MLP(
-            hidden_dim=config.get('Q_HIDDEN_DIM', 512),
-            num_layers=config.get('NUM_Q_LAYERS', 1),
-            out_dim=env.action_space(env_params).n,
-            activation=config['ACTIVATION'],
-            activate_final=False,
-            use_bias=config.get('USE_BIAS', True),
-            ),
-        q_fn_subtask=MLP(
             hidden_dim=config.get('Q_HIDDEN_DIM', 512),
             num_layers=config.get('NUM_Q_LAYERS', 1),
             out_dim=env.action_space(env_params).n,

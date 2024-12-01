@@ -2,7 +2,7 @@
 from jaxneurorl.agents.alphazero import *
 from networks import CraftaxObsEncoder
 
-class AlphaZeroAgent(nn.Module):
+class CraftaxAlphaZeroAgent(nn.Module):
 
     action_dim: int
 
@@ -116,7 +116,7 @@ def make_craftax_agent(
         ) -> Tuple[nn.Module, Params, vbb.AgentResetFn]:
 
 
-    agent = AlphaZeroAgent(
+    agent = CraftaxAlphaZeroAgent(
         action_dim=env.action_space(env_params).n,
         observation_encoder=CraftaxObsEncoder(
           hidden_dim=config["MLP_HIDDEN_DIM"],
@@ -160,18 +160,12 @@ def make_train(**kwargs):
       num_bins=num_bins,
       min_value=-max_value)
 
-  num_train_simulations = config.get('NUM_SIMULATIONS', 4)
+  num_train_simulations = config.get('NUM_SIMULATIONS', 2)
 
   mcts_policy = functools.partial(
       mctx.gumbel_muzero_policy,
       max_depth=config.get('MAX_SIM_DEPTH', None),
       num_simulations=num_train_simulations,
-      gumbel_scale=config.get('GUMBEL_SCALE', 1.0))
-  eval_mcts_policy = functools.partial(
-      mctx.gumbel_muzero_policy,
-      max_depth=config.get('MAX_SIM_DEPTH', None),
-      num_simulations=config.get(
-        'NUM_EVAL_SIMULATIONS', num_train_simulations),
       gumbel_scale=config.get('GUMBEL_SCALE', 1.0))
 
   return vbb.make_train(
@@ -186,6 +180,6 @@ def make_train(**kwargs):
       make_actor,
       discretizer=discretizer,
       mcts_policy=mcts_policy,
-      eval_mcts_policy=eval_mcts_policy),
+      eval_mcts_policy=mcts_policy),
     **kwargs,
 )

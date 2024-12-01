@@ -68,12 +68,14 @@ class Observer:
         period=1,
     )
 
-  def init(self, *args, **kwargs):
+  def init(self, *args, example_timestep, example_action, ** kwargs):
 
+    shape = (self.log_period,) + example_action.shape
     observer_state = BasicObserverState(
-      episode_returns=jnp.zeros((self.log_period), dtype=jnp.float32),
-      episode_lengths=jnp.zeros((self.log_period), dtype=jnp.int32),
-      finished=jnp.zeros((self.log_period), dtype=jnp.int32),
+      episode_returns=jnp.zeros(shape, dtype=jnp.float32),
+      episode_lengths=jnp.zeros(shape, dtype=jnp.int32),
+      finished=jnp.zeros(shape, dtype=jnp.int32),
+      idx=jnp.zeros(example_action.shape, dtype=jnp.int32),
     )
     return observer_state
 
@@ -105,33 +107,17 @@ class Observer:
         next_timestep (TimeStep): _description_
     """
     del agent_state
-
-    # only use first env
-    first_next_timestep = get_first(next_timestep)
-
-    def advance_episode(os):
-      # beginning new episode
-      next_idx = os.idx + 1
-      return os.replace(
-        idx=next_idx,
-        finished=os.finished.at[os.idx].add(1),
-        episode_lengths=os.episode_lengths.at[next_idx].add(1),
-        episode_returns=os.episode_returns.at[next_idx].add(first_next_timestep.reward),
-        )
-
-    def update_episode(os):
-      # within same episode
-      return os.replace(
-        episode_lengths=os.episode_lengths.at[os.idx].add(1),
-        episode_returns=os.episode_returns.at[os.idx].add(first_next_timestep.reward),
-
-      )
-
-    observer_state = jax.lax.cond(
-      first_next_timestep.first(),
-      advance_episode,
-      update_episode,
-      observer_state
-    )
+    # NOTE: THIS IS WRONG!!!!!! NEED TO RETHINK THROUGH THE LOGIC!!!
+    return observer_state
+    #next_timestep_last = (next_timestep.last()).astype(jnp.int32)
+    #idx = observer_state.idx
+    #next_idx = observer_state.idx + next_timestep_last
+    #import pdb; pdb.set_trace()
+    #observer_state = observer_state.replace(
+    #    idx=next_idx,
+    #    finished=observer_state.finished.at[idx].add(next_timestep_last),
+    #    episode_lengths=observer_state.episode_lengths.at[idx].add(1),
+    #    episode_returns=observer_state.episode_returns.at[idx].add(next_timestep.reward),
+    #)
 
     return observer_state

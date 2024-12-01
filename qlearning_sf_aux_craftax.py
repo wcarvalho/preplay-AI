@@ -159,6 +159,8 @@ class R2D2LossFn(vbb.RecurrentLossFn):
         '1.reward': rewards[1:].mean(),
         '1.reward_min': rewards[1:].min(),
         '1.reward_max': rewards[1:].max(),
+        'z.q_max': self.extract_q(online_preds).max(),
+        'z.q_min': self.extract_q(online_preds).min(),
         'z.q_mean': self.extract_q(online_preds).mean(),
         'z.q_var': self.extract_q(online_preds).var(),
         }
@@ -247,6 +249,7 @@ def make_craftax_agent(
           norm_type=config.get('NORM_TYPE', 'none'),
           structured_inputs=config.get('STRUCTURED_INPUTS', False),
           use_bias=config.get('USE_BIAS', True),
+          action_dim=env.action_space(env_params).n,
           ),
         rnn=rnn,
         q_fn=MLP(
@@ -257,7 +260,7 @@ def make_craftax_agent(
            ),
         achieve_fn=MLP(
            hidden_dim=config.get('Q_HIDDEN_DIM', 512),
-           num_layers=config.get('NUM_Q_LAYERS', 2),
+           num_layers=config.get('NUM_AUX_LAYERS', 0),
            out_dim=n_achieve,
            use_bias=config.get('USE_BIAS', True),
            )
