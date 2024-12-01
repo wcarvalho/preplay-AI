@@ -435,7 +435,7 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
             loss_mask=loss_mask,
             )
         # first label online loss with online
-        all_metrics.update({f'online/{k}': v for k, v in metrics.items()})
+        all_metrics.update({f'{k}/online': v for k, v in metrics.items()})
         all_log_info['online'] = log_info
         td_error = jnp.concatenate((td_error, jnp.zeros(B)[None]), 0)
         td_error = jnp.abs(td_error)
