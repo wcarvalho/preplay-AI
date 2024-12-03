@@ -264,7 +264,7 @@ def make_craftax_agent(
 
     return agent, network_params, reset_fn
 
-from craftax.craftax.constants import Action, BLOCK_PIXEL_SIZE_IMG
+from craftax.craftax.constants import Action, BLOCK_PIXEL_SIZE_IMG, Achievement
 from craftax.craftax.renderer import render_craftax_pixels
 from visualizer import plot_frames
 
@@ -364,6 +364,12 @@ def learner_log_extra(
             title = f't={i}\n'
             title += f'{actions_taken[i]}\n'
             title += f'r={timesteps.reward[i]}, $\\gamma={timesteps.discount[i]}$'
+
+            achieved = timesteps.observation.achievements[i]
+            if achieved.sum() > 1e-5:
+                achievement = Achievement(
+                    achieved.argmax()).name
+                title += f'{achievement}'
             return title
 
         fig = plot_frames(

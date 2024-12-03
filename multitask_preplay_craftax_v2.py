@@ -522,7 +522,10 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
         h_tm1 (jax.Array): [D], rnn-state at t-1
         h_tm1_target (jax.Array): [D], rnn-state at t-1 from target network
     """
-    roll = partial(rolling_window, size=self.window_size)
+    window_size = self.window_size if isinstance(self.window_size, int) else int(self.window_size*len(actions))
+    window_size = min(window_size, len(actions))
+
+    roll = partial(rolling_window, size=window_size)
     simulate = partial(simulate_n_trajectories,
         network=self.network,
         params=params,
@@ -730,7 +733,7 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
         h_online,        # [T', W, D]
         h_target,        # [T', W, D]
         loss_mask,       # [T', W]
-        jax.random.split(rng, self.window_size),            # [W, 2]
+        jax.random.split(rng, window_size),            # [W, 2]
       )
 
     # figuring out how to incorporate windows into TD error is annoying so punting
@@ -751,10 +754,10 @@ def make_loss_fn_class(config, **kwargs) -> MultitaskPreplayLossFn:
     simulation_length=config.get('SIMULATION_LENGTH', 5),
     importance_sampling_exponent=config.get('IMPORTANCE_SAMPLING_EXPONENT', 0.6),
     max_priority_weight=config.get('MAX_PRIORITY_WEIGHT', 0.9),
-    offtask_coeff=config.get('OFFTASK_COEFF', 1.0),
-    num_offtask_goals=config.get('NUM_OFFTASK_GOALS', 10),
     step_cost=config.get("STEP_COST", 0.),
     window_size=config.get('WINDOW_SIZE', 20),
+    offtask_coeff=config.get('OFFTASK_COEFF', 1.0),
+    num_offtask_goals=config.get('NUM_OFFTASK_GOALS', 5),
     **kwargs
     )
 
@@ -868,10 +871,17 @@ def learner_log_extra(
         goal_idx = goal.argmax(-1)
         achievement = Achievement(goal_idx).name
         def panel_title_fn(timesteps, i):
-            title = f'{achievement}. Pos: {int(any_achievable)}'
+            title = f'{achievement}. Pos: {int(any_achievable)}\n'
             title += f't={i}\n'
             title += f'{actions_taken[i]}\n'
             title += f'r={timesteps.reward[i]}, $\\gamma={timesteps.discount[i]}$'
+
+            achieved = timesteps.observation.achievements[i]
+            if achieved.sum() > 1e-5:
+                achievement = Achievement(
+                    achieved.argmax()).name
+                title += f'{achievement}'
+
             return title
 
         fig = plot_frames(

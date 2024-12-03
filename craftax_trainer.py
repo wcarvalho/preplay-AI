@@ -513,10 +513,13 @@ def sweep(search: str = ''):
             #"ENV": {'values': ['craftax']},
             "SEED": {'values': list(range(1,2))},
             "NUM_ENV_SEEDS": {'values': [0]},
-            "USE_PRECONDITION": {'values': [False, True]},
+            "FIXED_EPSILON": {'values': [0, 1, 2]},
+            "IMPORTANCE_SAMPLING_EXPONENT": {'values': [0, .6]},
+            "MAX_PRIORITY_WEIGHT": {'values': [0, .9]},
+            #"FIXED_EPSILON": {'values': [0, 1, 2]},
         },
-        'overrides': ['alg=ql', 'rlenv=craftax-1m', 'user=wilka'],
-        'group': 'ql-13',
+        'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
+        'group': 'ql-15-epsilon',
     }
   elif search == 'ql_sf':
     sweep_config = {
@@ -530,10 +533,10 @@ def sweep(search: str = ''):
             "SEED": {'values': list(range(1,2))},
             "NUM_ENV_SEEDS": {'values': [0]},
             "USE_PRECONDITION": {'values': [True, False]},
-            #"AUX_COEFF": {'values': [1.0, .1, .01, .001]},
+            "AUX_COEFF": {'values': [1e-3]},
         },
-        'overrides': ['alg=ql', 'rlenv=craftax-1m', 'user=wilka'],
-        'group': 'ql-sf-10',
+        'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
+        'group': 'ql-sf-11',
     }
   elif search == 'dyna':
     sweep_config = {
@@ -545,9 +548,11 @@ def sweep(search: str = ''):
             "ALG": {'values': ['dyna']},
             "SEED": {'values': list(range(1,2))},
             "NUM_ENV_SEEDS": {'values': [0]},
+            "SIMULATION_LENGTH": {'values': [10, 15, 20]},
+            "TOTAL_BATCH_SIZE": {'values': [1280]},
         },
-        'overrides': ['alg=dyna', 'rlenv=craftax-1m', 'user=wilka'],
-        'group': 'dyna-12-search',
+        'overrides': ['alg=dyna', 'rlenv=craftax-1m-dyna', 'user=wilka'],
+        'group': 'dyna-14-sim-length',
     }
   elif search == 'preplay':
     sweep_config = {
@@ -559,11 +564,12 @@ def sweep(search: str = ''):
           "ALG": {'values': ['preplay']},
           "SEED": {'values': list(range(1,2))},
           "NUM_ENV_SEEDS": {'values': [0]},
-          "WINDOW_SIZE": {'values': [20, 30, 40]},
+          "WINDOW_SIZE": {'values': [.5 , .75, 1.]},
           "SIMULATION_LENGTH": {'values': [10, 15, 20]},
+          "TOTAL_BATCH_SIZE": {'values': [640, 960, 1280]},
       },
-      'overrides': ['alg=preplay', 'rlenv=craftax-1m', 'user=wilka'],
-      'group': 'preplay-5-search',
+      'overrides': ['alg=preplay', 'rlenv=craftax-1m-dyna', 'user=wilka'],
+      'group': 'preplay-6-search',
     }
 
   elif search == 'pqn':
@@ -607,8 +613,6 @@ def sweep(search: str = ''):
         'parameters': {
             "NUM_ENV_SEEDS": {'values': [0]},
             "NUM_SIMULATIONS": {'values': [2]},
-            "NUM_MLP_LAYERS": {'values': [1]},
-            "AGENT_RNN_DIM": {'values': [256, 512]},
         },
         'overrides': ['alg=alphazero', 'rlenv=craftax-1m', 'user=wilka'],
         'group': 'alphazero-2',
