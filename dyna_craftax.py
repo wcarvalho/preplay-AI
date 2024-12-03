@@ -45,6 +45,7 @@ make_actor = base_agent.make_actor
 RnnState = jax.Array
 SimPolicy = Callable[[Qvalues, RngKey], int]
 
+MAX_REWARD = 8.0
 
 @struct.dataclass
 class AgentState:
@@ -440,7 +441,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
             online_preds=online_preds,
             target_preds=target_preds,
             actions=data.action,
-            rewards=data.reward,
+            rewards=data.reward/MAX_REWARD,
             is_last=make_float(data.timestep.last()),
             non_terminal=data.timestep.discount,
             loss_mask=loss_mask,

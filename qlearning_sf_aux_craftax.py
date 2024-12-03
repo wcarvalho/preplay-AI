@@ -24,6 +24,7 @@ from jaxneurorl.agents.qlearning import *
 from jaxneurorl import losses
 from networks import CraftaxObsEncoder
 
+MAX_REWARD = 8.0
 
 Agent = nn.Module
 Params = flax.core.FrozenDict
@@ -116,7 +117,7 @@ class R2D2LossFn(vbb.RecurrentLossFn):
     # Preprocess discounts & rewards.
     discounts = float(data.discount)*self.discount
     lambda_ = jnp.ones_like(data.discount)*self.lambda_
-    rewards = float(data.reward)
+    rewards = float(data.reward)/MAX_REWARD
     rewards = rewards - self.step_cost
     is_last = float(data.is_last)
 
