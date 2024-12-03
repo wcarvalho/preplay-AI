@@ -647,6 +647,7 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
 
       offtask_log_info['goal'] = g
       offtask_log_info['any_achievable'] = any_achievable
+      offtask_log_info['offtask_reward'] = offtask_reward
       #########################################
       # run RNN + main Q-network over simulation data
       #########################################
@@ -805,6 +806,7 @@ def learner_log_extra(
         q_target: np.array,
         goal: np.array,
         any_achievable: np.array,
+        offtask_reward: np.array,
         ):
         # Extract the relevant data
         # only use data from batch dim = 0
@@ -825,7 +827,8 @@ def learner_log_extra(
             ax.set_xlabel('Time')
             ax.grid(True)
             ax.set_xticks(range(0, len(rewards), 1))
-        ax1.plot(rewards, label='Rewards')
+        ax1.plot(offtask_reward, label='Subtask Reward')
+        ax1.plot(rewards, label='Main task reward')
         ax1.plot(q_values_taken, label='Q-Values')
         ax1.plot(q_target, label='Q-Targets')
         ax1.set_title('Rewards and Q-Values')
@@ -877,20 +880,23 @@ def learner_log_extra(
 
         def index(t, idx): return jax.tree.map(lambda x: x[idx], t)
 
-        goal_idx = goal.argmax(-1)
-        achievement = Achievement(goal_idx).name
         def panel_title_fn(timesteps, i):
-            title = f'{achievement}. Pos: {int(any_achievable)}\n'
-            title += f't={i}\n'
-            title += f'{actions_taken[i]}\n'
-            title += f'r={timesteps.reward[i]}, $\\gamma={timesteps.discount[i]}$'
+            goal_idx = goal.argmax(-1)
+            achievement = Achievement(goal_idx).name
+            title = f'{achievement}. Pos: {int(any_achievable)}'
+            title += f'\nt={i}'
+            title += f'\n{actions_taken[i]}'
+            if i >= len(timesteps.reward) - 1: return title
+            title += f'\nr={timesteps.reward[i+1]:.2f}, $\\gamma={timesteps.discount[i+1]}$'
 
-            achieved = timesteps.observation.achievements[i]
+            achieved = timesteps.observation.achievements[i+1]
             if achieved.sum() > 1e-5:
-                achievement = Achievement(
-                    achieved.argmax()).name
-                title += f'{achievement}'
-
+              achievement_idx = achieved.argmax()
+              try:
+                achievement = Achievement(achievement_idx).name
+                title += f'\n{achievement}'
+              except ValueError:
+                title += f'\nHealth?'
             return title
 
         fig = plot_frames(

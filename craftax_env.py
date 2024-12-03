@@ -696,7 +696,6 @@ def craftax_step(rng, state, action, params, static_params):
           (state.achievements.astype(int) - init_achievements.astype(int)).astype(jnp.float32),
           jnp.expand_dims(state.player_health - init_health, 0).astype(jnp.float32)
         ))
-    import ipdb; ipdb.set_trace()
     achievement_coefficients = jnp.concatenate(
         (ACHIEVEMENT_REWARD_MAP, jnp.array([0.1]))
     )
