@@ -514,12 +514,13 @@ def sweep(search: str = ''):
             "SEED": {'values': list(range(1,2))},
             "NUM_ENV_SEEDS": {'values': [0]},
             "FIXED_EPSILON": {'values': [0, 1, 2]},
+            "LR": {'values': [.001, .0003]},
             "IMPORTANCE_SAMPLING_EXPONENT": {'values': [0, .6]},
             "MAX_PRIORITY_WEIGHT": {'values': [0, .9]},
             #"FIXED_EPSILON": {'values': [0, 1, 2]},
         },
         'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'ql-15-epsilon',
+        'group': 'ql-16-epsilon',
     }
   elif search == 'ql_sf':
     sweep_config = {
@@ -537,6 +538,19 @@ def sweep(search: str = ''):
         },
         'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
         'group': 'ql-sf-11',
+    }
+  elif search == 'alphazero':
+    sweep_config = {
+        'metric': {
+            'name': 'evaluator_performance-0/0.score',
+            'goal': 'maximize',
+        },
+        'parameters': {
+            "NUM_ENV_SEEDS": {'values': [0]},
+            "NUM_SIMULATIONS": {'values': [2]},
+        },
+        'overrides': ['alg=alphazero', 'rlenv=craftax-1m-dyna', 'user=wilka'],
+        'group': 'alphazero-2',
     }
   elif search == 'dyna':
     sweep_config = {
@@ -603,19 +617,6 @@ def sweep(search: str = ''):
         },
         'overrides': ['alg=usfa', 'rlenv=craftax-1m', 'user=wilka'],
         'group': 'usfa-6',
-    }
-  elif search == 'alphazero':
-    sweep_config = {
-        'metric': {
-            'name': 'evaluator_performance-0/0.score',
-            'goal': 'maximize',
-        },
-        'parameters': {
-            "NUM_ENV_SEEDS": {'values': [0]},
-            "NUM_SIMULATIONS": {'values': [2]},
-        },
-        'overrides': ['alg=alphazero', 'rlenv=craftax-1m', 'user=wilka'],
-        'group': 'alphazero-2',
     }
   else:
     raise NotImplementedError(search)

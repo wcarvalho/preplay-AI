@@ -20,6 +20,8 @@ from craftax.craftax.world_gen.world_gen import generate_world, generate_smoothw
 from craftax.craftax.game_logic import *
 from craftax.craftax.util.game_logic_utils import *
 
+MAX_ACHIEVEMENT = max([i.value for i in Achievement.__members__.values()])
+
 @struct.dataclass
 class EnvParams:
     max_timesteps: int = 100000
@@ -694,6 +696,7 @@ def craftax_step(rng, state, action, params, static_params):
           (state.achievements.astype(int) - init_achievements.astype(int)).astype(jnp.float32),
           jnp.expand_dims(state.player_health - init_health, 0).astype(jnp.float32)
         ))
+    import ipdb; ipdb.set_trace()
     achievement_coefficients = jnp.concatenate(
         (ACHIEVEMENT_REWARD_MAP, jnp.array([0.1]))
     )

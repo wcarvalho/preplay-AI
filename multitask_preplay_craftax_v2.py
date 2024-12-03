@@ -545,7 +545,7 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
     h_target = jax.tree.map(roll, h_target)
     loss_mask = jax.tree.map(roll, loss_mask)
 
-    def dyna_loss_fn_(t, a, h_on, h_tar, l_mask, any_achievable, g, key):
+    def dyna_loss_fn_(t, a, h_on, h_tar, l_mask, achievable, any_achievable, g, key):
       """
 
       Args:
@@ -638,6 +638,13 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
       # only use loss if any achievable goal
       offtask_batch_loss_mean = offtask_batch_loss_mean * any_achievable[None]
       offtask_batch_td_error = offtask_batch_td_error * any_achievable[None]
+
+      # Compute normalized entropy of achievable probability mass function
+      entropy = -jnp.sum(achievable * jnp.log(achievable + 1e-5)) / jnp.log(achievable.shape[-1])
+      #offtask_metrics['1.achievable'] = achievable
+      offtask_metrics['1.achievable_entropy'] = entropy
+      offtask_metrics['1.any_achievable'] = any_achievable
+
       offtask_log_info['goal'] = g
       offtask_log_info['any_achievable'] = any_achievable
       #########################################
@@ -718,8 +725,9 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
 
       return jax.vmap(
          dyna_loss_fn_,
-         in_axes=(None, None, None, None, None, None, 0, 0)
+         in_axes=(None, None, None, None, None, None, None, 0, 0)
          )(t, a, h_on, h_tar, l_mask,
+           achievable,
            any_achievable,
            goals,
            jax.random.split(key, self.num_offtask_goals))
