@@ -452,7 +452,9 @@ def get_possible_achievements(state: EnvState, use_precondition: bool = False) -
     return possible_achievements
 
 
-def print_possible_achievements(possible_achievements: jnp.ndarray) -> None:
+def print_possible_achievements(
+        possible_achievements: jnp.ndarray,
+        return_list: bool = False) -> None:
     """
     Prints a readable list of currently achievable achievements.
     
@@ -468,7 +470,8 @@ def print_possible_achievements(possible_achievements: jnp.ndarray) -> None:
             # Convert enum name from COLLECT_WOOD to "Collect Wood"
             achievement_name = achievement.name.replace('_', ' ').title()
             achievable.append(achievement_name)
-
+    if return_list:
+        return achievable
     if achievable:
         print("\nCurrently achievable:")
         for name in sorted(achievable):
@@ -697,7 +700,6 @@ def craftax_step(rng, state, action, params, static_params):
           (state.achievements.astype(int) - init_achievements.astype(int)).astype(jnp.float32),
           jnp.expand_dims(state.player_health - init_health, 0).astype(jnp.float32)
         ))
-    import ipdb; ipdb.set_trace()
     achievement_coefficients = jnp.concatenate(
         (ACHIEVEMENT_REWARD_MAP, jnp.array([0.1]))
     )

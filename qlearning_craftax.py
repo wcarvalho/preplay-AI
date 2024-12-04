@@ -359,18 +359,20 @@ def learner_log_extra(
         # plot
         # ------------
         actions_taken = [Action(a).name for a in actions]
-
-        def index(t, idx): return jax.tree_map(lambda x: x[idx], t)
         def panel_title_fn(timesteps, i):
-            title = f't={i}\n'
-            title += f'{actions_taken[i]}\n'
-            title += f'r={timesteps.reward[i]}, $\\gamma={timesteps.discount[i]}$'
+            title = f't={i}'
+            title += f'\n{actions_taken[i]}'
+            if i >= len(timesteps.reward) - 1: return title
+            title += f'\nr={timesteps.reward[i+1]:.2f}, $\\gamma={timesteps.discount[i+1]}$'
 
-            achieved = timesteps.observation.achievements[i]
+            achieved = timesteps.observation.achievements[i+1]
             if achieved.sum() > 1e-5:
-                achievement = Achievement(
-                    achieved.argmax()).name
-                title += f'{achievement}'
+              achievement_idx = achieved.argmax()
+              try:
+                achievement = Achievement(achievement_idx).name
+                title += f'\n{achievement}'
+              except ValueError:
+                title += f'\nHealth?'
             return title
 
         fig = plot_frames(
