@@ -21,6 +21,7 @@ from craftax.craftax.game_logic import *
 from craftax.craftax.util.game_logic_utils import *
 
 MAX_ACHIEVEMENT = max([i.value for i in Achievement.__members__.values()])
+assert MAX_ACHIEVEMENT + 1 == len(ACHIEVEMENT_REWARD_MAP), 'achievements are not contiguous'
 
 @struct.dataclass
 class EnvParams:
