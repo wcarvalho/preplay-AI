@@ -451,7 +451,9 @@ def get_possible_achievements(state: EnvState, use_precondition: bool = False) -
     return possible_achievements
 
 
-def print_possible_achievements(possible_achievements: jnp.ndarray) -> None:
+def print_possible_achievements(
+        possible_achievements: jnp.ndarray,
+        return_list: bool = False) -> None:
     """
     Prints a readable list of currently achievable achievements.
     
@@ -467,7 +469,8 @@ def print_possible_achievements(possible_achievements: jnp.ndarray) -> None:
             # Convert enum name from COLLECT_WOOD to "Collect Wood"
             achievement_name = achievement.name.replace('_', ' ').title()
             achievable.append(achievement_name)
-
+    if return_list:
+        return achievable
     if achievable:
         print("\nCurrently achievable:")
         for name in sorted(achievable):

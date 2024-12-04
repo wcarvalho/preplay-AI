@@ -26,6 +26,8 @@ matplotlib.use('Agg')
 
 import wandb
 
+import craftax_env
+
 from jaxneurorl import losses
 from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
@@ -158,9 +160,10 @@ def simulate_n_trajectories(
         network: nn.Module,
         params: Params,
         policy_fn: SimPolicy = None,
-        q_fn: Callable = None,
         num_steps: int = 5,
         num_simulations: int = 5,
+        use_offtask_policy: jax.Array = None,
+        terminate_offtask: bool = False,
     ):
     """
 
@@ -183,17 +186,43 @@ def simulate_n_trajectories(
         _type_: _description_
     """
 
+    alpha = use_offtask_policy.astype(jnp.float32)
+
+    def get_q_vals(beta, lstm_out, w):
+        """
+        Q-values that switch between subtask and regular Q-values.
+        alpha is a global parameter, beta is updated per timestep.
+
+        If alpha=1, use off-task Q-values, else use regular Q-values.
+        If beta=0, use subtask Q-values, else use regular Q-values.
+        beta can be interpeted as a termination parameter.
+
+        Q_subtask(s, a) = alpha*Q_subtask(s,a) + (1-alpha)*Q_regular(s,a)
+        Q(s, a) = (1 - beta)*Q_subtask(s, a) + beta*Q_regular(s, a)
+        """
+        beta = beta.astype(jnp.float32)
+
+        subtask_q = network.apply(params, lstm_out, w, method=network.subtask_q_fn)
+        reg_q = network.apply(params, lstm_out, w, method=network.reg_q_fn)
+
+        # use subtask_q if use_offtask_policy=1 else use reg_q
+        subtask_q = alpha*subtask_q + (1-alpha)*reg_q
+        q_vals = (1-beta)*subtask_q + beta*reg_q
+        return q_vals
+
     def initial_predictions(x, prior_h, w, rng_):
         # roll through RNN
         # get q-values
         lstm_state, lstm_out = network.apply(
             params, prior_h, x, rng_,
             method=network.apply_rnn)
+
+        beta = jnp.zeros((), dtype=jnp.int32)  # scalar
         preds = Predictions(
-            q_vals=network.apply(params, lstm_out, w, method=q_fn),
+            q_vals=get_q_vals(beta, lstm_out, w),
             state=lstm_state
         )
-        return x, lstm_state, preds
+        return x, beta, lstm_state, preds
 
 
     # by giving state as input and returning, will
@@ -203,7 +232,7 @@ def simulate_n_trajectories(
     # one for each simulation
     # [N, ...]
     # replace (x_t, task) with N-copies
-    x_t, h_t, preds_t = jax.vmap(
+    x_t, beta_t, h_t, preds_t = jax.vmap(
         initial_predictions,
         in_axes=(None, None, 0, 0),
         out_axes=0
@@ -216,7 +245,7 @@ def simulate_n_trajectories(
 
     def _single_model_step(carry, inputs):
         del inputs  # unused
-        (timestep, lstm_state, a, rng) = carry
+        (timestep, beta, lstm_state, a, rng) = carry
 
         ###########################
         # 1. use state + action to predict next state
@@ -227,7 +256,6 @@ def simulate_n_trajectories(
             params, timestep, a, rng_,
             method=network.apply_model)
 
-
         ###########################
         # 2. get actions at next state
         ###########################
@@ -235,13 +263,20 @@ def simulate_n_trajectories(
         next_lstm_state, next_rnn_out = network.apply(
             params, lstm_state, next_timestep, rng_,
             method=network.apply_rnn)
+        if terminate_offtask:
+          # as soon as have first success, terminate off-task by setting beta to 1
+          # beta will always be 1 afterwards switching to Q-fn
+          coeff = goal.astype(jnp.float32)
+          achievements = next_timestep.observation.achievements.astype(jnp.float32)
+          offtask_reward = (achievements * coeff).sum(-1)
+          beta = ((beta + offtask_reward) > 0).astype(jnp.int32) 
+
         next_preds = Predictions(
-            q_vals=network.apply(
-                params, next_rnn_out, goal, method=q_fn),
+            q_vals=jax.vmap(get_q_vals)(beta, next_rnn_out, goal),
             state=next_lstm_state
         )
         next_a = policy_fn(next_preds, rng_)
-        carry = (next_timestep, next_lstm_state, next_a, rng)
+        carry = (next_timestep, beta, next_lstm_state, next_a, rng)
         sim_output = SimulationOutput(
             predictions=next_preds,
             actions=next_a,
@@ -251,7 +286,7 @@ def simulate_n_trajectories(
     ################
     # get simulation ouputs
     ################
-    initial_carry = (x_t, h_t, a_t, rng)
+    initial_carry = (x_t, beta_t,h_t, a_t, rng)
     _, (next_timesteps, sim_outputs) = jax.lax.scan(
         f=_single_model_step,
         init=initial_carry,
@@ -329,7 +364,7 @@ def apply_rnn_and_q(
     return preds
 
 @struct.dataclass
-class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
+class DynaLossFn(vbb.RecurrentLossFn):
 
   """Loss function for multitask preplay.
 
@@ -345,6 +380,7 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
   importance_sampling_exponent: float = 0.6
   num_offtask_goals: int = 5
   offtask_coeff: float = 1.0
+  terminate_offtask: bool = False
 
   simulation_policy: SimPolicy = None
 
@@ -531,8 +567,8 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
         network=self.network,
         params=params,
         num_steps=self.simulation_length,
-        num_simulations=self.num_simulations,
         policy_fn=self.simulation_policy,
+        terminate_offtask=self.terminate_offtask,
         )
 
     # first do a rollowing window
@@ -545,7 +581,9 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
     h_target = jax.tree.map(roll, h_target)
     loss_mask = jax.tree.map(roll, loss_mask)
 
-    def dyna_loss_fn_(t, a, h_on, h_tar, l_mask, achievable, any_achievable, g, key):
+    def offtask_dyna_loss_fn_(
+          t, a, h_on, h_tar, l_mask,
+          achieve_poss, any_achievable, g, key):
       """
 
       Args:
@@ -561,7 +599,9 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
 
       # use same goal for all simulations
       # [G] --> [num_sims, G]
-      g = repeat(g, self.num_simulations)
+      num_simulations = 1
+      # TODO: remove this dummy num_simulations=1 dimension to keep code cleaner
+      g = repeat(g, num_simulations)
 
       #########################################
       # get simulations starting from final timestep in window
@@ -573,8 +613,9 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
           h_tm1=last(h_on),    # [D]
           x_t=last(t),         # [D, ...]
           rng=key_,
-          q_fn=self.network.subtask_q_fn,
-          goal=g,                                       # [num_sims, G]
+          goal=g,              # [num_sims, G]
+          use_offtask_policy=jnp.ones((1,)),
+          num_simulations=num_simulations,
         )
 
       #########################################
@@ -591,7 +632,7 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
       # TODO: reuse RNN online param computations for speed (probably not worth it)
       key, key_ = jax.random.split(key)
       h_tm1_online_repeated = jax.tree.map(lambda x: x[0], h_on)
-      h_tm1_online_repeated = repeat(h_tm1_online_repeated, self.num_simulations)
+      h_tm1_online_repeated = repeat(h_tm1_online_repeated, num_simulations)
       online_preds = apply_rnn_and_q(
           h_tm1=h_tm1_online_repeated,   # [num_sims, D]
           timesteps=all_t,               # [T', num_sims, ...]
@@ -604,7 +645,7 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
 
       key, key_ = jax.random.split(key)
       h_tm1_target_repeated = jax.tree.map(lambda x: x[0], h_tar)
-      h_tm1_target_repeated = repeat(h_tm1_target_repeated, self.num_simulations)
+      h_tm1_target_repeated = repeat(h_tm1_target_repeated, num_simulations)
       target_preds = apply_rnn_and_q(
           h_tm1=h_tm1_target_repeated,
           timesteps=all_t,
@@ -640,10 +681,11 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
       offtask_batch_td_error = offtask_batch_td_error * any_achievable[None]
 
       # Compute normalized entropy of achievable probability mass function
-      entropy = -jnp.sum(achievable * jnp.log(achievable + 1e-5)) / jnp.log(achievable.shape[-1])
+      entropy = -jnp.sum(achieve_poss * jnp.log(achieve_poss)) / jnp.log(achieve_poss.shape[-1])
       #offtask_metrics['1.achievable'] = achievable
       offtask_metrics['1.achievable_entropy'] = entropy
       offtask_metrics['1.any_achievable'] = any_achievable
+      offtask_metrics['1.num_achievable'] = all_t.observation.achievable.sum()  # unnormalized
 
       offtask_log_info['goal'] = g
       offtask_log_info['any_achievable'] = any_achievable
@@ -692,10 +734,84 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
       batch_td_error = self.offtask_coeff*jnp.abs(offtask_batch_td_error) + jnp.abs(main_batch_td_error)
       batch_loss_mean = self.offtask_coeff*offtask_batch_loss_mean + main_batch_loss_mean
       metrics = {
-          **{f'{k}/offtask': v for k, v in offtask_metrics.items()},
-          **main_metrics,
+          **{f'{k}/offtask-sub': v for k, v in offtask_metrics.items()},
+          **{f'{k}/offtask-reg': v for k, v in main_metrics.items()},
       }
       log_info = offtask_log_info
+      return batch_td_error, batch_loss_mean, metrics, log_info
+
+    def dyna_loss_fn_(t, a, h_on, h_tar, l_mask, key):
+      """
+
+      Args:
+        t (jax.Array): [window_size, ...]
+        h_on (jax.Array): [window_size, ...]
+        h_tar (jax.Array): [window_size, ...]
+        key (jax.random.PRNGKey): [2]
+      """
+      # get simulations starting from final timestep in window
+      key, key_ = jax.random.split(key)
+      # [sim_length, num_sim, ...]
+
+      dummy_goal = jnp.zeros(
+         (self.num_simulations, t.observation.achievements[0].shape[-1]))
+      next_t, sim_outputs_t = simulate(
+          h_tm1=jax.tree.map(lambda x: x[-1], h_on),
+          x_t=jax.tree.map(lambda x: x[-1], t),
+          rng=key_,
+          goal=dummy_goal,
+          use_offtask_policy=jnp.zeros((1,)),
+          num_simulations=self.num_simulations,
+        )
+
+      # we replace last, because last action from data 
+      # is different than action from simulation
+      # [window_size + sim_length, num_sims, ...]
+      all_but_last = lambda y: jax.tree.map(lambda x: x[:-1], y)
+      all_t = concat_start_sims(all_but_last(t), next_t)
+      all_a = concat_start_sims(all_but_last(a), sim_outputs_t.actions)
+
+
+      # NOTE: we're recomputing RNN but easier to read this way...
+      # TODO: reuse RNN online param computations for speed (probably not worth it)
+      key, key_ = jax.random.split(key)
+      h_htm1 = jax.tree.map(lambda x: x[0], h_on)
+      h_htm1 = repeat(h_htm1, self.num_simulations)
+      online_preds = apply_rnn_and_q(
+          h_tm1=h_htm1,
+          timesteps=all_t,
+          task=None,
+          rng=key_,
+          network=self.network,
+          params=params,
+          q_fn=self.network.reg_q_fn,
+      )
+
+      key, key_ = jax.random.split(key)
+      h_htm1 = jax.tree.map(lambda x: x[0], h_tar)
+      h_htm1 = repeat(h_htm1, self.num_simulations)
+      target_preds = apply_rnn_and_q(
+          h_tm1=h_htm1,
+          timesteps=all_t,
+          task=None,
+          rng=key_,
+          network=self.network,
+          params=target_params,
+          q_fn=self.network.reg_q_fn,
+      )
+
+      all_t_mask = simulation_finished_mask(l_mask, next_t)
+
+      batch_td_error, batch_loss_mean, metrics, log_info = self.loss_fn(
+          timestep=all_t,
+          online_preds=online_preds,
+          target_preds=target_preds,
+          actions=all_a,
+          rewards=all_t.reward,
+          is_last=make_float(all_t.last()),
+          non_terminal=all_t.discount,
+          loss_mask=all_t_mask,
+      )
       return batch_td_error, batch_loss_mean, metrics, log_info
 
     def preplay_loss_fn_(t, a, h_on, h_tar, l_mask, key):
@@ -707,37 +823,77 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
         h_tar (jax.Array): [T', ...]
         key (jax.random.PRNGKey): [2]
       """
+      #########################################
+      # First compute off-task loss
+      #########################################
       # sample goals available at last timestep in window
       achievable = t.observation.achievable.astype(jnp.float32)
       achievable = jax.tree.map(lambda x: x[-1], achievable)
       any_achievable = achievable.sum() > .1
-      achievable += 1e-5
       num_classes = t.observation.achievable.shape[-1]
-      achievable = achievable/achievable.sum()
+      achieve_poss = achievable + 1e-5
+      achieve_poss = achieve_poss/achieve_poss.sum()
 
       # sample a different goal for each timestep in window
       # [num_offtask_goals]
       key, key_ = jax.random.split(key)
-      goals = distrax.Categorical(probs=achievable).sample(
+      goals = distrax.Categorical(probs=achieve_poss).sample(
         seed=key_, sample_shape=(self.num_offtask_goals))
 
       # [num_offtask_goals, G]
       goals = jax.nn.one_hot(goals, num_classes=num_classes)
 
-      return jax.vmap(
-         dyna_loss_fn_,
-         in_axes=(None, None, None, None, None, None, None, 0, 0)
+      key, key_ = jax.random.split(key)
+      # [num_offtask_goals, T', num_sim], # [num_offtask_goals, num_sim], ...
+      offtask_batch_td_error, offtask_batch_loss_mean, offtask_metrics, offtask_log_info = jax.vmap(
+         offtask_dyna_loss_fn_,
+         in_axes=(None, None, None, None, None, None, None, 0, 0),
          )(t, a, h_on, h_tar, l_mask,
            achievable,
            any_achievable,
            goals,
-           jax.random.split(key, self.num_offtask_goals))
+           jax.random.split(key_, self.num_offtask_goals))
+
+      #########################################
+      # Afterward compute regular dyna loss
+      #########################################
+      key, key_ = jax.random.split(key)
+      # [T', num_sim]
+      dyna_batch_td_error, dyna_batch_loss_mean, dyna_metrics, _ = dyna_loss_fn_(t, a, h_on, h_tar, l_mask, key_)
+
+      # merge num_sim and num_offtask_goals dimensions, them sum over those and divide by total number
+      # don't reshape and concatenate to avoid unnecessary copies
+      denominator = (
+         offtask_batch_loss_mean.size + # [num_offtask_goals*num_sim]
+         dyna_batch_loss_mean.size # [num_sim]
+      )
+
+      batch_td_error = (
+         # sum over [num_offtask_goals, num_sim]
+         offtask_batch_td_error.sum(axis=(0, 2)) + 
+         # sum over [num_sim]
+         dyna_batch_td_error.sum(axis=1))/denominator
+
+      batch_loss_mean = (
+         # sum over [num_offtask_goals, num_sim]
+         offtask_batch_loss_mean.sum(axis=(0, 1)) + 
+         # sum over [num_sim]
+         dyna_batch_loss_mean.sum(axis=0))/denominator
+
+      metrics = {
+          **offtask_metrics,
+          **dyna_metrics,
+      }
+      log_info = offtask_log_info
+
+      return batch_td_error, batch_loss_mean, metrics, log_info
 
     # vmap over individual windows
-    # TD ERROR: [T', num_goals, T + sim_length, num_sim]
-    # Loss: [T', num_goals, num_sim, ...]
+    # TD ERROR: [T', T' + sim_length]
+    # Loss: [T']
+    loss_fn_ = preplay_loss_fn_ if self.num_offtask_goals > 0 else dyna_loss_fn_
     batch_td_error, batch_loss_mean, metrics, log_info = jax.vmap(
-      preplay_loss_fn_, (1, 1, 1, 1, 1, 0), 0)(
+      loss_fn_, (1, 1, 1, 1, 1, 0), 0)(
         timesteps,       # [T', W, ...]
         actions,         # [T', W]
         h_online,        # [T', W, D]
@@ -753,9 +909,9 @@ class MultitaskPreplayLossFn(vbb.RecurrentLossFn):
 
     return batch_td_error, batch_loss_mean, metrics, log_info
 
-def make_loss_fn_class(config, **kwargs) -> MultitaskPreplayLossFn:
+def make_loss_fn_class(config, **kwargs) -> DynaLossFn:
   return functools.partial(
-    MultitaskPreplayLossFn,
+    DynaLossFn,
     discount=config['GAMMA'],
     lambda_=config.get('TD_LAMBDA', .9),
     online_coeff=config.get('ONLINE_COEFF', 1.0),
@@ -764,10 +920,11 @@ def make_loss_fn_class(config, **kwargs) -> MultitaskPreplayLossFn:
     simulation_length=config.get('SIMULATION_LENGTH', 5),
     importance_sampling_exponent=config.get('IMPORTANCE_SAMPLING_EXPONENT', 0.6),
     max_priority_weight=config.get('MAX_PRIORITY_WEIGHT', 0.9),
-    step_cost=config.get("STEP_COST", 0.),
-    window_size=config.get('WINDOW_SIZE', 20),
+    step_cost=config.get("STEP_COST", 0.001),
+    window_size=config.get('WINDOW_SIZE', 1.),
     offtask_coeff=config.get('OFFTASK_COEFF', 1.0),
     num_offtask_goals=config.get('NUM_OFFTASK_GOALS', 5),
+    terminate_offtask=config.get('TERMINATE_OFFTASK', False),
     **kwargs
     )
 
@@ -888,6 +1045,7 @@ def learner_log_extra(
             title += f'\n{actions_taken[i]}'
             if i >= len(timesteps.reward) - 1: return title
             title += f'\nr={timesteps.reward[i+1]:.2f}, $\\gamma={timesteps.discount[i+1]}$'
+            title += f'\nr_off={offtask_reward[i+1]:.2f}'
 
             achieved = timesteps.observation.achievements[i+1]
             if achieved.sum() > 1e-5:
@@ -897,6 +1055,14 @@ def learner_log_extra(
                 title += f'\n{achievement}'
               except ValueError:
                 title += f'\nHealth?'
+            achievable_list = craftax_env.print_possible_achievements(
+               timesteps.observation.achievable[i], return_list=True)
+
+            if achievable_list:
+              title += '\nAchievable:'
+              for name in achievable_list:
+                title += f'\n- {name}'
+
             return title
 
         fig = plot_frames(
@@ -1103,6 +1269,8 @@ def make_train(**kwargs):
 
     epsilon_setting = config['SIM_EPSILON_SETTING']
     num_simulations = config['NUM_SIMULATIONS']
+    sim_epsilon = config.get('SIM_EPSILON', 0)
+
     if epsilon_setting == 1:
       # ACME default
       # range of ~(0.001, .1)
@@ -1116,17 +1284,18 @@ def make_train(**kwargs):
 
     epsilons = jax.random.choice(
         rng, vals, shape=(num_simulations - 1,))
-    epsilons = jnp.concatenate((jnp.zeros(1), epsilons))
+    epsilons = jnp.concatenate((jnp.array((sim_epsilon,)), epsilons))
     #greedy_idx = int(epsilons.argmin())
 
     def simulation_policy(
         preds: Predictions,
         sim_rng: jax.Array):
         q_values = preds.q_vals
-        assert q_values.shape[0] == epsilons.shape[0]
+        eps = epsilons[:q_values.shape[0]]
+        assert q_values.shape[0] == eps.shape[0]
         sim_rng = jax.random.split(sim_rng, q_values.shape[0])
         return jax.vmap(base_agent.epsilon_greedy_act, in_axes=(0, 0, 0))(
-            q_values, epsilons, sim_rng)
+            q_values, eps, sim_rng)
 
     return vbb.make_train(
       make_agent=partial(make_agent,
