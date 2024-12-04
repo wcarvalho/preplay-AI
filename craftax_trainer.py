@@ -573,14 +573,14 @@ def sweep(search: str = ''):
           "ALG": {'values': ['preplay']},
           "SEED": {'values': list(range(1,2))},
           "NUM_ENV_SEEDS": {'values': [0]},
-          "WINDOW_SIZE": {'values': [.5 , .75, 1.]},
+          "WINDOW_SIZE": {'values': [.6, .75, 1.]},
           "SIMULATION_LENGTH": {'values': [15, 20]},
           "TOTAL_BATCH_SIZE": {'values': [1280]},
           "TERMINATE_OFFTASK": {'values': [True, False]},
-          "NUM_OFFTASK_GOALS": {'values': [1, 2, 4]},
+          "NUM_OFFTASK_GOALS": {'values': [1, 4]},
       },
       'overrides': ['alg=preplay', 'rlenv=craftax-1m-dyna', 'user=wilka'],
-      'group': 'preplay-10-num-offtask',
+      'group': 'preplay-11-num-offtask-fixed-env',
     }
 
   elif search == 'pqn':

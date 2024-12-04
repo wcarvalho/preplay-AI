@@ -316,137 +316,84 @@ def get_possible_achievements(state: EnvState, use_precondition: bool = False) -
     )
 
     # Combat-related possibilities (including spells)
-    has_weapon = jnp.logical_or(
-        state.inventory.sword > 0,
-        jnp.logical_or(
-            jnp.logical_and(
-                state.inventory.bow > 0,
-                state.inventory.arrows > 0
-            ),
-            jnp.logical_and(
-                jnp.logical_or(
-                    state.learned_spells[0],
-                    state.learned_spells[1]
-                ),
-                state.player_mana >= 1
-            )
-        )
-    )
+    #has_weapon = jnp.logical_or(
+    #    state.inventory.sword > 0,
+    #    jnp.logical_or(
+    #        jnp.logical_and(
+    #            state.inventory.bow > 0,
+    #            state.inventory.arrows > 0
+    #        ),
+    #        jnp.logical_and(
+    #            jnp.logical_or(
+    #                state.learned_spells[0],
+    #                state.learned_spells[1]
+    #            ),
+    #            state.player_mana >= 1
+    #        )
+    #    )
+    #)
 
     # Melee mobs (using exact Achievement enum values)
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_ZOMBIE.value].set(
-        jnp.logical_and(
-            check_mob_nearby(0, state.melee_mobs),
-            #has_weapon
-        )
+          check_mob_nearby(0, state.melee_mobs)
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_GNOME_WARRIOR.value].set(
-        jnp.logical_and(
-            check_mob_nearby(1, state.melee_mobs),
-            #has_weapon
-        )
+          check_mob_nearby(1, state.melee_mobs)
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_ORC_SOLIDER.value].set(
-        jnp.logical_and(
-            check_mob_nearby(2, state.melee_mobs),
-            #has_weapon
-        )
+          check_mob_nearby(2, state.melee_mobs)
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_LIZARD.value].set(
-        jnp.logical_and(
-            check_mob_nearby(3, state.melee_mobs),
-            #has_weapon
-        )
+          check_mob_nearby(3, state.melee_mobs)
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_KNIGHT.value].set(
-        jnp.logical_and(
-            check_mob_nearby(4, state.melee_mobs),
-            #has_weapon
-        )
+          check_mob_nearby(4, state.melee_mobs)
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_TROLL.value].set(
-        jnp.logical_and(
-            check_mob_nearby(5, state.melee_mobs),
-            #has_weapon
-        )
+          check_mob_nearby(5, state.melee_mobs)
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_PIGMAN.value].set(
-        jnp.logical_and(
-            check_mob_nearby(6, state.melee_mobs),
-            #has_weapon
-        )
+          check_mob_nearby(6, state.melee_mobs)
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_FROST_TROLL.value].set(
-        jnp.logical_and(
-            check_mob_nearby(7, state.melee_mobs),
-            #has_weapon
-        )
+          check_mob_nearby(7, state.melee_mobs)
     )
 
     # Ranged mobs
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_SKELETON.value].set(
-        jnp.logical_and(
-            check_mob_nearby(0, state.ranged_mobs),
-        )
+          check_mob_nearby(0, state.ranged_mobs)
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_GNOME_ARCHER.value].set(
-        jnp.logical_and(
-            check_mob_nearby(1, state.ranged_mobs),
-            #has_weapon
-        )
+          check_mob_nearby(1, state.ranged_mobs)
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_ORC_MAGE.value].set(
-        jnp.logical_and(
-            check_mob_nearby(2, state.ranged_mobs),
-            #has_weapon
-        )
+          check_mob_nearby(2, state.ranged_mobs)
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_KOBOLD.value].set(
-        jnp.logical_and(
-            check_mob_nearby(3, state.ranged_mobs),
-            #has_weapon
-        )
+          check_mob_nearby(3, state.ranged_mobs)
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_ARCHER.value].set(
-        jnp.logical_and(
-            check_mob_nearby(4, state.ranged_mobs),
-            #has_weapon
-        )
+          check_mob_nearby(4, state.ranged_mobs)
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_DEEP_THING.value].set(
-        jnp.logical_and(
-            check_mob_nearby(5, state.ranged_mobs),
-            #has_weapon
-        )
+          check_mob_nearby(5, state.ranged_mobs)
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_FIRE_ELEMENTAL.value].set(
-        jnp.logical_and(
-            check_mob_nearby(6, state.ranged_mobs),
-            #has_weapon
-        )
+          check_mob_nearby(6, state.ranged_mobs)
     )
     possible_achievements = possible_achievements.at[Achievement.DEFEAT_ICE_ELEMENTAL.value].set(
-        jnp.logical_and(
-            check_mob_nearby(7, state.ranged_mobs),
-            #has_weapon
-        )
+          check_mob_nearby(7, state.ranged_mobs)
     )
 
     # Passive mobs (for eating)
     possible_achievements = possible_achievements.at[Achievement.EAT_COW.value].set(
-        jnp.logical_and(
-            check_mob_nearby(0, state.passive_mobs),
-        )
+          check_mob_nearby(0, state.passive_mobs)
     )
     possible_achievements = possible_achievements.at[Achievement.EAT_BAT.value].set(
-        jnp.logical_and(
-            check_mob_nearby(1, state.passive_mobs),
-        )
+          check_mob_nearby(1, state.passive_mobs)
     )
     possible_achievements = possible_achievements.at[Achievement.EAT_SNAIL.value].set(
-        jnp.logical_and(
-            check_mob_nearby(2, state.passive_mobs),
-        )
+          check_mob_nearby(2, state.passive_mobs)
     )
     possible_achievements = jnp.concatenate((
         possible_achievements,
