@@ -38,6 +38,9 @@ from visualizer import plot_frames
 
 from housemaze import renderer
 
+def info(x): 
+   return jax.tree.map(lambda y: (y.shape, y.dtype), x)
+
 Agent = nn.Module
 Params = flax.core.FrozenDict
 Qvalues = jax.Array
@@ -64,6 +67,7 @@ class Predictions:
 class SimulationOutput:
     actions: jax.Array
     predictions: Optional[Predictions] = None
+
 
 
 def make_float(x): return x.astype(jnp.float32)
@@ -376,7 +380,8 @@ class DynaLossFn(vbb.RecurrentLossFn):
   """
 
   window_size: int = 5
-  num_simulations: int = 2
+  num_dyna_simulations: int = 1
+  num_offtask_simulations: int = 1
   simulation_length: int = 5
   online_coeff: float = 1.0
   dyna_coeff: float = 1.0
@@ -387,7 +392,8 @@ class DynaLossFn(vbb.RecurrentLossFn):
   terminate_offtask: bool = False
   subtask_coeff: float = 1.0
 
-  simulation_policy: SimPolicy = None
+  dyna_policy: SimPolicy = None
+  offtask_dyna_policy: SimPolicy = None
 
   def loss_fn(
     self,
@@ -572,7 +578,6 @@ class DynaLossFn(vbb.RecurrentLossFn):
         network=self.network,
         params=params,
         num_steps=self.simulation_length,
-        policy_fn=self.simulation_policy,
         terminate_offtask=self.terminate_offtask,
         subtask_coeff=self.subtask_coeff,
         )
@@ -605,8 +610,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
 
       # use same goal for all simulations
       # [G] --> [num_sims, G]
-      num_simulations = 1
-      # TODO: remove this dummy num_simulations=1 dimension to keep code cleaner
+      num_simulations = self.num_offtask_simulations
       g = repeat(g, num_simulations)
 
       #########################################
@@ -622,6 +626,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
           goal=g,              # [num_sims, G]
           use_offtask_policy=jnp.ones((1,)),
           num_simulations=num_simulations,
+          policy_fn=self.offtask_dyna_policy,
         )
 
       #########################################
@@ -666,8 +671,11 @@ class DynaLossFn(vbb.RecurrentLossFn):
       #########################################
       all_t_mask = simulation_finished_mask(l_mask, next_t)
 
+      # [T, K, D]
       achievements = all_t.observation.achievements.astype(jnp.float32)
+      # [T, K, D]
       achievement_coefficients = all_t.observation.task_w.astype(jnp.float32)
+      # [T, K, D]
       achievement_coefficients = achievement_coefficients[..., :g.shape[-1]]
 
       coeff_mask = g.astype(jnp.float32)
@@ -686,15 +694,16 @@ class DynaLossFn(vbb.RecurrentLossFn):
       )
 
       # only use loss if any achievable goal
+      any_achievable = any_achievable.astype(jnp.float32)
       offtask_batch_loss_mean = offtask_batch_loss_mean * any_achievable[None]
       offtask_batch_td_error = offtask_batch_td_error * any_achievable[None]
 
       # Compute normalized entropy of achievable probability mass function
-      entropy = -jnp.sum(achieve_poss * jnp.log(achieve_poss)) / jnp.log(achieve_poss.shape[-1])
+      entropy = -jnp.sum(achieve_poss * jnp.log(achieve_poss + 1e-5), axis=-1) / jnp.log(achieve_poss.shape[-1])
       #offtask_metrics['1.achievable'] = achievable
-      offtask_metrics['1.achievable_entropy'] = entropy
-      offtask_metrics['1.any_achievable'] = any_achievable
-      offtask_metrics['1.num_achievable'] = all_t.observation.achievable.sum()  # unnormalized
+      offtask_metrics['2.achievable_entropy'] = entropy
+      offtask_metrics['2.any_achievable'] = any_achievable
+      offtask_metrics['2.num_achievable'] = all_t.observation.achievable.sum(-1)  # unnormalized
 
       offtask_log_info['goal'] = g
       offtask_log_info['any_achievable'] = any_achievable
@@ -726,10 +735,11 @@ class DynaLossFn(vbb.RecurrentLossFn):
           params=target_params,
           q_fn=self.network.reg_q_fn,
       )
+
       #########################################
       # Get Main task loss
       #########################################
-      main_batch_td_error, main_batch_loss_mean, main_metrics, _ = self.loss_fn(
+      main_batch_td_error, main_batch_loss_mean, main_metrics, main_log_info = self.loss_fn(
           timestep=all_t,
           online_preds=online_preds,
           target_preds=target_preds,
@@ -739,6 +749,8 @@ class DynaLossFn(vbb.RecurrentLossFn):
           non_terminal=all_t.discount,
           loss_mask=all_t_mask,
       )
+      offtask_log_info['main_q_values'] = main_log_info['q_values']
+      offtask_log_info['main_q_target'] = main_log_info['q_target']
 
       batch_td_error = self.offtask_coeff*jnp.abs(offtask_batch_td_error) + jnp.abs(main_batch_td_error)
       batch_loss_mean = self.offtask_coeff*offtask_batch_loss_mean + main_batch_loss_mean
@@ -763,14 +775,15 @@ class DynaLossFn(vbb.RecurrentLossFn):
       # [sim_length, num_sim, ...]
 
       dummy_goal = jnp.zeros(
-         (self.num_simulations, t.observation.achievements[0].shape[-1]))
+         (self.num_dyna_simulations, t.observation.achievements[0].shape[-1]))
       next_t, sim_outputs_t = simulate(
           h_tm1=jax.tree.map(lambda x: x[-1], h_on),
           x_t=jax.tree.map(lambda x: x[-1], t),
           rng=key_,
           goal=dummy_goal,
           use_offtask_policy=jnp.zeros((1,)),
-          num_simulations=self.num_simulations,
+          num_simulations=self.num_dyna_simulations,
+          policy_fn=self.dyna_policy,
         )
 
       # we replace last, because last action from data 
@@ -785,11 +798,11 @@ class DynaLossFn(vbb.RecurrentLossFn):
       # TODO: reuse RNN online param computations for speed (probably not worth it)
       key, key_ = jax.random.split(key)
       h_htm1 = jax.tree.map(lambda x: x[0], h_on)
-      h_htm1 = repeat(h_htm1, self.num_simulations)
+      h_htm1 = repeat(h_htm1, self.num_dyna_simulations)
       online_preds = apply_rnn_and_q(
           h_tm1=h_htm1,
           timesteps=all_t,
-          task=None,
+          task=dummy_goal,
           rng=key_,
           network=self.network,
           params=params,
@@ -798,11 +811,11 @@ class DynaLossFn(vbb.RecurrentLossFn):
 
       key, key_ = jax.random.split(key)
       h_htm1 = jax.tree.map(lambda x: x[0], h_tar)
-      h_htm1 = repeat(h_htm1, self.num_simulations)
+      h_htm1 = repeat(h_htm1, self.num_dyna_simulations)
       target_preds = apply_rnn_and_q(
           h_tm1=h_htm1,
           timesteps=all_t,
-          task=None,
+          task=dummy_goal,
           rng=key_,
           network=self.network,
           params=target_params,
@@ -821,6 +834,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
           non_terminal=all_t.discount,
           loss_mask=all_t_mask,
       )
+
       return batch_td_error, batch_loss_mean, metrics, log_info
 
     def preplay_loss_fn_(t, a, h_on, h_tar, l_mask, key):
@@ -925,7 +939,8 @@ def make_loss_fn_class(config, **kwargs) -> DynaLossFn:
     lambda_=config.get('TD_LAMBDA', .9),
     online_coeff=config.get('ONLINE_COEFF', 1.0),
     dyna_coeff=config.get('DYNA_COEFF', 1.0),
-    num_simulations=config.get('NUM_SIMULATIONS', 2),
+    num_dyna_simulations=config.get('NUM_DYNA_SIMULATIONS', 2),
+    num_offtask_simulations=config.get('NUM_OFFTASK_SIMULATIONS', 2),
     simulation_length=config.get('SIMULATION_LENGTH', 5),
     importance_sampling_exponent=config.get('IMPORTANCE_SAMPLING_EXPONENT', 0.6),
     max_priority_weight=config.get('MAX_PRIORITY_WEIGHT', 0.9),
@@ -971,6 +986,8 @@ def learner_log_extra(
         q_values: np.array,
         q_loss: np.array,
         q_target: np.array,
+        main_q_values: np.array,
+        main_q_target: np.array,
         goal: np.array,
         any_achievable: np.array,
         offtask_reward: np.array,
@@ -982,7 +999,6 @@ def learner_log_extra(
         discounts = timesteps.discount
         rewards = timesteps.reward
         q_values_taken = rlax.batched_index(q_values, actions)
-
         # Create a figure with three subplots
         width = .3
         nT = len(rewards)  # e.g. 20 --> 8
@@ -995,17 +1011,25 @@ def learner_log_extra(
             ax.grid(True)
             ax.set_xticks(range(0, len(rewards), 1))
         ax1.plot(offtask_reward, label='Subtask Reward')
-        ax1.plot(rewards, label='Main task reward')
+        #ax1.plot(rewards, label='Main task reward')
         ax1.plot(q_values_taken, label='Q-Values')
         ax1.plot(q_target, label='Q-Targets')
-        ax1.set_title('Rewards and Q-Values')
+        ax1.set_title('Subtask Rewards and Q-Values')
         format(ax1)
         ax1.legend()
 
         # Plot TD errors in the middle subplot
-        ax2.plot(td_errors)
+        #ax2.plot(offtask_reward, label='Subtask Reward')
+        main_q_values_taken = rlax.batched_index(main_q_values, actions)
+        ax2.plot(rewards, label='Main task reward')
+        ax2.plot(main_q_values_taken, label='Main Q-Values')
+        ax2.plot(main_q_target, label='Main Q-Targets')
+        ax2.set_title('Main Rewards and Q-Values')
         format(ax2)
-        ax2.set_title('TD Errors')
+        ax2.legend()
+        #ax2.plot(td_errors)
+        #format(ax2)
+        #ax2.set_title('TD Errors')
 
         # Plot Q-loss in the bottom subplot
         ax3.plot(q_loss)
@@ -1050,8 +1074,8 @@ def learner_log_extra(
         def panel_title_fn(timesteps, i):
             goal_idx = goal.argmax(-1)
             achievement = Achievement(goal_idx).name
-            title = f'{achievement}. Pos: {int(any_achievable)}'
-            title += f'\nt={i}. A={actions_taken[i]}'
+            title = f'{achievement}. t={i}'
+            title += f'\nA={actions_taken[i]}'
             if i >= len(timesteps.reward) - 1: return title
             title += f'\nr={timesteps.reward[i+1]:.2f}, $\\gamma={timesteps.discount[i+1]}$'
             title += f'\nr_off={offtask_reward[i+1]:.2f}'
@@ -1078,6 +1102,7 @@ def learner_log_extra(
             timesteps=timesteps,
             frames=obs_images,
             panel_title_fn=panel_title_fn,
+            row_height=2.5,
             ncols=6)
         if wandb.run is not None:
             wandb.log(
@@ -1109,6 +1134,100 @@ def learner_log_extra(
           dyna_data)
 
 
+class DuellingMLP(nn.Module):
+  hidden_dim: int
+  out_dim: int = 0
+  num_layers: int = 1
+  norm_type: str = 'none'
+  activation: str = 'relu'
+  activate_final: bool = True
+  use_bias: bool = False
+
+  @nn.compact
+  def __call__(self, x, train: bool = False):
+    value_mlp = MLP(
+       hidden_dim=self.hidden_dim,
+       num_layers=self.num_layers,
+       norm_type=self.norm_type,
+       activation=self.activation,
+       activate_final=False,
+       use_bias=self.use_bias,
+       out_dim=1,
+       )
+    advantage_mlp = MLP(
+       hidden_dim=self.hidden_dim,
+       num_layers=self.num_layers,
+       norm_type=self.norm_type,
+       activation=self.activation,
+       activate_final=False,
+       use_bias=self.use_bias,
+       out_dim=self.out_dim,
+       )
+    assert self.out_dim > 0, "must have at least one action"
+
+    value = value_mlp(x, train)  # [B, 1]
+    advantages = advantage_mlp(x, train)  # [B, A]
+
+    # Advantages have zero mean.
+    advantages -= jnp.mean(advantages, axis=-1, keepdims=True)  # [B, A]
+
+    q_values = value + advantages  # [B, A]
+
+    return q_values
+
+class DuellingDotMLP(nn.Module):
+  hidden_dim: int
+  out_dim: int = 0
+  num_layers: int = 1
+  norm_type: str = 'none'
+  activation: str = 'relu'
+  activate_final: bool = True
+  use_bias: bool = False
+
+  @nn.compact
+  def __call__(self, x, task, train: bool = False):
+    task_dim = task.shape[-1]
+    value_mlp = MLP(
+       hidden_dim=self.hidden_dim,
+       num_layers=self.num_layers,
+       norm_type=self.norm_type,
+       activation=self.activation,
+       activate_final=False,
+       use_bias=self.use_bias,
+       out_dim=task_dim,
+       )
+    advantage_mlp = MLP(
+       hidden_dim=self.hidden_dim,
+       num_layers=self.num_layers,
+       norm_type=self.norm_type,
+       activation=self.activation,
+       activate_final=False,
+       use_bias=self.use_bias,
+       out_dim=self.out_dim*task_dim,
+       )
+    assert self.out_dim > 0, "must have at least one action"
+
+    # Compute value & advantage
+    value = value_mlp(x, train)  # [B, C]
+    advantages = advantage_mlp(x, train)  # [B, A*C]
+
+    # Reshape value and advantages
+    value = jnp.expand_dims(value, axis=-2)  # [B, 1, C]
+    # Reshape advantages to [B, (T), A, C] where T dimension is optional
+    advantages_shape = list(advantages.shape[:-1]) + [self.out_dim, task_dim]
+    advantages = jnp.reshape(advantages, advantages_shape)  # [B, A, C]
+
+    # Advantages have zero mean across actions
+    advantages -= jnp.mean(advantages, axis=1, keepdims=True)  # [B, A, C]
+
+    # Combine value and advantages
+    sf = value + advantages  # [B, A, C]
+
+    # Dot product with task vector to get Q-values
+    q_values = jnp.sum(sf * jnp.expand_dims(task, axis=-2), axis=-1)  # [B, A]
+
+    return q_values
+
 class DynaAgentEnvModel(nn.Module):
     """
     
@@ -1122,11 +1241,12 @@ class DynaAgentEnvModel(nn.Module):
     q_fn_subtask: nn.Module
     env: environment.Environment
     env_params: environment.EnvParams
+    q_head_type: str
 
     def setup(self):
         kernel_init = nn.initializers.variance_scaling(
             1.0, 'fan_in', 'normal', out_axis=0)
-        self.task_fn = nn.Dense(128, kernel_init=kernel_init, use_bias=False)
+        self.task_fn = nn.Dense(128, kernel_init=kernel_init)
 
     def initialize(self, x: TimeStep):
         """Only used for initialization."""
@@ -1134,7 +1254,7 @@ class DynaAgentEnvModel(nn.Module):
         rng = jax.random.PRNGKey(0)
         batch_dims = (x.reward.shape[0],)
         rnn_state = self.initialize_carry(rng, batch_dims)
-        predictions, rnn_state = self.__call__(rnn_state, x, rng)
+        _, rnn_state = self.__call__(rnn_state, x, rng)
         #dummy_action = jnp.zeros(batch_dims, dtype=jnp.int32)
         #self.apply_model(predictions.state, dummy_action, rng)
         task = jnp.zeros_like(x.observation.achievable)
@@ -1153,19 +1273,27 @@ class DynaAgentEnvModel(nn.Module):
     def __call__(self, rnn_state, x: TimeStep, rng: jax.random.PRNGKey) -> Tuple[Predictions, RnnState]:
 
         new_rnn_state, rnn_out = self.apply_rnn(rnn_state, x, rng)
-        q_vals = self.q_fn(rnn_out)
+        task = jnp.zeros_like(x.observation.achievements)
+        q_vals = self.reg_q_fn(rnn_out, task)
         predictions = Predictions(q_vals=q_vals, state=new_rnn_state)
 
         return predictions, new_rnn_state
 
     def reg_q_fn(self, rnn_out, task):
         # just so both have same signature
-        del task
-        return self.q_fn(rnn_out)
+        if self.q_head_type == 'dot':
+          return self.q_fn(rnn_out, task)
+        else:
+          del task
+          return self.q_fn(rnn_out)
 
     def subtask_q_fn(self, rnn_out, task):
-        inp = jnp.concatenate((rnn_out, self.task_fn(task)), axis=-1)
-        return self.q_fn_subtask(inp)
+        task = self.task_fn(task)
+        inp = jnp.concatenate((rnn_out, task), axis=-1)
+        if self.q_head_type == 'dot':
+          return self.q_fn_subtask(inp, task)
+        else:
+          return self.q_fn_subtask(inp)
 
     def unroll(self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey) -> Tuple[Predictions, RnnState]:
         # rnn_state: [B]
@@ -1179,8 +1307,117 @@ class DynaAgentEnvModel(nn.Module):
         # [B, D], [T, B, D]
         new_rnn_state, new_rnn_states = self.rnn.unroll(rnn_state, rnn_in, _rng)
 
+        task = jnp.zeros_like(xs.observation.achievements)
         rnn_out = self.rnn.output_from_state(new_rnn_states)
-        q_vals = nn.BatchApply(self.q_fn)(rnn_out)
+        q_vals = nn.BatchApply(self.reg_q_fn)(rnn_out, task)
+        predictions = Predictions(
+            q_vals=q_vals,
+            state=new_rnn_states
+            )
+        return predictions, new_rnn_state
+
+    def apply_model(
+          self,
+          state: TimeStep,
+          action: jnp.ndarray,
+          rng: jax.random.PRNGKey,
+      ) -> Tuple[Predictions, RnnState]:
+        """This applies the model to each element in the state, action vectors.
+        Args:
+            state (State): states. [B, D]
+            action (jnp.ndarray): actions to take on states. [B]
+        Returns:
+            Tuple[ModelOutput, State]: muzero outputs and new states for 
+              each state state action pair.
+        """
+        # take one step forward in the environment
+        B = action.shape[0]
+        def env_step(s, a, rng_): 
+           return self.env.step(rng_, s, a, self.env_params)
+        return jax.vmap(env_step)(
+            state, action, jax.random.split(rng, B))
+
+    def compute_reward(self, timestep, task):
+      return self.env.compute_reward(timestep, task, self.env_params)
+
+class DynaAgentEnvModelSharedHead(nn.Module):
+    """
+    
+    Note: predictions contains rnn_state because when you use unroll, you only get the final rnn_state but predictions for all time-steps. 
+    
+    """
+
+    observation_encoder: nn.Module
+    rnn: vbb.ScannedRNN
+    q_fn: nn.Module
+    q_fn_subtask: nn.Module # ignored
+    env: environment.Environment
+    env_params: environment.EnvParams
+    q_head_type: str
+
+    def setup(self):
+        kernel_init = nn.initializers.variance_scaling(
+            1.0, 'fan_in', 'normal', out_axis=0)
+        self.task_fn = nn.Dense(128, kernel_init=kernel_init)
+
+    def initialize(self, x: TimeStep):
+        """Only used for initialization."""
+        # [B, D]
+        rng = jax.random.PRNGKey(0)
+        batch_dims = (x.reward.shape[0],)
+        rnn_state = self.initialize_carry(rng, batch_dims)
+        _, rnn_state = self.__call__(rnn_state, x, rng)
+        #dummy_action = jnp.zeros(batch_dims, dtype=jnp.int32)
+        #self.apply_model(predictions.state, dummy_action, rng)
+        task = jnp.zeros_like(x.observation.achievable)
+        self.subtask_q_fn(rnn_state[1], task)
+
+    def initialize_carry(self, *args, **kwargs):
+        """Initializes the RNN state."""
+        return self.rnn.initialize_carry(*args, **kwargs)
+
+    def apply_rnn(self, rnn_state, x: TimeStep, rng: jax.random.PRNGKey):
+        embedding = self.observation_encoder(x.observation)
+        rnn_in = vbb.RNNInput(obs=embedding, reset=x.first())
+        rng, _rng = jax.random.split(rng)
+        return self.rnn(rnn_state, rnn_in, _rng)
+
+    def __call__(self, rnn_state, x: TimeStep, rng: jax.random.PRNGKey) -> Tuple[Predictions, RnnState]:
+
+        new_rnn_state, rnn_out = self.apply_rnn(rnn_state, x, rng)
+        task = jnp.zeros_like(x.observation.achievements)
+        q_vals = self.reg_q_fn(rnn_out, task)
+        predictions = Predictions(q_vals=q_vals, state=new_rnn_state)
+
+        return predictions, new_rnn_state
+
+    def reg_q_fn(self, rnn_out, task):
+        task = self.task_fn(task)
+        inp = jnp.concatenate((rnn_out, task), axis=-1)
+        if self.q_head_type == 'dot':
+          # CHECKED
+          return self.q_fn(inp, task)
+        else:
+          return self.q_fn(inp)
+
+    def subtask_q_fn(self, rnn_out, task):
+        return self.reg_q_fn(rnn_out, task)
+
+    def unroll(self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey) -> Tuple[Predictions, RnnState]:
+        # rnn_state: [B]
+        # xs: [T, B]
+
+        embedding = jax.vmap(self.observation_encoder)(xs.observation)
+
+        rnn_in = vbb.RNNInput(obs=embedding, reset=xs.first())
+        rng, _rng = jax.random.split(rng)
+
+        # [B, D], [T, B, D]
+        new_rnn_state, new_rnn_states = self.rnn.unroll(rnn_state, rnn_in, _rng)
+
+        task = jnp.zeros_like(xs.observation.achievements)
+        rnn_out = self.rnn.output_from_state(new_rnn_states)
+        q_vals = nn.BatchApply(self.reg_q_fn)(rnn_out, task)
         predictions = Predictions(
             q_vals=q_vals,
             state=new_rnn_states
@@ -1231,7 +1468,19 @@ def make_agent(
             cell_type=cell_type,
             unroll_output_state=True,
             )
-    agent = DynaAgentEnvModel(
+    if config.get('SHARE_HEADS', True):
+      AgentCls = DynaAgentEnvModelSharedHead
+    else:
+      AgentCls = DynaAgentEnvModel
+
+    if config.get('QHEAD_TYPE', 'dot') == 'dot':
+      QFnCls = DuellingDotMLP
+    elif config.get('QHEAD_TYPE', 'dot') == 'duelling':
+      QFnCls = DuellingMLP
+    else:
+      QFnCls = MLP
+
+    agent = AgentCls(
         observation_encoder=CraftaxObsEncoder(
           hidden_dim=config["MLP_HIDDEN_DIM"],
           num_layers=config['NUM_MLP_LAYERS'],
@@ -1242,7 +1491,7 @@ def make_agent(
           action_dim=env.action_space(env_params).n,
           ),
         rnn=rnn,
-        q_fn=MLP(
+        q_fn=QFnCls(
             hidden_dim=config.get('Q_HIDDEN_DIM', 512),
             num_layers=config.get('NUM_Q_LAYERS', 1),
             out_dim=env.action_space(env_params).n,
@@ -1250,7 +1499,7 @@ def make_agent(
             activate_final=False,
             use_bias=config.get('USE_BIAS', True),
             ),
-        q_fn_subtask=MLP(
+        q_fn_subtask=QFnCls(
             hidden_dim=config.get('Q_HIDDEN_DIM', 512),
             num_layers=config.get('NUM_AUX_LAYERS', 0),
             out_dim=env.action_space(env_params).n,
@@ -1260,6 +1509,7 @@ def make_agent(
             ),
         env=model_env,
         env_params=model_env_params,
+        q_head_type=config.get('QHEAD_TYPE', 'dot'),
     )
 
     rng, _rng = jax.random.split(rng)
@@ -1282,8 +1532,6 @@ def make_train(**kwargs):
     rng = jax.random.PRNGKey(config["SEED"])
 
     epsilon_setting = config['SIM_EPSILON_SETTING']
-    num_simulations = config['NUM_SIMULATIONS']
-    sim_epsilon = config.get('SIM_EPSILON', 0)
 
     if epsilon_setting == 1:
       # ACME default
@@ -1296,15 +1544,24 @@ def make_train(**kwargs):
         # very random
         vals = np.ones(256)*0.9
 
-    epsilons = jax.random.choice(
-        rng, vals, shape=(num_simulations - 1,))
-    epsilons = jnp.concatenate((jnp.array((sim_epsilon,)), epsilons))
-    #greedy_idx = int(epsilons.argmin())
+    num_offtask_simulations = config['NUM_OFFTASK_SIMULATIONS']
 
-    def simulation_policy(
+    assert config['NUM_DYNA_SIMULATIONS'] == 1
+
+    def dyna_policy(
+        preds: Predictions,
+        sim_rng: jax.Array):
+        del sim_rng
+        return jnp.argmax(preds.q_vals, axis=-1)
+
+    def offtask_dyna_policy(
         preds: Predictions,
         sim_rng: jax.Array):
         q_values = preds.q_vals
+        sim_rng, sim_rng_ = jax.random.split(sim_rng)
+        epsilons = jax.random.choice(
+          sim_rng_, vals, shape=(num_offtask_simulations - 1, ))
+        epsilons = jnp.concatenate((jnp.array([0.0]), epsilons))
         eps = epsilons[:q_values.shape[0]]
         assert q_values.shape[0] == eps.shape[0]
         sim_rng = jax.random.split(sim_rng, q_values.shape[0])
@@ -1316,7 +1573,8 @@ def make_train(**kwargs):
                          model_env=kwargs.pop('model_env')),
       make_loss_fn_class=functools.partial(
         make_loss_fn_class,
-        simulation_policy=simulation_policy,
+        dyna_policy=dyna_policy,
+        offtask_dyna_policy=offtask_dyna_policy,
         ),
       make_optimizer=base_agent.make_optimizer,
       make_actor=make_actor,

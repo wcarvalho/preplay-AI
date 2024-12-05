@@ -555,15 +555,33 @@ def sweep(search: str = ''):
         },
         'parameters': {
             "ALG": {'values': ['dyna']},
-            "SEED": {'values': list(range(1,3))},
+            "SEED": {'values': list(range(1,2))},
             "NUM_ENV_SEEDS": {'values': [0]},
-            "SIM_EPSILON": {'values': [0, .1, .2]},
-            #"STEP_COST": {'values': [1e-4, 1e-5]},
+            "SIM_EPSILON": {'values': [0]},
+            "NUM_SIMULATIONS": {'values': [1]},
         },
         'overrides': ['alg=dyna', 'rlenv=craftax-1m-dyna', 'user=wilka'],
         'group': 'dyna-16-step-cost',
     }
-  elif search == 'preplay':
+  elif search == 'preplay-1':
+    sweep_config = {
+      'metric': {
+          'name': 'evaluator_performance-0/0.score',
+          'goal': 'maximize',
+      },
+      'parameters': {
+          "ALG": {'values': ['preplay']},
+          "SEED": {'values': list(range(1,2))},
+          "NUM_ENV_SEEDS": {'values': [0]},
+          "WINDOW_SIZE": {'values': [.75, 1.]},
+          "NUM_OFFTASK_GOALS": {'values': [1]},
+          "TERMINATE_OFFTASK": {'values': [True, False]},
+          "NUM_OFFTASK_SIMULATIONS": {'values': [4, 2]},
+      },
+      'overrides': ['alg=preplay', 'rlenv=craftax-1m-dyna', 'user=wilka'],
+      'group': 'preplay-15-sim-policy',
+    }
+  elif search == 'preplay-2':
     sweep_config = {
       'metric': {
           'name': 'evaluator_performance-0/0.score',
@@ -574,13 +592,13 @@ def sweep(search: str = ''):
           "SEED": {'values': list(range(1,2))},
           "NUM_ENV_SEEDS": {'values': [0]},
           "WINDOW_SIZE": {'values': [.75]},
-          "NUM_OFFTASK_GOALS": {'values': [1, 4]},
-          "TERMINATE_OFFTASK": {'values': [False]},
-          "SUBTASK_COEFF": {'values': [1.5, 1.0, 2.0]},
-          #"TERMINATE_OFFTASK": {'values': [True]},
+          "NUM_OFFTASK_GOALS": {'values': [1]},
+          "TERMINATE_OFFTASK": {'values': [True]},
+          "QHEAD_TYPE": {'values': ['duelling', 'dot']},
+          "SHARE_HEADS": {'values': [True, False]},
       },
       'overrides': ['alg=preplay', 'rlenv=craftax-1m-dyna', 'user=wilka'],
-      'group': 'preplay-13-sum-offtask-fixed-env',
+      'group': 'preplay-14-q-head',
     }
 
   elif search == 'pqn':

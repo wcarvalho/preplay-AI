@@ -109,6 +109,7 @@ def plot_frames(
         frames,
         ncols,
         panel_title_fn = lambda t,i: '',
+        row_height=1.7,
         max_frames=1e10):
     """
     Dynamically plots frames in a single figure based on the number of columns (W) and maximum number of frames.
@@ -125,7 +126,7 @@ def plot_frames(
     width = 3
 
     fig_width = ncols*width
-    fig_height = int(1.7*H*width)
+    fig_height = int(row_height*H*width)
     fig, axs = plt.subplots(
         H, ncols, figsize=(fig_width, fig_height), squeeze=False)
 

@@ -161,8 +161,10 @@ def get_possible_achievements(state: EnvState, use_precondition: bool = False) -
         mob_positions = mob_collection.position
         mob_types = mob_collection.type_id
         mob_masks = mob_collection.mask
-        low = state.player_position - obs_dim_array
-        high = state.player_position + obs_dim_array
+
+        # lower radius a bit
+        low = state.player_position - obs_dim_array + 3
+        high = state.player_position + obs_dim_array - 3
 
         is_visible = (
             (mob_positions[:, 0] < high[0]) &
