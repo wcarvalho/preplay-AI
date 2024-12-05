@@ -164,6 +164,7 @@ def simulate_n_trajectories(
         num_simulations: int = 5,
         use_offtask_policy: jax.Array = None,
         terminate_offtask: bool = False,
+        subtask_coeff: float = 1.0,
     ):
     """
 
@@ -207,7 +208,11 @@ def simulate_n_trajectories(
 
         # use subtask_q if use_offtask_policy=1 else use reg_q
         subtask_q = alpha*subtask_q + (1-alpha)*reg_q
-        q_vals = (1-beta)*subtask_q + beta*reg_q
+        if terminate_offtask:
+          q_vals = (1-beta)*subtask_q + beta*reg_q
+        else:
+          q_vals = reg_q + subtask_coeff*subtask_q
+          import ipdb; ipdb.set_trace()
         return q_vals
 
     def initial_predictions(x, prior_h, w, rng_):
@@ -381,6 +386,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
   num_offtask_goals: int = 5
   offtask_coeff: float = 1.0
   terminate_offtask: bool = False
+  subtask_coeff: float = 1.0
 
   simulation_policy: SimPolicy = None
 
@@ -569,6 +575,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
         num_steps=self.simulation_length,
         policy_fn=self.simulation_policy,
         terminate_offtask=self.terminate_offtask,
+        subtask_coeff=self.offtask_coeff,
         )
 
     # first do a rollowing window
@@ -830,7 +837,6 @@ class DynaLossFn(vbb.RecurrentLossFn):
       achievable = t.observation.achievable.astype(jnp.float32)
       achievable = jax.tree.map(lambda x: x[-1], achievable)
       any_achievable = achievable.sum() > .1
-      num_classes = t.observation.achievable.shape[-1]
       achieve_poss = achievable + 1e-5
       achieve_poss = achieve_poss/achieve_poss.sum()
 
@@ -841,6 +847,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
         seed=key_, sample_shape=(self.num_offtask_goals))
 
       # [num_offtask_goals, G]
+      num_classes = t.observation.achievable.shape[-1]
       goals = jax.nn.one_hot(goals, num_classes=num_classes)
 
       key, key_ = jax.random.split(key)
@@ -925,6 +932,7 @@ def make_loss_fn_class(config, **kwargs) -> DynaLossFn:
     offtask_coeff=config.get('OFFTASK_COEFF', 1.0),
     num_offtask_goals=config.get('NUM_OFFTASK_GOALS', 5),
     terminate_offtask=config.get('TERMINATE_OFFTASK', False),
+    subtask_coeff=config.get('SUBTASK_COEFF', 1.0),
     **kwargs
     )
 
@@ -1149,6 +1157,9 @@ class DynaAgentEnvModel(nn.Module):
         return self.q_fn(rnn_out)
 
     def subtask_q_fn(self, rnn_out, task):
+        kernel_init = nn.initializers.variance_scaling(
+            1.0, 'fan_in', 'normal', out_axis=0)
+        task = nn.Dense(128, kernel_init=kernel_init, use_bias=False)(task)
         inp = jnp.concatenate((rnn_out, task), axis=-1)
         return self.q_fn_subtask(inp)
 
