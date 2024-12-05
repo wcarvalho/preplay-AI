@@ -1041,8 +1041,7 @@ def learner_log_extra(
             goal_idx = goal.argmax(-1)
             achievement = Achievement(goal_idx).name
             title = f'{achievement}. Pos: {int(any_achievable)}'
-            title += f'\nt={i}'
-            title += f'\n{actions_taken[i]}'
+            title += f'\nt={i}. A={actions_taken[i]}'
             if i >= len(timesteps.reward) - 1: return title
             title += f'\nr={timesteps.reward[i+1]:.2f}, $\\gamma={timesteps.discount[i+1]}$'
             title += f'\nr_off={offtask_reward[i+1]:.2f}'
