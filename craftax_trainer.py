@@ -555,13 +555,13 @@ def sweep(search: str = ''):
         },
         'parameters': {
             "ALG": {'values': ['dyna']},
-            "SEED": {'values': list(range(1,2))},
+            "SEED": {'values': list(range(1,3))},
             "NUM_ENV_SEEDS": {'values': [0]},
-            "SIMULATION_LENGTH": {'values': [10, 15, 20]},
-            "TOTAL_BATCH_SIZE": {'values': [1280]},
+            "SIM_EPSILON": {'values': [0, .1, .2]},
+            #"STEP_COST": {'values': [1e-4, 1e-5]},
         },
         'overrides': ['alg=dyna', 'rlenv=craftax-1m-dyna', 'user=wilka'],
-        'group': 'dyna-14-sim-length',
+        'group': 'dyna-16-step-cost',
     }
   elif search == 'preplay':
     sweep_config = {
@@ -574,16 +574,13 @@ def sweep(search: str = ''):
           "SEED": {'values': list(range(1,2))},
           "NUM_ENV_SEEDS": {'values': [0]},
           "WINDOW_SIZE": {'values': [.75]},
-          "SIMULATION_LENGTH": {'values': [20]},
-          "TOTAL_BATCH_SIZE": {'values': [1280]},
           "NUM_OFFTASK_GOALS": {'values': [1, 4]},
-          #"TERMINATE_OFFTASK": {'values': [False]},
-          #"SUBTASK_COEFF": {'values': [1.0, .1, .01]},
-          "TERMINATE_OFFTASK": {'values': [True]},
-          #"SUBTASK_COEFF": {'values': [1.0, .1, .01]},
+          "TERMINATE_OFFTASK": {'values': [False]},
+          "SUBTASK_COEFF": {'values': [1.5, 1.0, 2.0]},
+          #"TERMINATE_OFFTASK": {'values': [True]},
       },
       'overrides': ['alg=preplay', 'rlenv=craftax-1m-dyna', 'user=wilka'],
-      'group': 'preplay-12-sum-offtask-fixed-env',
+      'group': 'preplay-13-sum-offtask-fixed-env',
     }
 
   elif search == 'pqn':

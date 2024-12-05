@@ -45,7 +45,7 @@ make_actor = base_agent.make_actor
 RnnState = jax.Array
 SimPolicy = Callable[[Qvalues, RngKey], int]
 
-MAX_REWARD = 8.0
+MAX_REWARD = 1.0
 
 @struct.dataclass
 class AgentState:
@@ -600,7 +600,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
           online_preds=online_preds,
           target_preds=target_preds,
           actions=all_a,
-          rewards=all_t.reward,
+          rewards=all_t.reward/MAX_REWARD,
           is_last=make_float(all_t.last()),
           non_terminal=all_t.discount,
           loss_mask=all_t_mask,
@@ -942,6 +942,7 @@ def make_train(**kwargs):
 
     epsilon_setting = config['SIM_EPSILON_SETTING']
     num_simulations = config['NUM_SIMULATIONS']
+    sim_epsilon = config.get('SIM_EPSILON', 0)
     if epsilon_setting == 1:
       # ACME default
       # range of ~(0.001, .1)
@@ -955,7 +956,7 @@ def make_train(**kwargs):
 
     epsilons = jax.random.choice(
         rng, vals, shape=(num_simulations - 1,))
-    epsilons = jnp.concatenate((jnp.zeros(1), epsilons))
+    epsilons = jnp.concatenate((jnp.array((sim_epsilon,)), epsilons))
     #greedy_idx = int(epsilons.argmin())
 
     def simulation_policy(

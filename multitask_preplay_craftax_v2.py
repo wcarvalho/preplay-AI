@@ -47,7 +47,7 @@ make_actor = base_agent.make_actor
 RnnState = jax.Array
 SimPolicy = Callable[[Qvalues, RngKey], int]
 
-MAX_REWARD = 8.0
+MAX_REWARD = 1.0
 
 @struct.dataclass
 class AgentState:
@@ -667,16 +667,19 @@ class DynaLossFn(vbb.RecurrentLossFn):
       all_t_mask = simulation_finished_mask(l_mask, next_t)
 
       achievements = all_t.observation.achievements.astype(jnp.float32)
-      coeff = g.astype(jnp.float32)
-      # [T, K, D] * [1, K, D] --> [T, K]
-      offtask_reward = (achievements * coeff[None]).sum(-1)
+      achievement_coefficients = all_t.observation.task_w.astype(jnp.float32)
+      achievement_coefficients = achievement_coefficients[..., :g.shape[-1]]
+
+      coeff_mask = g.astype(jnp.float32)
+      # [T, K, D] * [T, K, D] * [1, K, D] --> [T, K]
+      offtask_reward = (achievements * achievement_coefficients * coeff_mask[None]).sum(-1)
 
       offtask_batch_td_error, offtask_batch_loss_mean, offtask_metrics, offtask_log_info = self.loss_fn(
           timestep=all_t,
           online_preds=online_preds,
           target_preds=target_preds,
           actions=all_a,
-          rewards=offtask_reward,
+          rewards=offtask_reward / MAX_REWARD,
           is_last=make_float(all_t.last()),
           non_terminal=all_t.discount,
           loss_mask=all_t_mask,
@@ -731,7 +734,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
           online_preds=online_preds,
           target_preds=target_preds,
           actions=all_a,
-          rewards=all_t.reward,
+          rewards=all_t.reward/MAX_REWARD,
           is_last=make_float(all_t.last()),
           non_terminal=all_t.discount,
           loss_mask=all_t_mask,
