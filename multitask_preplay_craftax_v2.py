@@ -571,7 +571,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
         num_steps=self.simulation_length,
         policy_fn=self.simulation_policy,
         terminate_offtask=self.terminate_offtask,
-        subtask_coeff=self.offtask_coeff,
+        subtask_coeff=self.subtask_coeff,
         )
 
     # first do a rollowing window

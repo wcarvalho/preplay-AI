@@ -576,12 +576,14 @@ def sweep(search: str = ''):
           "WINDOW_SIZE": {'values': [.75]},
           "SIMULATION_LENGTH": {'values': [20]},
           "TOTAL_BATCH_SIZE": {'values': [1280]},
-          "TERMINATE_OFFTASK": {'values': [False, True]},
           "NUM_OFFTASK_GOALS": {'values': [1, 4]},
-          "SUBTASK_COEFF": {'values': [1.0, .1, .01]},
+          #"TERMINATE_OFFTASK": {'values': [False]},
+          #"SUBTASK_COEFF": {'values': [1.0, .1, .01]},
+          "TERMINATE_OFFTASK": {'values': [True]},
+          #"SUBTASK_COEFF": {'values': [1.0, .1, .01]},
       },
       'overrides': ['alg=preplay', 'rlenv=craftax-1m-dyna', 'user=wilka'],
-      'group': 'preplay-11-num-offtask-fixed-env',
+      'group': 'preplay-12-sum-offtask-fixed-env',
     }
 
   elif search == 'pqn':
