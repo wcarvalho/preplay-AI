@@ -208,10 +208,7 @@ def simulate_n_trajectories(
 
         # use subtask_q if use_offtask_policy=1 else use reg_q
         subtask_q = alpha*subtask_q + (1-alpha)*reg_q
-        if terminate_offtask:
-          q_vals = (1-beta)*subtask_q + beta*reg_q
-        else:
-          q_vals = reg_q + subtask_coeff*subtask_q
+        q_vals = (1-beta)*subtask_q + beta*reg_q
         return q_vals
 
     def initial_predictions(x, prior_h, w, rng_):
