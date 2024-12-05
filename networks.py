@@ -132,8 +132,10 @@ class CraftaxObsEncoder(nn.Module):
             action = jax.nn.one_hot(obs.previous_action, self.action_dim or 50)
             # common trick for one-hot encodings, same as nn.Embed
             # main benefit comes from adding action
-            kernel_init = nn.initializers.variance_scaling(1.0, 'fan_in', 'normal', out_axis=0)
-            action = nn.Dense(128, kernel_init=kernel_init)(action)
+            kernel_init = nn.initializers.variance_scaling(
+                1.0, 'fan_in', 'normal', out_axis=0)
+            action = nn.Dense(
+                128, kernel_init=kernel_init, use_bias=False)(action)
             outputs = jnp.concatenate((outputs, action), axis=-1)
         
         return outputs
