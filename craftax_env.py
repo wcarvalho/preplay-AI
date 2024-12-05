@@ -163,16 +163,24 @@ def get_possible_achievements(state: EnvState, use_precondition: bool = False) -
         mob_masks = mob_collection.mask
 
         # lower radius a bit
-        low = state.player_position - obs_dim_array + 3
-        high = state.player_position + obs_dim_array - 3
+        low = state.player_position - obs_dim_array//2 + 2
+        high = state.player_position + obs_dim_array//2 - 2
 
-        is_visible = (
-            (mob_positions[:, 0] < high[0]) &
-            (mob_positions[:, 0] >= low[0]) &
-            (mob_positions[:, 1] < high[1]) &
-            (mob_positions[:, 1] >= low[1]) &
-            mob_masks &
-            (mob_types == mob_type_id)
+        is_visible = jnp.logical_and(
+            jnp.logical_and(
+                jnp.logical_and(
+                    jnp.logical_and(
+                        jnp.logical_and(
+                            mob_positions[:, 0] < high[0],
+                            mob_positions[:, 0] >= low[0]
+                        ),
+                        mob_positions[:, 1] < high[1]
+                    ),
+                    mob_positions[:, 1] >= low[1]
+                ),
+                mob_masks
+            ),
+            mob_types == mob_type_id
         )
         is_visible = jnp.any(is_visible)
 
