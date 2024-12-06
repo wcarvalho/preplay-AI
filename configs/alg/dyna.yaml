@@ -49,7 +49,7 @@ SIM_POLICY: 'epsilon'
 SIM_EPSILON_SETTING: 3 # range of epsilons
 OFFTASK_SIMULATION: False
 OFFTASK_COEFF: 0.0
-
+WINDOW_SIZE: 1.0
 
 FIXED_EPSILON: 2 # range of epsilons
 EPSILON_START: 1.0
