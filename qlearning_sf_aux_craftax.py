@@ -222,6 +222,42 @@ def make_loss_fn_class(config) -> vbb.RecurrentLossFn:
     step_cost=config.get('STEP_COST', 0.),
     aux_coeff=config.get('AUX_COEFF', 0.001))
 
+
+class DuellingMLP(nn.Module):
+  hidden_dim: int
+  out_dim: int = 0
+  num_layers: int = 1
+  norm_type: str = 'none'
+  activation: str = 'relu'
+  activate_final: bool = True
+  use_bias: bool = False
+
+  @nn.compact
+  def __call__(self, x, train: bool = False):
+    value_mlp = MLP(
+        hidden_dim=self.hidden_dim,
+        num_layers=self.num_layers,
+        use_bias=self.use_bias,
+        out_dim=1,
+    )
+    advantage_mlp = MLP(
+        hidden_dim=self.hidden_dim,
+        num_layers=self.num_layers,
+        use_bias=self.use_bias,
+        out_dim=self.out_dim,
+    )
+    assert self.out_dim > 0, "must have at least one action"
+
+    value = value_mlp(x)  # [B, 1]
+    advantages = advantage_mlp(x)  # [B, A]
+
+    # Advantages have zero mean.
+    advantages -= jnp.mean(advantages, axis=-1, keepdims=True)  # [B, A]
+
+    q_values = value + advantages  # [B, A]
+
+    return q_values
+
 def make_craftax_agent(
         config: dict,
         env: environment.Environment,
@@ -253,7 +289,7 @@ def make_craftax_agent(
           action_dim=env.action_space(env_params).n,
           ),
         rnn=rnn,
-        q_fn=MLP(
+        q_fn=DuellingMLP(
            hidden_dim=config.get('Q_HIDDEN_DIM', 512),
            num_layers=config.get('NUM_Q_LAYERS', 2),
            out_dim=env.action_space(env_params).n,

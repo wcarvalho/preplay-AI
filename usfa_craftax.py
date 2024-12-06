@@ -90,7 +90,7 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
         batch_sf_loss = 0.5 * batch_sq_error
 
         # [T, B, N, C] --> [B]
-        batch_sf_loss_mean = batch_sf_loss.sum(axis=3).mean(axis=(0, 2))
+        batch_sf_loss_mean = batch_sf_loss.mean(axis=3).mean(axis=(0, 2))
 
         ################
         # Compute Q-loss
@@ -130,6 +130,8 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
                 'n_updates': steps,
             })
 
+        # mean over policy and cumulant dimensions
+        batch_td_error = jnp.abs(batch_td_error).mean(axis=(2,3))
         return batch_td_error, batch_loss_mean, metrics  # [T, B, N, C], [B]
 
 def make_loss_fn_class(config) -> vbb.RecurrentLossFn:
@@ -140,6 +142,125 @@ def make_loss_fn_class(config) -> vbb.RecurrentLossFn:
       aux_coeff=config.get('AUX_COEFF', 1.0),
       tx_pair=rlax.SIGNED_HYPERBOLIC_PAIR if config.get('TX_PAIR', 'none') == 'hyperbolic' else rlax.IDENTITY_PAIR,
       )
+
+
+class DuellingDotMLP(nn.Module):
+  hidden_dim: int
+  out_dim: int = 0
+  num_layers: int = 1
+  norm_type: str = 'none'
+  activation: str = 'relu'
+  activate_final: bool = True
+  use_bias: bool = False
+
+  @nn.compact
+  def __call__(self, x, task, train: bool = False):
+    task_dim = task.shape[-1]
+    value_mlp = MLP(
+        hidden_dim=self.hidden_dim,
+        num_layers=self.num_layers,
+        out_dim=task_dim,
+    )
+    advantage_mlp = MLP(
+        hidden_dim=self.hidden_dim,
+        num_layers=self.num_layers,
+        out_dim=self.out_dim*task_dim,
+    )
+    assert self.out_dim > 0, "must have at least one action"
+
+    # Compute value & advantage
+    value = value_mlp(x)  # [B, C]
+    advantages = advantage_mlp(x)  # [B, A*C]
+
+    # Reshape value and advantages
+    value = jnp.expand_dims(value, axis=-2)  # [B, 1, C]
+    # Reshape advantages to [B, (T), A, C] where T dimension is optional
+    advantages_shape = list(advantages.shape[:-1]) + [self.out_dim, task_dim]
+    advantages = jnp.reshape(advantages, advantages_shape)  # [B, A, C]
+
+    # Advantages have zero mean across actions
+    advantages -= jnp.mean(advantages, axis=1, keepdims=True)  # [B, A, C]
+
+    # Combine value and advantages
+    sf = value + advantages  # [B, A, C]
+
+    # Dot product with task vector to get Q-values
+    q_values = jnp.sum(sf * jnp.expand_dims(task, axis=-2), axis=-1)  # [B, A]
+
+    return sf, q_values
+
+
+class SfGpiHead(nn.Module):
+    num_actions: int
+    state_features_dim: int
+    train_tasks: jnp.ndarray
+    num_layers: int = 2
+    hidden_dim: int = 512
+    nsamples: int = 10
+    variance: float = 0.5
+    eval_task_support: str = 'train'
+
+    def setup(self):
+        self.policy_net = lambda x: x
+        self.sf_net = DuellingDotMLP(
+            hidden_dim=self.hidden_dim,
+            num_layers=self.num_layers,
+            out_dim=self.num_actions)
+
+    @nn.compact
+    def __call__(self, usfa_input: jnp.ndarray, task: jnp.ndarray, rng: jax.random.PRNGKey) -> USFAPreds:
+        policy = get_task_onehot(task, self.train_tasks)
+        if self.nsamples > 1:
+            rng, _rng = jax.random.split(rng)
+            policy_samples = sample_gauss(
+                mean=policy,
+                var=self.variance,
+                key=_rng,
+                nsamples=self.nsamples)
+            policy_base = jnp.expand_dims(policy, axis=-2)  # [1, D_w]
+            policies = jnp.concatenate(
+                (policy_base, policy_samples), axis=-2)  # [N+1, D_w]
+        else:
+            policies = jnp.expand_dims(policy, axis=-2)  # [1, D_w]
+
+        return self.sfgpi(usfa_input=usfa_input, policies=policies, task=task)
+
+    def evaluate(self,
+                 usfa_input: jnp.ndarray,
+                 task: jnp.ndarray) -> USFAPreds:
+
+        if self.eval_task_support == 'train':
+            policies = jnp.array(
+                [get_task_onehot(task, self.train_tasks) for task in self.train_tasks])
+        elif self.eval_task_support == 'eval':
+            policies = jnp.expand_dims(
+                get_task_onehot(task, self.train_tasks), axis=-2)
+        elif self.eval_task_support == 'train_eval':
+            task_expand = jnp.expand_dims(
+                get_task_onehot(task, self.train_tasks), axis=-2)
+            train_policies = jnp.array(
+                [get_task_onehot(task, self.train_tasks) for task in self.train_tasks])
+            policies = jnp.concatenate((train_policies, task_expand), axis=-2)
+        else:
+            raise RuntimeError(self.eval_task_support)
+
+        return self.sfgpi(usfa_input=usfa_input, policies=policies, task=task)
+
+    def sfgpi(self, usfa_input: jnp.ndarray, policies: jnp.ndarray, task: jnp.ndarray) -> USFAPreds:
+        def compute_sf_q(sf_input: jnp.ndarray, policy: jnp.ndarray, task: jnp.ndarray):
+            sf_input = jnp.concatenate((sf_input, policy), axis=-1)  # 2D
+            return self.sf_net(sf_input, task)
+
+        # []
+        policy_embeddings = self.policy_net(policies)
+        sfs, q_values = jax.vmap(compute_sf_q, in_axes=(None, 0, None), out_axes=0)(
+            usfa_input, policy_embeddings, task)
+
+        q_values = jnp.max(q_values, axis=-2)
+        policies = jnp.expand_dims(policies, axis=-2)
+        policies = jnp.tile(policies, (1, self.num_actions, 1))
+
+        return USFAPreds(sf=sfs, policy=policies, q_vals=q_values, task=task)
 
 def make_craftax_agent(
         config: dict,

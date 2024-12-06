@@ -534,6 +534,22 @@ def sweep(search: str = ''):
         'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
         'group': 'ql-sf-12',
     }
+  elif search == 'usfa':
+    sweep_config = {
+        'metric': {
+            'name': 'evaluator_performance-0/0.score',
+            'goal': 'maximize',
+        },
+        'parameters': {
+            "NUM_ENV_SEEDS": {'values': [100, 10_000]},
+            #"TX_PAIR": {'values': ['hyperbolic']},
+            # "NSAMPLES": {'values': [1, 5]},
+            "AUX_COEFF": {'values': [1.0, .1, .01, 0.]},
+        },
+        'overrides': ['alg=usfa', 'rlenv=craftax-10m', 'user=wilka'],
+        'group': 'usfa-6',
+    }
+
   elif search == 'alphazero':
     sweep_config = {
         'metric': {
@@ -600,7 +616,6 @@ def sweep(search: str = ''):
       'overrides': ['alg=preplay', 'rlenv=craftax-1m-dyna', 'user=wilka'],
       'group': 'preplay-14-q-head',
     }
-
   elif search == 'pqn':
     sweep_config = {
         'metric': {
@@ -615,23 +630,8 @@ def sweep(search: str = ''):
             "LR": {'values': [.001, .0003]},
             "NUM_ENVS": {'values': [256]},
         },
-        'overrides': ['alg=pqn-craftax', 'rlenv=craftax-1m', 'user=wilka'],
+        'overrides': ['alg=pqn-craftax', 'rlenv=craftax-10m', 'user=wilka'],
         'group': 'pqn-7',
-    }
-  elif search == 'usfa':
-    sweep_config = {
-        'metric': {
-            'name': 'evaluator_performance-0/0.score',
-            'goal': 'maximize',
-        },
-        'parameters': {
-            "NUM_ENV_SEEDS": {'values': [100, 10_000]},
-            "TX_PAIR": {'values': ['hyperbolic']},
-            #"NSAMPLES": {'values': [1, 5]},
-            "AUX_COEFF": {'values': [1.0, .1, .01]},
-        },
-        'overrides': ['alg=usfa', 'rlenv=craftax-1m', 'user=wilka'],
-        'group': 'usfa-6',
     }
   else:
     raise NotImplementedError(search)
