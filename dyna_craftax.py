@@ -519,7 +519,9 @@ class DynaLossFn(vbb.RecurrentLossFn):
         h_tm1 (jax.Array): [D], rnn-state at t-1
         h_tm1_target (jax.Array): [D], rnn-state at t-1 from target network
     """
-    roll = partial(rolling_window, size=self.window_size)
+    window_size = self.window_size if isinstance(self.window_size, int) else int(self.window_size*len(actions))
+    window_size = min(window_size, len(actions))
+    roll = partial(rolling_window, size=window_size)
     simulate = partial(simulate_n_trajectories,
         network=self.network,
         params=params,
@@ -617,7 +619,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
         h_online,        # [T, W, D]
         h_target,        # [T, W, D]
         loss_mask,       # [T, W]
-        jax.random.split(rng, self.window_size),            # [W, 2]
+        jax.random.split(rng, window_size),            # [W, 2]
       )
 
     # figuring out how to incorporate windows into TD error is annoying so punting

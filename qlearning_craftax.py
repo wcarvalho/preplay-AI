@@ -26,7 +26,7 @@ from jaxneurorl.agents.qlearning import *
 from jaxneurorl import losses
 from networks import CraftaxObsEncoder
 
-MAX_REWARD = 8.0
+MAX_REWARD = 1.0
 
 Agent = nn.Module
 Params = flax.core.FrozenDict

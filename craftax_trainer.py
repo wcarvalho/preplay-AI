@@ -511,12 +511,10 @@ def sweep(search: str = ''):
         },
         'parameters': {
             #"ENV": {'values': ['craftax']},
-            "SEED": {'values': list(range(1,3))},
-            "NUM_ENV_SEEDS": {'values': [0]},
-            "USE_PRECONDITION": {'values': [True, False]},
+            "SEED": {'values': list(range(1,2))},
         },
         'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'ql-18',
+        'group': 'ql-23-num-envs',
     }
   elif search == 'ql_sf':
     sweep_config = {
@@ -527,12 +525,12 @@ def sweep(search: str = ''):
         'parameters': {
             "ALG": {'values': ['qlearning_sf_aux']},
             #"ENV": {'values': ['craftax']},
-            "SEED": {'values': list(range(1,3))},
+            "SEED": {'values': list(range(1,2))},
             "NUM_ENV_SEEDS": {'values': [0]},
             "USE_PRECONDITION": {'values': [True, False]},
         },
         'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'ql-sf-12',
+        'group': 'ql-sf-13',
     }
   elif search == 'usfa':
     sweep_config = {
@@ -541,13 +539,14 @@ def sweep(search: str = ''):
             'goal': 'maximize',
         },
         'parameters': {
-            "NUM_ENV_SEEDS": {'values': [100, 10_000]},
+            "NUM_ENV_SEEDS": {'values': [0]},
             #"TX_PAIR": {'values': ['hyperbolic']},
             # "NSAMPLES": {'values': [1, 5]},
+            "USE_PRECONDITION": {'values': [True, False]},
             "AUX_COEFF": {'values': [1.0, .1, .01, 0.]},
         },
         'overrides': ['alg=usfa', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'usfa-6',
+        'group': 'usfa-7',
     }
 
   elif search == 'alphazero':
@@ -573,11 +572,10 @@ def sweep(search: str = ''):
             "ALG": {'values': ['dyna']},
             "SEED": {'values': list(range(1,2))},
             "NUM_ENV_SEEDS": {'values': [0]},
-            "SIM_EPSILON": {'values': [0]},
             "NUM_SIMULATIONS": {'values': [1]},
         },
         'overrides': ['alg=dyna', 'rlenv=craftax-1m-dyna', 'user=wilka'],
-        'group': 'dyna-16-step-cost',
+        'group': 'dyna-17-duelling',
     }
   elif search == 'preplay-1':
     sweep_config = {
@@ -589,10 +587,7 @@ def sweep(search: str = ''):
           "ALG": {'values': ['preplay']},
           "SEED": {'values': list(range(1,2))},
           "NUM_ENV_SEEDS": {'values': [0]},
-          "WINDOW_SIZE": {'values': [.75, 1.]},
-          "NUM_OFFTASK_GOALS": {'values': [1, 4]},
-          "TERMINATE_OFFTASK": {'values': [True, False]},
-          "NUM_OFFTASK_SIMULATIONS": {'values': [1, 2, 4]},
+
       },
       'overrides': ['alg=preplay', 'rlenv=craftax-1m-dyna', 'user=wilka'],
       'group': 'preplay-15-sim-policy',
