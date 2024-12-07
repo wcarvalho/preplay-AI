@@ -90,8 +90,10 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
         batch_sf_loss = 0.5 * batch_sq_error
 
         # [T, B, N, C] --> [B]
-        batch_sf_loss_mean = batch_sf_loss.mean(axis=3).mean(axis=(0, 2))
+        batch_sf_loss_mean = batch_sf_loss.sum(axis=3).mean(axis=(0, 2))
 
+        # mean over policy and cumulant dimensions
+        sf_td_error = jnp.abs(batch_td_error).mean(axis=(2, 3))
         ################
         # Compute Q-loss
         ################
@@ -100,17 +102,20 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
         task_w = task_w[:, :, None]  # add policy dimension (N)
 
         # [T, B, N, C] --> [T, B, N]
-        batch_q_loss = 0.5 * jnp.square(
-            (task_w*batch_td_error).sum(axis=-1))
+        q_td_error = (task_w*batch_td_error).sum(axis=-1)
+
+        batch_q_loss = 0.5 * jnp.square(q_td_error)
         # [T, B, N] --> [B]
         batch_q_loss_mean = batch_q_loss.mean(axis=(0, 2))
 
         batch_loss_mean = batch_q_loss_mean + self.aux_coeff*batch_sf_loss_mean
+        batch_td_error = q_td_error + self.aux_coeff*sf_td_error
 
         metrics = {
             '0.sf_loss': batch_sf_loss_mean.mean(),
             '0.q_loss': batch_q_loss_mean.mean(),
             '0.sf_td': jnp.abs(batch_td_error).mean(),
+            '0.q_td': jnp.abs(q_td_error).mean(),
             '1.cumulants': cumulants.mean(),
             'z.sf_mean': online_sf.mean(),
             'z.sf_var': online_sf.var(),

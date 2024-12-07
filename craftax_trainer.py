@@ -541,12 +541,13 @@ def sweep(search: str = ''):
             'goal': 'maximize',
         },
         'parameters': {
-            "NUM_ENV_SEEDS": {'values': [100, 10_000]},
-            #"TX_PAIR": {'values': ['hyperbolic']},
-            # "NSAMPLES": {'values': [1, 5]},
-            "AUX_COEFF": {'values': [1.0, .1, .01, 0.]},
+            "NUM_ENV_SEEDS": {'values': [0]},
+            "USE_PRECONDITION": {'values': [True, False]},
+            "AUX_COEFF": {'values': [1.0, 0.]},
+            "MAX_PRIORITY_WEIGHT": {'values': [0.]},
+            "IMPORTANCE_SAMPLING_EXPONENT": {'values': [0.]},
         },
-        'overrides': ['alg=usfa', 'rlenv=craftax-10m', 'user=wilka'],
+        'overrides': ['alg=usfa_craftax', 'rlenv=craftax-10m', 'user=wilka'],
         'group': 'usfa-6',
     }
 
