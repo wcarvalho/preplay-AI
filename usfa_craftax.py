@@ -30,7 +30,7 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
         achievements = data.timestep.observation.achievements.astype(online_sf.dtype)
         achievable = data.timestep.observation.achievable.astype(online_sf.dtype)
         cumulants = jnp.concatenate((achievements, achievable), axis=-1)
-        cumulants = cumulants - self.step_cost
+        cumulants = cumulants - self.step_cost/cumulants.shape[-1]
 
         # Get selector actions from online Q-values for double Q-learning
         dot = lambda x, y: (x * y).sum(axis=-1)
