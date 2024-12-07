@@ -192,7 +192,7 @@ class R2D2LossFn(vbb.RecurrentLossFn):
       target = jax.lax.stop_gradient(target)
       # [T, B, D], sum over achievements
       aux_error = target - predictions
-      aux_error = aux_error*loss_mask
+      aux_error = aux_error*loss_mask[:,:,None]
       achieve_loss = 0.5 * jnp.square(aux_error).mean(-1)
 
       batch_td_error = jnp.abs(batch_td_error) + self.aux_coeff*jnp.abs(aux_error).mean(-1)

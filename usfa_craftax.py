@@ -109,7 +109,10 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
         batch_q_loss_mean = batch_q_loss.mean(axis=(0, 2))
 
         batch_loss_mean = batch_q_loss_mean + self.aux_coeff*batch_sf_loss_mean
-        batch_td_error = q_td_error + self.aux_coeff*sf_td_error
+
+        # mean over policy dimension
+        batch_td_error = jnp.abs(q_td_error).mean(
+            2) + self.aux_coeff*jnp.abs(sf_td_error)
 
         metrics = {
             '0.sf_loss': batch_sf_loss_mean.mean(),
@@ -135,8 +138,6 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
                 'n_updates': steps,
             })
 
-        # mean over policy and cumulant dimensions
-        batch_td_error = jnp.abs(batch_td_error).mean(axis=(2,3))
         return batch_td_error, batch_loss_mean, metrics  # [T, B, N, C], [B]
 
 def make_loss_fn_class(config) -> vbb.RecurrentLossFn:
