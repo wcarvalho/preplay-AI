@@ -527,7 +527,8 @@ def sweep(search: str = ''):
             #"ENV": {'values': ['craftax']},
             "SEED": {'values': list(range(1,2))},
             "NUM_ENV_SEEDS": {'values': [0]},
-            "USE_PRECONDITION": {'values': [True, False]},
+            "AUX_COEFF": {'values': [.5, .1, .01]},
+            "USE_PRECONDITION": {'values': [True]},
         },
         'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
         'group': 'ql-sf-13',
@@ -540,12 +541,12 @@ def sweep(search: str = ''):
         },
         'parameters': {
             "NUM_ENV_SEEDS": {'values': [0]},
-            #"TX_PAIR": {'values': ['hyperbolic']},
-            # "NSAMPLES": {'values': [1, 5]},
-            "USE_PRECONDITION": {'values': [True, False]},
-            "AUX_COEFF": {'values': [1.0, .1, .01, 0.]},
+            "USE_PRECONDITION": {'values': [True]},
+            "AUX_COEFF": {'values': [1.0, 0.]},
+            "MAX_PRIORITY_WEIGHT": {'values': [0.]},
+            "IMPORTANCE_SAMPLING_EXPONENT": {'values': [0.]},
         },
-        'overrides': ['alg=usfa', 'rlenv=craftax-10m', 'user=wilka'],
+        'overrides': ['alg=usfa_craftax', 'rlenv=craftax-10m', 'user=wilka'],
         'group': 'usfa-7',
     }
 

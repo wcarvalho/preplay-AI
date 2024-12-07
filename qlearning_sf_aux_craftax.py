@@ -70,8 +70,9 @@ class RnnAgent(nn.Module):
         rng, _rng = jax.random.split(rng)
         new_rnn_state, rnn_out = self.rnn(rnn_state, rnn_in, _rng)
 
-        q_vals = self.q_fn(rnn_out)
         achieve_vals = self.achieve_fn(rnn_out)
+        q_in = jnp.concatenate((rnn_out, achieve_vals), axis=-1)
+        q_vals = self.q_fn(q_in)
         return Predictions(q_vals, achieve_vals, rnn_out), new_rnn_state
 
     def unroll(self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey):
@@ -84,8 +85,9 @@ class RnnAgent(nn.Module):
         rng, _rng = jax.random.split(rng)
         new_rnn_state, rnn_out = self.rnn.unroll(rnn_state, rnn_in, _rng)
 
-        q_vals = nn.BatchApply(self.q_fn)(rnn_out)
         achieve_vals = nn.BatchApply(self.achieve_fn)(rnn_out)
+        q_in = jnp.concatenate((rnn_out, achieve_vals), axis=-1)
+        q_vals = nn.BatchApply(self.q_fn)(q_in)
         return Predictions(q_vals, achieve_vals, rnn_out), new_rnn_state
 
     def initialize_carry(self, *args, **kwargs):
@@ -190,11 +192,12 @@ class R2D2LossFn(vbb.RecurrentLossFn):
       target = jax.lax.stop_gradient(target)
       # [T, B, D], sum over achievements
       aux_error = target - predictions
+      aux_error = aux_error*loss_mask
       achieve_loss = 0.5 * jnp.square(aux_error).mean(-1)
 
       batch_td_error = jnp.abs(batch_td_error) + self.aux_coeff*jnp.abs(aux_error).mean(-1)
 
-      achieve_loss = achieve_loss.mean(axis=0)  # [B]
+      achieve_loss = (achieve_loss*loss_mask).mean(0)
       metrics['0.achieve_loss'] = achieve_loss
       metrics['0.full_td'] = batch_td_error
       batch_loss_mean = batch_loss_mean + self.aux_coeff*achieve_loss
