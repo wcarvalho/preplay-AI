@@ -527,11 +527,11 @@ def sweep(search: str = ''):
             #"ENV": {'values': ['craftax']},
             "SEED": {'values': list(range(1,2))},
             "NUM_ENV_SEEDS": {'values': [0]},
-            "AUX_COEFF": {'values': [.5, .1, .01]},
+            "AUX_COEFF": {'values': [1e-3, 1e-4, 1e-5]},
             "USE_PRECONDITION": {'values': [True]},
         },
         'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'ql-sf-13',
+        'group': 'ql-sf-14',
     }
   elif search == 'usfa':
     sweep_config = {
@@ -542,12 +542,12 @@ def sweep(search: str = ''):
         'parameters': {
             "NUM_ENV_SEEDS": {'values': [0]},
             "USE_PRECONDITION": {'values': [True]},
-            "AUX_COEFF": {'values': [1.0, 0.]},
+            "AUX_COEFF": {'values': [1e-3, 1e-4, 0.]},
             "MAX_PRIORITY_WEIGHT": {'values': [0.]},
             "IMPORTANCE_SAMPLING_EXPONENT": {'values': [0.]},
         },
         'overrides': ['alg=usfa_craftax', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'usfa-7',
+        'group': 'usfa-8',
     }
 
   elif search == 'alphazero':

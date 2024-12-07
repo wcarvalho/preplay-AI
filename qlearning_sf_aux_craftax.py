@@ -71,7 +71,9 @@ class RnnAgent(nn.Module):
         new_rnn_state, rnn_out = self.rnn(rnn_state, rnn_in, _rng)
 
         achieve_vals = self.achieve_fn(rnn_out)
-        q_in = jnp.concatenate((rnn_out, achieve_vals), axis=-1)
+        q_in = jnp.concatenate((
+           rnn_out,
+           jax.lax.stop_gradient(achieve_vals)), axis=-1)
         q_vals = self.q_fn(q_in)
         return Predictions(q_vals, achieve_vals, rnn_out), new_rnn_state
 
@@ -86,7 +88,9 @@ class RnnAgent(nn.Module):
         new_rnn_state, rnn_out = self.rnn.unroll(rnn_state, rnn_in, _rng)
 
         achieve_vals = nn.BatchApply(self.achieve_fn)(rnn_out)
-        q_in = jnp.concatenate((rnn_out, achieve_vals), axis=-1)
+        q_in = jnp.concatenate((
+           rnn_out,
+           jax.lax.stop_gradient(achieve_vals)), axis=-1)
         q_vals = nn.BatchApply(self.q_fn)(q_in)
         return Predictions(q_vals, achieve_vals, rnn_out), new_rnn_state
 
