@@ -407,7 +407,6 @@ def create_metrics(log_states, dones, prefix="eval"):
         lambda x: (x * dones).sum() / (1e-5 + dones.sum()),
         metrics
     )
-
     return metrics
 
 def evaluate_model(network, params, rng, env, test_env_params, config):
@@ -441,7 +440,6 @@ def evaluate_model(network, params, rng, env, test_env_params, config):
         _eval_step, carry, None, config["NUM_STEPS"] * 100
     )
     metrics = create_metrics(log_states, dones)
-
     return metrics
 
 def make_train(config, env, env_params, test_env_params):
@@ -702,7 +700,7 @@ def make_train(config, env, env_params, test_env_params):
 
             metric = create_metrics(traj_states, traj_batch.done)
             rng = update_state[-1]
-            if config["DEBUG"] and config["USE_WANDB"]:
+            if config["wandb"]:
 
                 def callback(metric, update_step):
                     to_log = create_log_dict(metric, config)
@@ -724,20 +722,14 @@ def make_train(config, env, env_params, test_env_params):
                     config=config,
 
                 )
-                
-                if config["DEBUG"] and config["USE_WANDB"]:
-                    def eval_callback(eval_metrics, update_step):
-                        to_log = create_log_dict(eval_metrics, config)
-                        # Add 'eval_' prefix to all metrics
-                        to_log = {f"eval_{k}": v for k, v in to_log.items()}
-                        batch_log(update_step, to_log, config)
-                    
-                    jax.debug.callback(eval_callback, eval_metrics, update_step)
-                
-                return rng
+                eval_metrics = jax.tree.map(lambda x: x.mean(), eval_metrics)
+                def callback(m):
+                  wandb.log(m)
+                jax.debug.callback(callback, eval_metrics)
 
             # Condition for evaluation (every 10% of training)
             should_eval = ((update_step + 1) % (config["NUM_UPDATES"] // 10)) == 0
+            should_eval = jnp.logical_or(should_eval, update_step == 0)
             rng, eval_rng = jax.random.split(rng)
             jax.lax.cond(
                 should_eval,
