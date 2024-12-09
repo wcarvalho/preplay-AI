@@ -7,13 +7,11 @@ JAX_DISABLE_JIT=1 \
 HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue craftax_ppo_trainer.py \
   app.parallel=none \
   app.debug=True \
-  app.wandb=False \
-  app.search=ql
+  app.wandb=False
 
 RUNNING ON SLURM:
 python craftax_ppo_trainer.py \
-  app.parallel=slurm \
-  app.search=usfa
+  app.parallel=slurm
 """
 
 from typing import Any, Callable, Dict, Union, Optional, Sequence, NamedTuple
@@ -203,7 +201,8 @@ class LogWrapper(GymnaxWrapper):
         )
         return obs, state, reward, done, info
 
-class OptimisticResetVecEnvWrapper(object):
+
+class OptimisticResetVecEnvWrapper(GymnaxWrapper):
     """
     Provides efficient 'optimistic' resets.
     The wrapper also necessarily handles the batching of environment steps and resetting.
@@ -211,12 +210,8 @@ class OptimisticResetVecEnvWrapper(object):
     chance of duplicate resets.
     """
 
-    def __getattr__(self, name):
-      # provide proxy access to regular attributes of wrapped object
-        return getattr(self._env, name)
-
     def __init__(self, env, num_envs: int, reset_ratio: int):
-        self._env = env
+        super().__init__(env)
 
         self.num_envs = num_envs
         self.reset_ratio = reset_ratio
@@ -232,27 +227,24 @@ class OptimisticResetVecEnvWrapper(object):
     def reset(self, rng, params=None):
         rng, _rng = jax.random.split(rng)
         rngs = jax.random.split(_rng, self.num_envs)
-        timestep = self.reset_fn(rngs, params)
-        return timestep
+        obs, env_state = self.reset_fn(rngs, params)
+        return obs, env_state
 
     @partial(jax.jit, static_argnums=(0, 4))
-    def step(self, rng, prior_timestep, action, params=None):
+    def step(self, rng, state, action, params=None):
 
         rng, _rng = jax.random.split(rng)
         rngs = jax.random.split(_rng, self.num_envs)
-        timestep_st = self.step_fn(
-            rngs, prior_timestep, action, params)
+        obs_st, state_st, reward, done, info = self.step_fn(
+            rngs, state, action, params)
 
         rng, _rng = jax.random.split(rng)
         rngs = jax.random.split(_rng, self.num_resets)
-        timestep_re = self.reset_fn(rngs, params)
+        obs_re, state_re = self.reset_fn(rngs, params)
 
         rng, _rng = jax.random.split(rng)
         reset_indexes = jnp.arange(self.num_resets).repeat(self.reset_ratio)
 
-        # NOTE: CHANGE: if PRIOR timestep is last, then we are resetting
-        # before, if CURRENT timestep is last, then we are resetting
-        done = prior_timestep.last()
         being_reset = jax.random.choice(
             _rng,
             jnp.arange(self.num_envs),
@@ -263,18 +255,24 @@ class OptimisticResetVecEnvWrapper(object):
         reset_indexes = reset_indexes.at[being_reset].set(
             jnp.arange(self.num_resets))
 
-        timestep_re = jax.tree.map(lambda x: x[reset_indexes], timestep_re)
+        obs_re = jax.tree.map(lambda x: x[reset_indexes], obs_re)
+        state_re = jax.tree.map(lambda x: x[reset_indexes], state_re)
 
         # Auto-reset environment based on termination
-        def auto_reset(done, timestep_re, timestep_st):
-            return jax.tree.map(
-                lambda x, y: jax.lax.select(done, x, y), timestep_re, timestep_st
+        def auto_reset(done, state_re, state_st, obs_re, obs_st):
+            state = jax.tree.map(
+                lambda x, y: jax.lax.select(done, x, y), state_re, state_st
+            )
+            obs = jax.tree.map(
+                lambda x, y: jax.lax.select(done, x, y), obs_re, obs_st
             )
 
-        timestep = jax.vmap(auto_reset)(
-            done, timestep_re, timestep_st)
+            return state, obs
 
-        return timestep
+        state, obs = jax.vmap(auto_reset)(
+            done, state_re, state_st, obs_re, obs_st)
+
+        return obs, state, reward, done, info
 
 class ScannedRNN(nn.Module):
     @partial(
@@ -311,27 +309,44 @@ class ActorCriticRNN(nn.Module):
     @nn.compact
     def __call__(self, hidden, x):
         obs, dones = x
-        embedding = nn.Dense(
-            self.config["LAYER_SIZE"],
-            kernel_init=orthogonal(np.sqrt(2)),
-            bias_init=constant(0.0),
-        )(obs)
+
+        def embed(x): 
+            return nn.Dense(
+              self.config["LAYER_SIZE"],
+              kernel_init=orthogonal(np.sqrt(2)),
+              bias_init=constant(0.0),
+          )(x)
+        #####
+        # image
+        #####
+        image = obs.image
+        embedding = embed(image)
+        embedding = nn.relu(embedding)
+        #####
+        # action + achievable
+        #####
+        def embed_binary(x): 
+            return nn.Dense(
+              128,
+              kernel_init=nn.initializers.variance_scaling(
+                  1.0, 'fan_in', 'normal', out_axis=0),
+              bias_init=constant(0.0),
+          )(x)
+        previous_action = jax.nn.one_hot(obs.previous_action, self.action_dim)
+        to_concat = (
+            embedding,
+            embed_binary(previous_action),
+            embed_binary(obs.achievable.astype(jnp.float32)))
+        embedding = jnp.concatenate(to_concat, axis=-1)
+        embedding = embed(image)
         embedding = nn.relu(embedding)
 
         rnn_in = (embedding, dones)
         hidden, embedding = ScannedRNN()(hidden, rnn_in)
 
-        actor_mean = nn.Dense(
-            self.config["LAYER_SIZE"],
-            kernel_init=orthogonal(2),
-            bias_init=constant(0.0),
-        )(embedding)
+        actor_mean = embed(embedding)
         actor_mean = nn.relu(actor_mean)
-        actor_mean = nn.Dense(
-            self.config["LAYER_SIZE"],
-            kernel_init=orthogonal(2),
-            bias_init=constant(0.0),
-        )(actor_mean)
+        actor_mean = embed(actor_mean)
         actor_mean = nn.relu(actor_mean)
         actor_mean = nn.Dense(
             self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
@@ -339,17 +354,9 @@ class ActorCriticRNN(nn.Module):
 
         pi = distrax.Categorical(logits=actor_mean)
 
-        critic = nn.Dense(
-            self.config["LAYER_SIZE"],
-            kernel_init=orthogonal(2),
-            bias_init=constant(0.0),
-        )(embedding)
+        critic = embed(embedding)
         critic = nn.relu(critic)
-        critic = nn.Dense(
-            self.config["LAYER_SIZE"],
-            kernel_init=orthogonal(2),
-            bias_init=constant(0.0),
-        )(critic)
+        critic = embed(critic)
         critic = nn.relu(critic)
         critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(
             critic
@@ -368,6 +375,41 @@ class Transition(NamedTuple):
     info: jnp.ndarray
 
 
+def create_metrics(log_states, dones, prefix="eval"):
+    """Create evaluation metrics dictionary and compute episode averages.
+    
+    Args:
+        log_states: LogEnvState containing episode returns and lengths
+        achievements: Array of achievement values [T, B, A]
+        dones: Boolean array indicating episode completion
+        prefix: String prefix for metric keys (default: "eval")
+        
+    Returns:
+        Dictionary of averaged evaluation metrics
+    """
+    main_key = prefix
+    ach_key = f"{prefix}-achievements"
+
+    metrics = {}
+    metrics[f"{main_key}/0.episode_return"] = log_states.returned_episode_returns
+    metrics[f"{main_key}/0.score"] = (
+        log_states.returned_episode_returns/MAX_SCORE)*100.0
+    metrics[f"{main_key}/0.episode_length"] = log_states.returned_episode_lengths
+
+    achievements = log_states.env_state.achievements  # [T, B, A]
+    achievements = achievements * dones[:, :, None] * 100.0  # Scale
+    for achievement in Achievement:
+        name = f"Achievements/{achievement.name.lower()}"
+        metrics[f"{ach_key}/{name}"] = achievements[:, :, achievement.value]
+
+    # Compute final metrics (average over episodes)
+    metrics = jax.tree.map(
+        lambda x: (x * dones).sum() / (1e-5 + dones.sum()),
+        metrics
+    )
+
+    return metrics
+
 def evaluate_model(network, params, rng, env, test_env_params, config):
     """Evaluate the model on test environments."""
     
@@ -375,7 +417,7 @@ def evaluate_model(network, params, rng, env, test_env_params, config):
         hstate, obs, done, rng, log_state = carry
         
         # Select action
-        ac_in = (obs[np.newaxis, :], done[np.newaxis, :])
+        ac_in = jax.tree.map(lambda x: x[jnp.newaxis, :], (obs, done))
         hstate, pi, value = network.apply(params, hstate, ac_in)
         rng, _rng = jax.random.split(rng)
         action = pi.sample(seed=_rng)
@@ -398,32 +440,9 @@ def evaluate_model(network, params, rng, env, test_env_params, config):
     _, (rewards, dones, log_states) = jax.lax.scan(
         _eval_step, carry, None, config["NUM_STEPS"] * 100
     )
-    
-    # Process achievements similar to craftax_experience_logger
-    achievements = log_states.env_state.achievements  # [T, B, A]
-    achievements = achievements * dones[:,:,None] * 100.0  # Scale achievements to percentages
-    
-    # Use same naming convention as craftax_experience_logger
-    key = "eval"
-    main_key = key
-    ach_key = f"{key}-achievements"
-    
-    metrics = {}
-    metrics[f"{main_key}/0.episode_return"] = log_states.returned_episode_returns
-    metrics[f"{main_key}/0.score"] = (log_states.returned_episode_returns/MAX_SCORE)*100.0
-    metrics[f"{main_key}/0.episode_length"] = log_states.returned_episode_lengths
-    
-    for achievement in Achievement:
-        name = f"Achievements/{achievement.name.lower()}"
-        metrics[f"{ach_key}/{name}"] = achievements[:, :, achievement.value]
-    
-    # Compute final metrics (average over episodes)
-    eval_metrics = jax.tree_map(
-        lambda x: (x * dones).sum() / (1e-5 + dones.sum()),
-        metrics
-    )
-    
-    return eval_metrics
+    metrics = create_metrics(log_states, dones)
+
+    return metrics
 
 def make_train(config, env, env_params, test_env_params):
     config["NUM_UPDATES"] = (
@@ -431,16 +450,6 @@ def make_train(config, env, env_params, test_env_params):
     )
     config["MINIBATCH_SIZE"] = (
         config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
-    )
-
-    # Wrap with some extra logging
-    env = LogWrapper(env)
-
-    # Wrap with a batcher, maybe using optimistic resets
-    env = OptimisticResetVecEnvWrapper(
-        env,
-        num_envs=config["NUM_ENVS"],
-        reset_ratio=min(config["OPTIMISTIC_RESET_RATIO"], config["NUM_ENVS"]),
     )
 
     def linear_schedule(count):
@@ -455,12 +464,12 @@ def make_train(config, env, env_params, test_env_params):
         # INIT NETWORK
         network = ActorCriticRNN(env.action_space(env_params).n, config=config)
         rng, _rng = jax.random.split(rng)
+        init_obs, init_env_state = env.reset(rng, env_params)
         init_x = (
-            jnp.zeros(
-                (1, config["NUM_ENVS"], *env.observation_space(env_params).shape)
-            ),
-            jnp.zeros((1, config["NUM_ENVS"])),
+            init_obs,
+            jnp.zeros((config["NUM_ENVS"])),
         )
+        init_x = jax.tree.map(lambda x: x[None], init_x)
         init_hstate = ScannedRNN.initialize_carry(
             config["NUM_ENVS"], config["LAYER_SIZE"]
         )
@@ -506,7 +515,7 @@ def make_train(config, env, env_params, test_env_params):
                 rng, _rng = jax.random.split(rng)
 
                 # SELECT ACTION
-                ac_in = (last_obs[np.newaxis, :], last_done[np.newaxis, :])
+                ac_in = jax.tree.map(lambda x: x[np.newaxis, :], (last_obs, last_done))
                 hstate, pi, value = network.apply(train_state.params, hstate, ac_in)
                 action = pi.sample(seed=_rng)
                 log_prob = pi.log_prob(action)
@@ -533,10 +542,10 @@ def make_train(config, env, env_params, test_env_params):
                     rng,
                     update_step,
                 )
-                return runner_state, transition
+                return runner_state, (transition, env_state)
 
             initial_hstate = runner_state[-3]
-            runner_state, traj_batch = jax.lax.scan(
+            runner_state, (traj_batch, traj_states) = jax.lax.scan(
                 _env_step, runner_state, None, config["NUM_STEPS"]
             )
 
@@ -550,7 +559,7 @@ def make_train(config, env, env_params, test_env_params):
                 rng,
                 update_step,
             ) = runner_state
-            ac_in = (last_obs[np.newaxis, :], last_done[np.newaxis, :])
+            ac_in = jax.tree.map(lambda x: x[np.newaxis, :], (last_obs, last_done))
             _, _, last_val = network.apply(train_state.params, hstate, ac_in)
             last_val = last_val.squeeze(0)
 
@@ -690,11 +699,8 @@ def make_train(config, env, env_params, test_env_params):
                 _update_epoch, update_state, None, config["UPDATE_EPOCHS"]
             )
             train_state = update_state[0]
-            metric = jax.tree.map(
-                lambda x: (x * traj_batch.info["returned_episode"]).sum()
-                / traj_batch.info["returned_episode"].sum(),
-                traj_batch.info,
-            )
+
+            metric = create_metrics(traj_states, traj_batch.done)
             rng = update_state[-1]
             if config["DEBUG"] and config["USE_WANDB"]:
 
@@ -708,8 +714,7 @@ def make_train(config, env, env_params, test_env_params):
             # EVALUATION
             ############################################################
             def do_eval(args):
-                train_state, rng, update_step = args
-                rng, eval_rng = jax.random.split(rng)
+                train_state, eval_rng, update_step = args
                 eval_metrics = evaluate_model(
                     network=network, 
                     params=train_state.params, 
@@ -733,11 +738,12 @@ def make_train(config, env, env_params, test_env_params):
 
             # Condition for evaluation (every 10% of training)
             should_eval = ((update_step + 1) % (config["NUM_UPDATES"] // 10)) == 0
-            rng = jax.lax.cond(
+            rng, eval_rng = jax.random.split(rng)
+            jax.lax.cond(
                 should_eval,
                 do_eval,
-                lambda x: x,
-                (train_state, rng, update_step)
+                lambda x: None,
+                (train_state, eval_rng, update_step)
             )
 
             runner_state = (
@@ -790,7 +796,22 @@ def run_single(
       env_params = env.default_params
       test_env_params = env.default_params
 
-    train_fn = make_train(config=config, env=env)
+    # Wrap with some extra logging
+    env = LogWrapper(env)
+
+    # Wrap with a batcher, maybe using optimistic resets
+    env = OptimisticResetVecEnvWrapper(
+        env,
+        num_envs=config["NUM_ENVS"],
+        reset_ratio=min(config["OPTIMISTIC_RESET_RATIO"], config["NUM_ENVS"]),
+    )
+
+    train_fn = make_train(
+        config=config,
+        env=env,
+        env_params=env_params,
+        test_env_params=test_env_params,
+        )
 
     start_time = time.time()
     train_vjit = jax.jit(jax.vmap(train_fn))
