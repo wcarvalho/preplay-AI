@@ -4,6 +4,7 @@ TESTING:
 JAX_DEBUG_NANS=True \
 JAX_DISABLE_JIT=1 \
 HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue craftax_trainer.py \
+  app.parallel=none \
   app.debug=True \
   app.wandb=False \
   app.search=ql
@@ -503,72 +504,70 @@ def run_single(
 
 def sweep(search: str = ''):
   search = search or 'ql'
+  ############################################################
+  # Testing
+  ############################################################
+  metric = {
+    'name': 'evaluator_performance-0/0.score',
+    'goal': 'maximize',
+  }
   if search == 'ql':
     sweep_config = {
-        'metric': {
-            'name': 'evaluator_performance-0/0.score',
-            'goal': 'maximize',
-        },
+        'metric': metric,
         'parameters': {
             #"ENV": {'values': ['craftax']},
+            "NUM_ENV_SEEDS": {'values': [0]},
             "SEED": {'values': list(range(1,2))},
         },
         'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'ql-23-num-envs',
+        'group': 'ql-24-achievable',
     }
   elif search == 'ql_sf':
     sweep_config = {
-        'metric': {
-            'name': 'evaluator_performance-0/0.score',
-            'goal': 'maximize',
-        },
+        'metric': metric,
         'parameters': {
             "ALG": {'values': ['qlearning_sf_aux']},
             #"ENV": {'values': ['craftax']},
             "SEED": {'values': list(range(1,2))},
             "NUM_ENV_SEEDS": {'values': [0]},
+            "NUM_ENVS": {'values': [128]},
             "AUX_COEFF": {'values': [1e-6, 1e-7]},
             "USE_PRECONDITION": {'values': [True]},
         },
         'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'ql-sf-14',
+        'group': 'ql-sf-16-achievable',
     }
   elif search == 'usfa':
     sweep_config = {
-        'metric': {
-            'name': 'evaluator_performance-0/0.score',
-            'goal': 'maximize',
-        },
+        'metric': metric,
         'parameters': {
             "NUM_ENV_SEEDS": {'values': [0]},
+            "NUM_ENVS": {'values': [128]},
             "USE_PRECONDITION": {'values': [True]},
             "AUX_COEFF": {'values': [1e-5, 1e-6]},
             "MAX_PRIORITY_WEIGHT": {'values': [0., .9]},
             "IMPORTANCE_SAMPLING_EXPONENT": {'values': [0., .6]},
         },
         'overrides': ['alg=usfa_craftax', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'usfa-8',
+        'group': 'usfa-10-achievable',
     }
 
   elif search == 'alphazero':
     sweep_config = {
-        'metric': {
-            'name': 'evaluator_performance-0/0.score',
-            'goal': 'maximize',
-        },
+        'metric': metric,
         'parameters': {
             "NUM_ENV_SEEDS": {'values': [0]},
             "NUM_SIMULATIONS": {'values': [2]},
+            "TRAINING_INTERVAL": {'values': [1, 5]},
+            "MAX_VALUE": {'values': [10, 20]},
+            "SAMPLE_LENGTH": {'values': [40, 60, 80]},
         },
         'overrides': ['alg=alphazero', 'rlenv=craftax-1m-dyna', 'user=wilka'],
-        'group': 'alphazero-2',
+        'group': 'alphazero-3',
     }
   elif search == 'dyna':
     sweep_config = {
-        'metric': {
-            'name': 'evaluator_performance-0/0.score',
-            'goal': 'maximize',
-        },
+        'metric': metric,
         'parameters': {
             "ALG": {'values': ['dyna']},
             "SEED": {'values': list(range(1,2))},
@@ -578,46 +577,20 @@ def sweep(search: str = ''):
         'overrides': ['alg=dyna', 'rlenv=craftax-1m-dyna', 'user=wilka'],
         'group': 'dyna-17-duelling',
     }
-  elif search == 'preplay-1':
+  elif search == 'preplay':
     sweep_config = {
-      'metric': {
-          'name': 'evaluator_performance-0/0.score',
-          'goal': 'maximize',
-      },
+      'metric': metric,
       'parameters': {
           "ALG": {'values': ['preplay']},
           "SEED": {'values': list(range(1,2))},
           "NUM_ENV_SEEDS": {'values': [0]},
-
       },
       'overrides': ['alg=preplay', 'rlenv=craftax-1m-dyna', 'user=wilka'],
       'group': 'preplay-15-sim-policy',
     }
-  elif search == 'preplay-2':
-    sweep_config = {
-      'metric': {
-          'name': 'evaluator_performance-0/0.score',
-          'goal': 'maximize',
-      },
-      'parameters': {
-          "ALG": {'values': ['preplay']},
-          "SEED": {'values': list(range(1,2))},
-          "NUM_ENV_SEEDS": {'values': [0]},
-          "WINDOW_SIZE": {'values': [.75]},
-          "NUM_OFFTASK_GOALS": {'values': [1]},
-          "TERMINATE_OFFTASK": {'values': [True]},
-          "QHEAD_TYPE": {'values': ['duelling', 'dot']},
-          "SHARE_HEADS": {'values': [True, False]},
-      },
-      'overrides': ['alg=preplay', 'rlenv=craftax-1m-dyna', 'user=wilka'],
-      'group': 'preplay-14-q-head',
-    }
   elif search == 'pqn':
     sweep_config = {
-        'metric': {
-            'name': 'evaluator_performance-0/0.score',
-            'goal': 'maximize',
-        },
+        'metric': metric,
         'parameters': {
             "FIXED_EPSILON": {'values': [0, 2]},
             "LAMBDA": {'values': [.95, .5]},
@@ -629,8 +602,68 @@ def sweep(search: str = ''):
         'overrides': ['alg=pqn-craftax', 'rlenv=craftax-10m', 'user=wilka'],
         'group': 'pqn-7',
     }
+  ############################################################
+  # More "final" experiments
+  ############################################################
+  elif search == 'ql-eval':
+    sweep_config = {
+        'metric': metric,
+        'parameters': {
+            "NUM_ENV_SEEDS": {'values': [64, 0]},
+            "SEED": {'values': list(range(1,3))},
+        },
+        'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
+        'group': 'ql-eval-2',
+    }
+  elif search == 'ql_sf-eval':
+    sweep_config = {
+        'metric': metric,
+        'parameters': {
+            "ALG": {'values': ['qlearning_sf_aux']},
+            "NUM_ENV_SEEDS": {'values': [64, 0]},
+            "SEED": {'values': list(range(1,4))},
+        },
+        'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
+        'group': 'ql-sf-eval-2',
+    }
+
+  elif search == 'alphazero-eval':
+    sweep_config = {
+        'metric': metric,
+        'parameters': {
+            "NUM_ENV_SEEDS": {'values': [64, 0]},
+            "SEED": {'values': list(range(1,4))},
+        },
+        'overrides': ['alg=alphazero', 'rlenv=craftax-1m-dyna', 'user=wilka'],
+        'group': 'alphazero-eval-2',
+    }
+  elif search == 'dyna-eval':
+    sweep_config = {
+        'metric': metric,
+        'parameters': {
+            "ALG": {'values': ['dyna']},
+            "NUM_ENV_SEEDS": {'values': [64, 0]},
+            "SEED": {'values': list(range(1,4))},
+            "NUM_SIMULATIONS": {'values': [1, 2, 5, 7]},
+        },
+        'overrides': ['alg=dyna', 'rlenv=craftax-1m-dyna', 'user=wilka'],
+        'group': 'dyna-eval-2',
+    }
+  elif search == 'preplay-eval':
+    sweep_config = {
+      'metric': metric,
+      'parameters': {
+          "ALG": {'values': ['preplay']},
+          "NUM_ENV_SEEDS": {'values': [64, 0]},
+          "SEED": {'values': list(range(1,4))},
+          "NUM_OFFTASK_GOALS": {'values': [1, 4, 6]},
+      },
+      'overrides': ['alg=preplay', 'rlenv=craftax-1m-dyna', 'user=wilka'],
+      'group': 'preplay-eval-2',
+    }
   else:
     raise NotImplementedError(search)
+
 
   return sweep_config
 
@@ -638,7 +671,7 @@ CONFIG_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), 'configs')
 @hydra.main(
     version_base=None,
     config_path=CONFIG_PATH,
-    config_name="config")
+    config_name="config_craftax")
 def main(config: DictConfig):
   launcher.run(
       config,

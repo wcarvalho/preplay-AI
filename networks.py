@@ -128,14 +128,20 @@ class CraftaxObsEncoder(nn.Module):
               use_bias=self.use_bias,
               activation=self.activation)(image, train)
 
-        if obs.previous_action is not None:
-            action = jax.nn.one_hot(obs.previous_action, self.action_dim or 50)
-            # common trick for one-hot encodings, same as nn.Embed
-            # main benefit comes from adding action
-            kernel_init = nn.initializers.variance_scaling(
-                1.0, 'fan_in', 'normal', out_axis=0)
-            action = nn.Dense(
-                128, kernel_init=kernel_init, use_bias=False)(action)
-            outputs = jnp.concatenate((outputs, action), axis=-1)
-        
+        if self.structured_inputs:
+          kernel_init = nn.initializers.variance_scaling(
+              1.0, 'fan_in', 'normal', out_axis=0)
+          achievable =  nn.Dense(
+              # binary vector
+              128, kernel_init=kernel_init, use_bias=False)(obs.achievable.astype(jnp.float32))
+          to_concat = (outputs, achievable)
+          if obs.previous_action is not None:
+              action = jax.nn.one_hot(obs.previous_action, self.action_dim or 50)
+              # common trick for one-hot encodings, same as nn.Embed
+              # main benefit comes from adding action
+              action = nn.Dense(
+                  128, kernel_init=kernel_init, use_bias=False)(action)
+              to_concat = to_concat + (action,)
+              outputs = jnp.concatenate(to_concat, axis=-1)
+
         return outputs

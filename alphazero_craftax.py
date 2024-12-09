@@ -17,7 +17,7 @@ class CraftaxAlphaZeroAgent(nn.Module):
     def setup(self):
 
         self.policy_fn = MLP(hidden_dim=512, num_layers=1, out_dim=self.action_dim)
-        self.value_fn = MLP(hidden_dim=512, num_layers=1, out_dim=self.num_bins)
+        self.value_fn = MLP(hidden_dim=512, num_layers=3, out_dim=self.num_bins)
 
     def initialize(self, x: TimeStep):
         """Only used for initialization."""
@@ -123,7 +123,8 @@ def make_craftax_agent(
           num_layers=config['NUM_MLP_LAYERS'],
           activation=config['ACTIVATION'],
           norm_type=config.get('NORM_TYPE', 'none'),
-          structured_inputs=config.get('STRUCTURED_INPUTS', False)
+          structured_inputs=config.get('STRUCTURED_INPUTS', False),
+          action_dim=env.action_space(env_params).n,
           ),
         rnn=vbb.ScannedRNN(
             hidden_dim=config["AGENT_RNN_DIM"],
@@ -153,12 +154,13 @@ def make_train(**kwargs):
   config = kwargs['config']
 
   max_value = config.get('MAX_VALUE', 10)
+  min_value = config.get('MIN_VALUE', -4)
   num_bins = config['NUM_BINS']
 
   discretizer = utils.Discretizer(
       max_value=max_value,
       num_bins=num_bins,
-      min_value=-max_value)
+      min_value=-min_value)
 
   num_train_simulations = config.get('NUM_SIMULATIONS', 2)
 
