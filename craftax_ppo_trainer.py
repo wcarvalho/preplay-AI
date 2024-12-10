@@ -1,5 +1,6 @@
 """
 MAIN CHANGE WAS TO ADD EVALUATION with test_env_params
+Adapted from: https://github.com/MichaelTMatthews/Craftax_Baselines/blob/main/ppo_rnn.py
 
 TESTING:
 JAX_DEBUG_NANS=True \
@@ -23,6 +24,7 @@ import time
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
+import flax
 import numpy as np
 import optax
 import chex  # for type checking
@@ -130,7 +132,7 @@ def batch_log(update_step, log, config):
             elif len(log_times) > 1:
                 dt = log_times[-1] - log_times[-2]
                 steps_between_updates = (
-                    config["NUM_STEPS"] * config["NUM_ENVS"] * config["NUM_REPEATS"]
+                    config["TRAINING_INTERVAL"] * config["NUM_ENVS"] * config["NUM_REPEATS"]
                 )
                 sps = steps_between_updates / dt
                 agg_logs["sps"] = sps
@@ -375,7 +377,7 @@ class Transition(NamedTuple):
     info: jnp.ndarray
 
 
-def create_metrics(log_states, dones, prefix="eval"):
+def create_metrics(log_states, dones, train_state, prefix="evaluator_performance"):
     """Create evaluation metrics dictionary and compute episode averages.
     
     Args:
@@ -407,11 +409,17 @@ def create_metrics(log_states, dones, prefix="eval"):
         lambda x: (x * dones).sum() / (1e-5 + dones.sum()),
         metrics
     )
+
+    metrics[f'{main_key}/num_actor_steps'] = train_state.timesteps
+    metrics[f'{main_key}/num_learner_updates'] = train_state.n_updates
+    metrics = jax.tree.map(lambda x: jnp.asarray(x).mean(), metrics)
+
     return metrics
 
-def evaluate_model(network, params, rng, env, test_env_params, config):
+def evaluate_model(network, train_state, rng, env, test_env_params, config):
     """Evaluate the model on test environments."""
     
+    params = train_state.params
     def _eval_step(carry, unused):
         hstate, obs, done, rng, log_state = carry
         
@@ -437,17 +445,28 @@ def evaluate_model(network, params, rng, env, test_env_params, config):
     # Run evaluation for fixed number of steps
     carry = (init_hstate, obs, done, rng, log_state)
     _, (rewards, dones, log_states) = jax.lax.scan(
-        _eval_step, carry, None, config["NUM_STEPS"] * 100
+        _eval_step, carry, None, config["EVAL_STEPS"] * config["EVAL_EPISODES"]
     )
-    metrics = create_metrics(log_states, dones)
+    metrics = create_metrics(
+        log_states,
+        dones,
+        train_state,
+        prefix=f'evaluator_performance-{config["NUM_ENV_SEEDS"]}'
+    )
     return metrics
+
+class CustomTrainState(TrainState):
+    timesteps: int = 0 
+    n_updates: int = 0
+    n_logs: int = 0
 
 def make_train(config, env, env_params, test_env_params):
     config["NUM_UPDATES"] = (
-        config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
+        config["TOTAL_TIMESTEPS"] // config["TRAINING_INTERVAL"] // config["NUM_ENVS"]
     )
+    config["NUM_UPDATES"] = max(config["NUM_UPDATES"], 1)
     config["MINIBATCH_SIZE"] = (
-        config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
+        config["NUM_ENVS"] * config["TRAINING_INTERVAL"] // config["NUM_MINIBATCHES"]
     )
 
     def linear_schedule(count):
@@ -482,7 +501,7 @@ def make_train(config, env, env_params, test_env_params):
                 optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
                 optax.adam(config["LR"], eps=1e-5),
             )
-        train_state = TrainState.create(
+        train_state = CustomTrainState.create(
             apply_fn=network.apply,
             params=network_params,
             tx=tx,
@@ -544,7 +563,7 @@ def make_train(config, env, env_params, test_env_params):
 
             initial_hstate = runner_state[-3]
             runner_state, (traj_batch, traj_states) = jax.lax.scan(
-                _env_step, runner_state, None, config["NUM_STEPS"]
+                _env_step, runner_state, None, config["TRAINING_INTERVAL"]
             )
 
             # CALCULATE ADVANTAGE
@@ -560,6 +579,10 @@ def make_train(config, env, env_params, test_env_params):
             ac_in = jax.tree.map(lambda x: x[np.newaxis, :], (last_obs, last_done))
             _, _, last_val = network.apply(train_state.params, hstate, ac_in)
             last_val = last_val.squeeze(0)
+
+            # Update timesteps count
+            timesteps = train_state.timesteps + config["TRAINING_INTERVAL"] * config["NUM_ENVS"]
+            train_state = train_state.replace(timesteps=timesteps)
 
             def _calculate_gae(traj_batch, last_val, last_done):
                 def _get_advantages(carry, transition):
@@ -639,6 +662,10 @@ def make_train(config, env, env_params, test_env_params):
                         train_state.params, init_hstate, traj_batch, advantages, targets
                     )
                     train_state = train_state.apply_gradients(grads=grads)
+                    train_state = train_state.replace(
+                        n_updates=train_state.n_updates + 1,
+                    )
+
                     return train_state, total_loss
 
                 (
@@ -698,15 +725,15 @@ def make_train(config, env, env_params, test_env_params):
             )
             train_state = update_state[0]
 
-            metric = create_metrics(traj_states, traj_batch.done)
+            #metric = create_metrics(traj_states, traj_batch.done)
             rng = update_state[-1]
-            if config["wandb"]:
+            #if config["wandb"]:
 
-                def callback(metric, update_step):
-                    to_log = create_log_dict(metric, config)
-                    batch_log(update_step, to_log, config)
+            #    def callback(metric, update_step):
+            #        to_log = create_log_dict(metric, config)
+            #        batch_log(update_step, to_log, config)
 
-                jax.debug.callback(callback, metric, update_step)
+            #    jax.debug.callback(callback, metric, update_step)
 
             ############################################################
             # EVALUATION
@@ -715,20 +742,21 @@ def make_train(config, env, env_params, test_env_params):
                 train_state, eval_rng, update_step = args
                 eval_metrics = evaluate_model(
                     network=network, 
-                    params=train_state.params, 
+                    train_state=train_state, 
                     rng=eval_rng, 
                     env=env, 
                     test_env_params=test_env_params, 
                     config=config,
 
                 )
-                eval_metrics = jax.tree.map(lambda x: x.mean(), eval_metrics)
+
                 def callback(m):
                   wandb.log(m)
                 jax.debug.callback(callback, eval_metrics)
 
             # Condition for evaluation (every 10% of training)
-            should_eval = ((update_step + 1) % (config["NUM_UPDATES"] // 10)) == 0
+            update_interval = max(config["NUM_UPDATES"] // 10, 1)
+            should_eval = ((update_step + 1) % update_interval) == 0
             should_eval = jnp.logical_or(should_eval, update_step == 0)
             rng, eval_rng = jax.random.split(rng)
             jax.lax.cond(
@@ -738,6 +766,16 @@ def make_train(config, env, env_params, test_env_params):
                 (train_state, eval_rng, update_step)
             )
 
+
+
+            # Update n_logs when logging
+            should_log = ((update_step + 1) % (config["NUM_UPDATES"] // 10)) == 0
+            should_log = jnp.logical_or(should_log, update_step == 0)
+            train_state = train_state.replace(
+                n_logs=train_state.n_logs + should_log.astype(jnp.int32)
+            )
+
+            metric = {}
             runner_state = (
                 train_state,
                 env_state,
@@ -772,7 +810,7 @@ def run_single(
 
     from craftax_env import CraftaxSymbolicEnvNoAutoReset
     config['STRUCTURED_INPUTS'] = True
-    config['NUM_ENV_SEEDS'] = config.get('NUM_ENV_SEEDS', 10_000)
+    config['NUM_ENV_SEEDS'] = config.get('NUM_ENV_SEEDS', 0)
 
     static_env_params = CraftaxSymbolicEnvNoAutoReset.default_static_params().replace(
       use_precondition=config.get('USE_PRECONDITION', False))
@@ -851,11 +889,12 @@ def sweep(search: str = ''):
     sweep_config = {
         'metric': metric,
         'parameters': {
-            #"ENV": {'values': ['craftax']},
+            "ALG": {'values': ['ppo']},
             "SEED": {'values': list(range(1,2))},
+            "NUM_ENV_SEEDS": {'values': [0, 32]},
         },
         'overrides': ['alg=ppo', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'ppo-1',
+        'group': 'ppo-3',
     }
 
   else:

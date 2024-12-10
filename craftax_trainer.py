@@ -558,12 +558,15 @@ def sweep(search: str = ''):
         'parameters': {
             "NUM_ENV_SEEDS": {'values': [0]},
             "NUM_SIMULATIONS": {'values': [2]},
-            "TRAINING_INTERVAL": {'values': [1, 5]},
-            "MAX_VALUE": {'values': [10, 20]},
-            "SAMPLE_LENGTH": {'values': [40, 60, 80]},
+            "GUMBEL_SCALE": {'values': [1.0, .1, 10.]},
+            "value_coef": {'values': [.25, 1.0, .025]},
+            "MAX_PRIORITY_WEIGHT": {'values': [0.]},
+            "IMPORTANCE_SAMPLING_EXPONENT": {'values': [0.]},
+            #"MAX_VALUE": {'values': [10, 20]},
+            #"SAMPLE_LENGTH": {'values': [40, 60, 80]},
         },
         'overrides': ['alg=alphazero', 'rlenv=craftax-1m-dyna', 'user=wilka'],
-        'group': 'alphazero-3',
+        'group': 'alphazero-4',
     }
   elif search == 'dyna':
     sweep_config = {
