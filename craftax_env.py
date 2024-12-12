@@ -407,6 +407,214 @@ def get_possible_achievements(state: EnvState, use_precondition: bool = False) -
         # 1 more for health (will always be 0)
         jnp.zeros([1], dtype=jnp.int32)
     ))
+
+    # Add missing resource collection achievements
+    has_sapling_nearby = check_block_nearby(BlockType.PLANT, visible_blocks)
+    has_fountain_nearby = check_block_nearby(BlockType.FOUNTAIN, visible_blocks)
+    
+    possible_achievements = possible_achievements.at[Achievement.COLLECT_SAPLING.value].set(has_sapling_nearby)
+    possible_achievements = possible_achievements.at[Achievement.COLLECT_DRINK.value].set(has_fountain_nearby)
+
+    # Add missing placement achievements
+    possible_achievements = possible_achievements.at[Achievement.PLACE_PLANT.value].set(
+        state.inventory.sapling > 0
+    )
+
+    # Add sleeping/resting related achievements
+    possible_achievements = possible_achievements.at[Achievement.WAKE_UP.value].set(
+        jnp.logical_or(state.is_sleeping, state.is_resting)
+    )
+
+    # Add crafting related achievements
+    possible_achievements = possible_achievements.at[Achievement.MAKE_ARROW.value].set(
+        jnp.logical_and(
+            state.inventory.wood >= 1 if use_precondition else True,
+            has_crafting_table
+        )
+    )
+    possible_achievements = possible_achievements.at[Achievement.MAKE_TORCH.value].set(
+        jnp.logical_and(
+            jnp.logical_and(
+                state.inventory.wood >= 1 if use_precondition else True,
+                state.inventory.coal >= 1 if use_precondition else True
+            ),
+            has_crafting_table
+        )
+    )
+
+    # Add advanced equipment crafting
+    possible_achievements = possible_achievements.at[Achievement.MAKE_DIAMOND_PICKAXE.value].set(
+        jnp.logical_and(
+            jnp.logical_and(
+                state.inventory.wood >= 1 if use_precondition else True,
+                state.inventory.diamond >= 1 if use_precondition else True
+            ),
+            jnp.logical_and(
+                has_crafting_table,
+                state.inventory.pickaxe < 4
+            )
+        )
+    )
+
+    # Add advanced equipment crafting
+    possible_achievements = possible_achievements.at[Achievement.MAKE_DIAMOND_SWORD.value].set(
+        jnp.logical_and(
+            jnp.logical_and(
+                state.inventory.wood >= 2 if use_precondition else True,
+                state.inventory.diamond >= 1 if use_precondition else True
+            ),
+            jnp.logical_and(
+                has_crafting_table,
+                state.inventory.sword < 4
+            )
+        )
+    )
+
+    possible_achievements = possible_achievements.at[Achievement.MAKE_IRON_ARMOUR.value].set(
+        jnp.logical_and(
+            jnp.logical_and(
+                state.inventory.iron >= 3 if use_precondition else True,
+                state.inventory.coal >= 3 if use_precondition else True
+            ),
+            jnp.logical_and(
+                has_crafting_table,
+                has_furnace
+            )
+        )
+    )
+    possible_achievements = possible_achievements.at[Achievement.MAKE_DIAMOND_ARMOUR.value].set(
+        jnp.logical_and(
+            state.inventory.diamond >= 3 if use_precondition else True,
+            has_crafting_table
+        )
+    )
+
+    # Add necromancer related achievements
+    has_necromancer_nearby = check_block_nearby(BlockType.NECROMANCER, visible_blocks)
+    has_vulnerable_necromancer_nearby = check_block_nearby(BlockType.NECROMANCER_VULNERABLE, visible_blocks)
+    
+    possible_achievements = possible_achievements.at[Achievement.DAMAGE_NECROMANCER.value].set(has_necromancer_nearby)
+    possible_achievements = possible_achievements.at[Achievement.DEFEAT_NECROMANCER.value].set(has_vulnerable_necromancer_nearby)
+
+    # Add bow related achievements
+    possible_achievements = possible_achievements.at[Achievement.FIND_BOW.value].set(
+        jnp.logical_and(
+            state.inventory.bow == 0,  # Only possible if you don't already have a bow
+            has_chest_nearby
+        )
+    )
+    possible_achievements = possible_achievements.at[Achievement.FIRE_BOW.value].set(
+        jnp.logical_and(
+            state.inventory.bow > 0,
+            state.inventory.arrows > 0
+        )
+    )
+
+    # Add spell related achievements
+    possible_achievements = possible_achievements.at[Achievement.LEARN_FIREBALL.value].set(
+        jnp.logical_and(
+            state.player_intelligence >= 2,
+            ~state.learned_spells[0]
+        )
+    )
+    possible_achievements = possible_achievements.at[Achievement.CAST_FIREBALL.value].set(
+        jnp.logical_and(
+            state.learned_spells[0],
+            state.player_mana >= 2
+        )
+    )
+    possible_achievements = possible_achievements.at[Achievement.LEARN_ICEBALL.value].set(
+        jnp.logical_and(
+            state.inventory.books >= 1,
+            jnp.logical_not(state.learned_spells[1])
+        )
+    )
+    possible_achievements = possible_achievements.at[Achievement.CAST_ICEBALL.value].set(
+        jnp.logical_and(
+            state.learned_spells[1],
+            state.player_mana >= 2
+        )
+    )
+
+    # Add enchantment achievements
+    has_fire_enchant_table = check_block_nearby(BlockType.ENCHANTMENT_TABLE_FIRE, visible_blocks)
+    has_ice_enchant_table = check_block_nearby(BlockType.ENCHANTMENT_TABLE_ICE, visible_blocks)
+    
+    possible_achievements = possible_achievements.at[Achievement.ENCHANT_SWORD.value].set(
+        jnp.logical_and(
+            jnp.logical_or(has_fire_enchant_table, has_ice_enchant_table),
+            state.inventory.sword > 0
+        )
+    )
+    possible_achievements = possible_achievements.at[Achievement.ENCHANT_ARMOUR.value].set(
+        jnp.logical_and(
+            jnp.logical_or(has_fire_enchant_table, has_ice_enchant_table),
+            jnp.any(state.inventory.armour > 0)
+        )
+    )
+
+    ## Add level entry achievements
+    #has_ladder_nearby = check_block_nearby(
+    #    ItemType.LADDER_DOWN, visible_blocks)
+
+    ## Map achievements to level numbers (based on game structure)
+    ## Level 0 is surface, descending ladder on level 0 takes you to level 1 (Gnomish Mines)
+    #possible_achievements = possible_achievements.at[Achievement.ENTER_GNOMISH_MINES.value].set(
+    #    jnp.logical_and(
+    #        has_ladder_nearby,
+    #        state.player_level == 0
+    #    )
+    #)
+
+    #possible_achievements = possible_achievements.at[Achievement.ENTER_DUNGEON.value].set(
+    #    jnp.logical_and(
+    #        has_ladder_nearby,
+    #        state.player_level == 1
+    #    )
+    #)
+
+    #possible_achievements = possible_achievements.at[Achievement.ENTER_SEWERS.value].set(
+    #    jnp.logical_and(
+    #        has_ladder_nearby,
+    #        state.player_level == 2
+    #    )
+    #)
+
+    #possible_achievements = possible_achievements.at[Achievement.ENTER_VAULT.value].set(
+    #    jnp.logical_and(
+    #        has_ladder_nearby,
+    #        state.player_level == 3
+    #    )
+    #)
+
+    #possible_achievements = possible_achievements.at[Achievement.ENTER_TROLL_MINES.value].set(
+    #    jnp.logical_and(
+    #        has_ladder_nearby,
+    #        state.player_level == 4
+    #    )
+    #)
+
+    #possible_achievements = possible_achievements.at[Achievement.ENTER_FIRE_REALM.value].set(
+    #    jnp.logical_and(
+    #        has_ladder_nearby,
+    #        state.player_level == 5
+    #    )
+    #)
+
+    #possible_achievements = possible_achievements.at[Achievement.ENTER_ICE_REALM.value].set(
+    #    jnp.logical_and(
+    #        has_ladder_nearby,
+    #        state.player_level == 6
+    #    )
+    #)
+
+    #possible_achievements = possible_achievements.at[Achievement.ENTER_GRAVEYARD.value].set(
+    #    jnp.logical_and(
+    #        has_ladder_nearby,
+    #        state.player_level == 7
+    #    )
+    #)
+
     return possible_achievements
 
 
