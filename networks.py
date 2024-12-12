@@ -99,6 +99,7 @@ class CraftaxObsEncoder(nn.Module):
     activation: str = 'relu'
     structured_inputs: bool = False
     use_bias: bool = True
+    include_achievable: bool = True
 
     @nn.compact
     def __call__(self, obs: Observation, train: bool = False):
@@ -134,7 +135,10 @@ class CraftaxObsEncoder(nn.Module):
           achievable =  nn.Dense(
               # binary vector
               128, kernel_init=kernel_init, use_bias=False)(obs.achievable.astype(jnp.float32))
-          to_concat = (outputs, achievable)
+          if self.include_achievable:
+            to_concat = (outputs, achievable)
+          else:
+            to_concat = (outputs,)
           if obs.previous_action is not None:
               action = jax.nn.one_hot(obs.previous_action, self.action_dim or 50)
               # common trick for one-hot encodings, same as nn.Embed

@@ -310,6 +310,14 @@ def simulate_n_trajectories(
     all_timesteps = concat_first_rest(x_t, next_timesteps)
     return all_timesteps, sim_outputs
 
+def reset_achievements(x_t):
+  return x_t.replace(
+    state=x_t.state.replace(
+      env_state=x_t.state.env_state.replace(
+        achievements=jnp.zeros_like(x_t.state.env_state.achievements),
+      )
+    )
+  )
 ################################
 # function to copy something n times
 ################################
@@ -619,9 +627,14 @@ class DynaLossFn(vbb.RecurrentLossFn):
       key, key_ = jax.random.split(key)
       # [sim_length, num_sim, ...]
       last = lambda y: jax.tree.map(lambda x: x[-1], y)
+      x_t = last(t)
+
+      # reset achievements at the beginning of the simulation
+      x_t = reset_achievements(x_t)
+
       next_t, sim_outputs_t = simulate(
           h_tm1=last(h_on),    # [D]
-          x_t=last(t),         # [D, ...]
+          x_t=x_t,         # [D, ...]
           rng=key_,
           goal=g,              # [num_sims, G]
           use_offtask_policy=jnp.ones((1,)),
@@ -679,6 +692,9 @@ class DynaLossFn(vbb.RecurrentLossFn):
       achievement_coefficients = achievement_coefficients[..., :g.shape[-1]]
 
       coeff_mask = g.astype(jnp.float32)
+      #coeff_time_mask = jnp.conj(
+      #   jnp.zeros_like(achievements)
+      #)
       # [T, K, D] * [T, K, D] * [1, K, D] --> [T, K]
       offtask_reward = (achievements * achievement_coefficients * coeff_mask[None]).sum(-1)
 
@@ -971,167 +987,6 @@ def render_fn(state):
     return image/255.0
 render_fn = jax.jit(render_fn)
 
-
-def learner_log_extra(
-        data: dict,
-        config: dict,
-        ):
-
-    def log_data(
-        key: str, 
-        timesteps: TimeStep,
-        actions: np.array,
-        td_errors: np.array,
-        loss_mask: np.array,
-        q_values: np.array,
-        q_loss: np.array,
-        q_target: np.array,
-        main_q_values: np.array,
-        main_q_target: np.array,
-        goal: np.array,
-        any_achievable: np.array,
-        offtask_reward: np.array,
-        ):
-        # Extract the relevant data
-        # only use data from batch dim = 0
-        # [T, B, ...] --> # [T, ...]
-
-        discounts = timesteps.discount
-        rewards = timesteps.reward
-        q_values_taken = rlax.batched_index(q_values, actions)
-        # Create a figure with three subplots
-        width = .3
-        nT = len(rewards)  # e.g. 20 --> 8
-        width = max(int(width*nT), 10)
-        fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(width, 20))
-
-        # Plot rewards and q-values in the top subplot
-        def format(ax):
-            ax.set_xlabel('Time')
-            ax.grid(True)
-            ax.set_xticks(range(0, len(rewards), 1))
-        ax1.plot(offtask_reward, label='Subtask Reward')
-        #ax1.plot(rewards, label='Main task reward')
-        ax1.plot(q_values_taken, label='Q-Values')
-        ax1.plot(q_target, label='Q-Targets')
-        ax1.set_title('Subtask Rewards and Q-Values')
-        format(ax1)
-        ax1.legend()
-
-        # Plot TD errors in the middle subplot
-        #ax2.plot(offtask_reward, label='Subtask Reward')
-        main_q_values_taken = rlax.batched_index(main_q_values, actions)
-        ax2.plot(rewards, label='Main task reward')
-        ax2.plot(main_q_values_taken, label='Main Q-Values')
-        ax2.plot(main_q_target, label='Main Q-Targets')
-        ax2.set_title('Main Rewards and Q-Values')
-        format(ax2)
-        ax2.legend()
-        #ax2.plot(td_errors)
-        #format(ax2)
-        #ax2.set_title('TD Errors')
-
-        # Plot Q-loss in the bottom subplot
-        ax3.plot(q_loss)
-        format(ax3)
-        ax3.set_title('Q-Loss')
-
-        # Plot episode quantities
-        is_last = timesteps.last()
-        ax4.plot(discounts, label='Discounts')
-        ax4.plot(loss_mask, label='mask')
-        ax4.plot(is_last, label='is_last')
-        format(ax4)
-        ax4.set_title('Episode markers')
-        ax4.legend()
-
-        if wandb.run is not None:
-            wandb.log({f"learner_example/{key}/q-values": wandb.Image(fig)})
-        plt.close(fig)
-
-        ##############################
-        # plot images of env
-        ##############################
-        # ------------
-        # get images
-        # ------------
-
-        #state_images = []
-        obs_images = []
-        max_len = min(config.get("MAX_EPISODE_LOG_LEN", 40), len(rewards))
-        for idx in range(max_len):
-            index = lambda y: jax.tree.map(lambda x: x[idx], y)
-            obs_image = render_fn(index(timesteps.state.env_state))
-            obs_images.append(obs_image)
-
-        # ------------
-        # plot
-        # ------------
-        actions_taken = [Action(a).name for a in actions]
-
-        def index(t, idx): return jax.tree.map(lambda x: x[idx], t)
-
-        def panel_title_fn(timesteps, i):
-            goal_idx = goal.argmax(-1)
-            achievement = Achievement(goal_idx).name
-            title = f'{achievement}. t={i}'
-            title += f'\nA={actions_taken[i]}'
-            if i >= len(timesteps.reward) - 1: return title
-            title += f'\nr={timesteps.reward[i+1]:.2f}, $\\gamma={timesteps.discount[i+1]}$'
-            title += f'\nr_off={offtask_reward[i+1]:.2f}'
-
-            achieved = timesteps.observation.achievements[i+1]
-            if achieved.sum() > 1e-5:
-              achievement_idx = achieved.argmax()
-              try:
-                achievement = Achievement(achievement_idx).name
-                title += f'\n{achievement}'
-              except ValueError:
-                title += f'\nHealth?'
-            achievable_list = craftax_env.print_possible_achievements(
-               timesteps.observation.achievable[i], return_list=True)
-
-            if achievable_list:
-              title += '\nAchievable:'
-              for name in achievable_list:
-                title += f'\n- {name}'
-
-            return title
-
-        fig = plot_frames(
-            timesteps=timesteps,
-            frames=obs_images,
-            panel_title_fn=panel_title_fn,
-            row_height=2.5,
-            ncols=6)
-        if wandb.run is not None:
-            wandb.log(
-                {f"learner_example/{key}/trajectory": wandb.Image(fig)})
-        plt.close(fig)
-
-    def callback(d, g, any_achievable):
-        log_data(**d, goal=g, any_achievable=any_achievable, key='dyna')
-    # this will be the value after update is applied
-    n_updates = data['n_updates'] + 1
-    is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
-
-    if 'dyna' in data:
-      # [Batch, Env Time, Num Goals, Num Simuations]
-      goal = data['dyna'].pop('goal')
-      goal = goal[0, 0, 0, 0]
-
-      # [Batch, Env Time, Num Goals]
-      any_achievable = data['dyna'].pop('any_achievable')
-      any_achievable = any_achievable[0, 0, 0]
-
-      # [Batch, Env Time, Num Goals, T+Sim, Num Simuations]
-      dyna_data = jax.tree.map(lambda x: x[0, 0, 0, :, 0], data['dyna'])
-
-      jax.lax.cond(
-          is_log_time,
-          lambda d: jax.debug.callback(callback, d, goal, any_achievable),
-          lambda d: None,
-          dyna_data)
 
 
 class DuellingMLP(nn.Module):
@@ -1488,6 +1343,7 @@ def make_agent(
           norm_type=config.get('NORM_TYPE', 'none'),
           structured_inputs=config.get('STRUCTURED_INPUTS', False),
           use_bias=config.get('USE_BIAS', True),
+          include_achievable=config.get('INCLUDE_ACHIEVABLE', True),
           action_dim=env.action_space(env_params).n,
           ),
         rnn=rnn,
@@ -1580,3 +1436,166 @@ def make_train(**kwargs):
       make_actor=make_actor,
       **kwargs,
   )
+
+
+def learner_log_extra(
+        data: dict,
+        config: dict,
+        ):
+
+    def log_data(
+        key: str, 
+        timesteps: TimeStep,
+        actions: np.array,
+        td_errors: np.array,
+        loss_mask: np.array,
+        q_values: np.array,
+        q_loss: np.array,
+        q_target: np.array,
+        main_q_values: np.array,
+        main_q_target: np.array,
+        goal: np.array,
+        any_achievable: np.array,
+        offtask_reward: np.array,
+        ):
+        # Extract the relevant data
+        # only use data from batch dim = 0
+        # [T, B, ...] --> # [T, ...]
+
+        discounts = timesteps.discount
+        rewards = timesteps.reward
+        q_values_taken = rlax.batched_index(q_values, actions)
+        # Create a figure with three subplots
+        width = .3
+        nT = len(rewards)  # e.g. 20 --> 8
+        width = max(int(width*nT), 10)
+        fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(width, 20))
+
+        # Plot rewards and q-values in the top subplot
+        def format(ax):
+            ax.set_xlabel('Time')
+            ax.grid(True)
+            ax.set_xticks(range(0, len(rewards), 1))
+        ax1.plot(offtask_reward, label='Subtask Reward')
+        #ax1.plot(rewards, label='Main task reward')
+        ax1.plot(q_values_taken, label='Q-Values')
+        ax1.plot(q_target, label='Q-Targets')
+        ax1.set_title('Subtask Rewards and Q-Values')
+        format(ax1)
+        ax1.legend()
+
+        # Plot TD errors in the middle subplot
+        #ax2.plot(offtask_reward, label='Subtask Reward')
+        main_q_values_taken = rlax.batched_index(main_q_values, actions)
+        ax2.plot(rewards, label='Main task reward')
+        ax2.plot(main_q_values_taken, label='Main Q-Values')
+        ax2.plot(main_q_target, label='Main Q-Targets')
+        ax2.set_title('Main Rewards and Q-Values')
+        format(ax2)
+        ax2.legend()
+        #ax2.plot(td_errors)
+        #format(ax2)
+        #ax2.set_title('TD Errors')
+
+        # Plot Q-loss in the bottom subplot
+        ax3.plot(q_loss)
+        format(ax3)
+        ax3.set_title('Q-Loss')
+
+        # Plot episode quantities
+        is_last = timesteps.last()
+        ax4.plot(discounts, label='Discounts')
+        ax4.plot(loss_mask, label='mask')
+        ax4.plot(is_last, label='is_last')
+        format(ax4)
+        ax4.set_title('Episode markers')
+        ax4.legend()
+
+        if wandb.run is not None:
+            wandb.log({f"learner_example/{key}/q-values": wandb.Image(fig)})
+        plt.close(fig)
+
+        ##############################
+        # plot images of env
+        ##############################
+        # ------------
+        # get images
+        # ------------
+
+        #state_images = []
+        obs_images = []
+        max_len = min(config.get("MAX_EPISODE_LOG_LEN", 40), len(rewards))
+        for idx in range(max_len):
+            index = lambda y: jax.tree.map(lambda x: x[idx], y)
+            obs_image = render_fn(index(timesteps.state.env_state))
+            obs_images.append(obs_image)
+
+        # ------------
+        # plot
+        # ------------
+        actions_taken = [Action(a).name for a in actions]
+
+        def index(t, idx): return jax.tree.map(lambda x: x[idx], t)
+
+        def panel_title_fn(timesteps, i):
+            goal_idx = goal.argmax(-1)
+            achievement = Achievement(goal_idx).name
+            title = f'{achievement}. t={i}'
+            title += f'\nA={actions_taken[i]}'
+            if i >= len(timesteps.reward) - 1: return title
+            title += f'\nr={timesteps.reward[i+1]:.2f}, $\\gamma={timesteps.discount[i+1]}$'
+            title += f'\nr_off={offtask_reward[i+1]:.2f}'
+
+            achieved = timesteps.observation.achievements[i+1]
+            if achieved.sum() > 1e-5:
+              achievement_idx = achieved.argmax()
+              try:
+                achievement = Achievement(achievement_idx).name
+                title += f'\n{achievement}'
+              except ValueError:
+                title += f'\nHealth?'
+            achievable_list = craftax_env.print_possible_achievements(
+               timesteps.observation.achievable[i], return_list=True)
+
+            if achievable_list:
+              title += '\nAchievable:'
+              for name in achievable_list:
+                title += f'\n- {name}'
+
+            return title
+
+        fig = plot_frames(
+            timesteps=timesteps,
+            frames=obs_images,
+            panel_title_fn=panel_title_fn,
+            row_height=2.5,
+            ncols=6)
+        if wandb.run is not None:
+            wandb.log(
+                {f"learner_example/{key}/trajectory": wandb.Image(fig)})
+        plt.close(fig)
+
+    def callback(d, g, any_achievable):
+        log_data(**d, goal=g, any_achievable=any_achievable, key='dyna')
+    # this will be the value after update is applied
+    n_updates = data['n_updates'] + 1
+    is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
+
+    if 'dyna' in data:
+      # [Batch, Env Time, Num Goals, Num Simuations]
+      goal = data['dyna'].pop('goal')
+      goal = goal[0, 0, 0, 0]
+
+      # [Batch, Env Time, Num Goals]
+      any_achievable = data['dyna'].pop('any_achievable')
+      any_achievable = any_achievable[0, 0, 0]
+
+      # [Batch, Env Time, Num Goals, T+Sim, Num Simuations]
+      dyna_data = jax.tree.map(lambda x: x[0, 0, 0, :, 0], data['dyna'])
+
+      jax.lax.cond(
+          is_log_time,
+          lambda d: jax.debug.callback(callback, d, goal, any_achievable),
+          lambda d: None,
+          dyna_data)
+

@@ -318,15 +318,7 @@ class ActorCriticRNN(nn.Module):
               kernel_init=orthogonal(np.sqrt(2)),
               bias_init=constant(0.0),
           )(x)
-        #####
-        # image
-        #####
-        image = obs.image
-        embedding = embed(image)
-        embedding = nn.relu(embedding)
-        #####
-        # action + achievable
-        #####
+
         def embed_binary(x): 
             return nn.Dense(
               128,
@@ -336,11 +328,11 @@ class ActorCriticRNN(nn.Module):
           )(x)
         previous_action = jax.nn.one_hot(obs.previous_action, self.action_dim)
         to_concat = (
-            embedding,
+            obs.image,
             embed_binary(previous_action),
             embed_binary(obs.achievable.astype(jnp.float32)))
         embedding = jnp.concatenate(to_concat, axis=-1)
-        embedding = embed(image)
+        embedding = embed(embedding)
         embedding = nn.relu(embedding)
 
         rnn_in = (embedding, dones)
@@ -422,19 +414,18 @@ def evaluate_model(network, train_state, rng, env, test_env_params, config):
     params = train_state.params
     def _eval_step(carry, unused):
         hstate, obs, done, rng, log_state = carry
-        
+
         # Select action
-        ac_in = jax.tree.map(lambda x: x[jnp.newaxis, :], (obs, done))
-        hstate, pi, value = network.apply(params, hstate, ac_in)
-        rng, _rng = jax.random.split(rng)
-        action = pi.sample(seed=_rng)
+        ac_in = jax.tree.map(lambda x: x[None], (obs, done))
+        hstate, pi, _ = network.apply(params, hstate, ac_in)
+        action = pi.mode()
         action = action.squeeze(0)
-        
+
         # Step environment
         rng, _rng = jax.random.split(rng)
         next_obs, log_state, reward, done, info = env.step(_rng, log_state, action, test_env_params)
         
-        return (hstate, next_obs, done, rng, log_state), (reward, done, log_state)
+        return (hstate, next_obs, done, rng, log_state), (done, log_state)
     
     # Initialize evaluation
     rng, _rng = jax.random.split(rng)
@@ -444,7 +435,7 @@ def evaluate_model(network, train_state, rng, env, test_env_params, config):
     
     # Run evaluation for fixed number of steps
     carry = (init_hstate, obs, done, rng, log_state)
-    _, (rewards, dones, log_states) = jax.lax.scan(
+    _, (dones, log_states) = jax.lax.scan(
         _eval_step, carry, None, config["EVAL_STEPS"] * config["EVAL_EPISODES"]
     )
     metrics = create_metrics(
@@ -755,7 +746,7 @@ def make_train(config, env, env_params, test_env_params):
                 jax.debug.callback(callback, eval_metrics)
 
             # Condition for evaluation (every 10% of training)
-            update_interval = max(config["NUM_UPDATES"] // 10, 1)
+            update_interval = max(config["NUM_UPDATES"] // 100, 1)
             should_eval = ((update_step + 1) % update_interval) == 0
             should_eval = jnp.logical_or(should_eval, update_step == 0)
             rng, eval_rng = jax.random.split(rng)
@@ -894,7 +885,7 @@ def sweep(search: str = ''):
             "NUM_ENV_SEEDS": {'values': [0, 32]},
         },
         'overrides': ['alg=ppo', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'ppo-3',
+        'group': 'ppo-4',
     }
 
   else:
