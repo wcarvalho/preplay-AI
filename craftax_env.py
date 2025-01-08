@@ -1,9 +1,13 @@
 """
+Based off of: craftax.craftax.envs.craftax_symbolic_env.CraftaxSymbolicEnvNoAutoReset
+
 Changes:
 1. Added a set of seeds to EnvParams so that train + env can have different seeds
+
 """
 import jax
 from jax import lax
+from jax.tree_util import tree_map
 from gymnax.environments import spaces, environment
 from typing import Tuple, Optional
 import chex
@@ -157,7 +161,7 @@ def get_possible_achievements(state: EnvState, use_precondition: bool = False) -
 
     # Check for mobs in visible range
     def check_mob_nearby(mob_type_id, mob_collection):
-        mob_collection = jax.tree.map(lambda x: x[state.player_level], mob_collection)
+        mob_collection = tree_map(lambda x: x[state.player_level], mob_collection)
         mob_positions = mob_collection.position
         mob_types = mob_collection.type_id
         mob_masks = mob_collection.mask
@@ -666,7 +670,7 @@ def generate_world(rng, params, static_params):
     )
 
     # Splice smoothgens and dungeons in order of levels
-    map, item_map, light_map, ladders_down, ladders_up = jax.tree.map(
+    map, item_map, light_map, ladders_down, ladders_up = tree_map(
         lambda x, y: jnp.stack(
             (x[0], y[0], x[1], y[1], y[2], x[2], x[3], x[4], x[5]), axis=0
         ),
@@ -725,7 +729,7 @@ def generate_world(rng, params, static_params):
     potion_mapping = jax.random.permutation(_rng, jnp.arange(6))
 
     # Inventory
-    inventory = jax.tree.map(
+    inventory = tree_map(
         lambda x, y: jax.lax.select(params.god_mode, x, y),
         get_new_full_inventory(),
         get_new_empty_inventory(),
