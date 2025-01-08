@@ -44,9 +44,9 @@ class EnvParams:
 
     god_mode: bool = False
     world_seeds: Tuple[int, ...] = tuple()
-    goals: Tuple[int, ...] = tuple()
-    goal_vector: jax.Array = jnp.zeros(1)
-    goal: int = 0
+    possible_goals: Tuple[int, ...] = tuple()
+    active_goals: Tuple[int, ...] = tuple()
+    current_goal: int = 0
 
     fractal_noise_angles: tuple[int, int, int, int] = (None, None, None, None)
 
@@ -313,7 +313,7 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
           state, _ = craftax_step(
               rng, state, action, params, self.static_env_params)
           goal_achieved = jax.lax.dynamic_index_in_dim(
-              state.achievements, params.goal, keepdims=False)
+              state.achievements, params.current_goal, keepdims=False)
           goal_achieved = goal_achieved.astype(jnp.float32)
           return state, goal_achieved
 
@@ -325,10 +325,14 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
           states, rewards = jax.vmap(
               step, in_axes=(None, 0, None))(
                   state, do_mapped_actions, params)
-          import pdb; pdb.set_trace()
           best_idx = jnp.argmax(rewards)
-          best_state = jax.lax.dynamic_index_in_dim(states, best_idx, keepdims=False)
-          return best_state
+
+          best_state = jax.tree_map(
+              lambda x: jax.lax.dynamic_index_in_dim(x, best_idx, keepdims=False),
+              states)
+          best_reward = jax.lax.dynamic_index_in_dim(
+              rewards, best_idx, keepdims=False)
+          return best_state, best_reward
 
         state, reward = jax.lax.cond(
             action == Action.DO.value,
@@ -337,7 +341,8 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
             state, params
         )
 
-        done = reward > 0
+        done = jnp.logical_or(reward > 0, self.is_terminal(state, params))
+
         info = log_achievements_to_info(state, done)
         info["discount"] = self.discount(state, params)
 
