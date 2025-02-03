@@ -8,21 +8,26 @@ Changes:
 4. structured obs with {image, task-vector}
 5. sample world set from pre-defined set of seeds
 6. goal-conditioned reward
+7. Current goal is a part of the state to effect the reward function.
+8. Player starts with pickaxe to mine stone easily
+9. made stones passable (i.e. can walk over them)
 """
 
 import jax
+import jax.numpy as jnp
 from jax.tree_util import tree_map
 from jax import lax
 from gymnax.environments import spaces, environment
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Union
 import chex
 from flax import struct
+from functools import partial
+import distrax
 
 from craftax.craftax.envs.common import log_achievements_to_info
 from craftax.environment_base.environment_bases import EnvironmentNoAutoReset
 from craftax.craftax.constants import *
-from craftax.craftax.game_logic import craftax_step, is_game_over
-from craftax.craftax.craftax_state import EnvState, EnvParams, StaticEnvParams
+from craftax.craftax.craftax_state import EnvParams, StaticEnvParams
 from craftax.craftax.renderer import render_craftax_symbolic
 from craftax.craftax.world_gen.world_gen import generate_world
 
@@ -41,6 +46,13 @@ from craftax.craftax.world_gen.world_gen import (
 from craftax.craftax.game_logic import *
 from craftax.craftax.util.game_logic_utils import *
 
+try:
+  from craftax_game_logic import craftax_step, is_game_over
+except ImportError:
+  from simulations.craftax_game_logic import craftax_step, is_game_over
+except Exception as e:
+  raise e
+
 
 @struct.dataclass
 class EnvParams:
@@ -54,10 +66,12 @@ class EnvParams:
 
   god_mode: bool = False
   world_seeds: Tuple[int, ...] = tuple()
-  possible_goals: Tuple[int, ...] = tuple()
+  #possible_goals: Tuple[int, ...] = tuple()
   active_goals: Tuple[int, ...] = tuple()
   current_goal: int = 0
-
+  start_positions: Optional[Union[Tuple[Tuple[int, int]], Tuple[int, int]]] = None
+  goal_locations: Tuple[Tuple[int, int]] = ((-1, -1),)
+  placed_goals: Tuple[int] = (-1,)
   fractal_noise_angles: tuple[int, int, int, int] = (None, None, None, None)
 
 
@@ -80,8 +94,86 @@ class StaticEnvParams:
   initial_strength: int = 20
 
 
+@struct.dataclass
+class EnvState:
+  map: jnp.ndarray
+  item_map: jnp.ndarray
+  mob_map: jnp.ndarray
+  light_map: jnp.ndarray
+  down_ladders: jnp.ndarray
+  up_ladders: jnp.ndarray
+  chests_opened: jnp.ndarray
+  monsters_killed: jnp.ndarray
+
+  player_position: jnp.ndarray
+  player_level: int
+  player_direction: int
+
+  # Intrinsics
+  player_health: float
+  player_food: int
+  player_drink: int
+  player_energy: int
+  player_mana: int
+  is_sleeping: bool
+  is_resting: bool
+
+  # Second order intrinsics
+  player_recover: float
+  player_hunger: float
+  player_thirst: float
+  player_fatigue: float
+  player_recover_mana: float
+
+  # Attributes
+  player_xp: int
+  player_dexterity: int
+  player_strength: int
+  player_intelligence: int
+
+  inventory: Inventory
+
+  melee_mobs: Mobs
+  passive_mobs: Mobs
+  ranged_mobs: Mobs
+
+  mob_projectiles: Mobs
+  mob_projectile_directions: jnp.ndarray
+  player_projectiles: Mobs
+  player_projectile_directions: jnp.ndarray
+
+  growing_plants_positions: jnp.ndarray
+  growing_plants_age: jnp.ndarray
+  growing_plants_mask: jnp.ndarray
+
+  potion_mapping: jnp.ndarray
+  learned_spells: jnp.ndarray
+
+  sword_enchantment: int
+  bow_enchantment: int
+  armour_enchantments: jnp.ndarray
+
+  boss_progress: int
+  boss_timesteps_to_spawn_this_round: int
+
+  light_level: float
+
+  achievements: jnp.ndarray
+
+  state_rng: Any
+
+  timestep: int
+  
+  # ADDED FOR EXPERIMENT
+  current_goal: int
+  start_position: jnp.ndarray
+  goal_location: jnp.ndarray
+  fractal_noise_angles: tuple[int, int, int, int] = (None, None, None, None)
+
+
 class Observation(struct.PyTreeNode):
   image: chex.Array
+  goal: chex.Array
 
 
 def get_map_obs_shape():
@@ -107,6 +199,7 @@ def get_inventory_obs_shape():
 
 
 def generate_world(rng, params, static_params):
+  # Get default or random start position
   player_position = jnp.array(
     [static_params.map_size[0] // 2, static_params.map_size[1] // 2]
   )
@@ -189,16 +282,41 @@ def generate_world(rng, params, static_params):
   # ========================================
   # Add 2 random crafting tables
   # ========================================
-  def find_empty_position(rng, current_map):
-    # Generate multiple candidate positions
+  def find_empty_position(rng, current_map, diamond_pos=None, max_distance=5):
+    # Generate multiple candidate positions around the diamond
     rng, _rng = jax.random.split(rng)
     num_candidates = 10  # Try multiple positions to increase success chance
-    positions = jax.random.randint(
-      _rng,
-      shape=(num_candidates, 2),
-      minval=2,
-      maxval=jnp.array([static_params.map_size[0] - 2, static_params.map_size[1] - 2]),
-    )
+
+    # If diamond position is provided, generate positions within max_distance
+    def generate_positions(rng):
+      if diamond_pos is not None:
+        # Generate offsets from -max_distance to +max_distance
+        offsets = jax.random.randint(
+          rng, shape=(num_candidates, 2), minval=-max_distance, maxval=max_distance + 1
+        )
+        # Add offsets to diamond position
+        positions = diamond_pos + offsets
+        # Clip to ensure within map bounds
+        positions = jnp.clip(
+          positions,
+          a_min=2,
+          a_max=jnp.array(
+            [static_params.map_size[0] - 2, static_params.map_size[1] - 2]
+          ),
+        )
+      else:
+        # Original random position generation if no diamond_pos
+        positions = jax.random.randint(
+          rng,
+          shape=(num_candidates, 2),
+          minval=2,
+          maxval=jnp.array(
+            [static_params.map_size[0] - 2, static_params.map_size[1] - 2]
+          ),
+        )
+      return positions
+
+    positions = generate_positions(_rng)
 
     # Check which positions are empty (0 typically represents empty space)
     is_empty = current_map[positions[:, 0], positions[:, 1]] == 0
@@ -213,15 +331,86 @@ def generate_world(rng, params, static_params):
   # ========================================
   if static_params.initial_crafting_tables:
     # Place first table
+    # Find diamond position in overworld (level 0)
+    flat_index = jnp.argmax(map[0] == BlockType.DIAMOND.value)
+    y = flat_index // map[0].shape[1]
+    x = flat_index % map[0].shape[1]
+    diamond_pos = jnp.array([y, x])
+
     rng, _rng = jax.random.split(rng)
-    pos, _rng = find_empty_position(_rng, map[0])
+    pos, _rng = find_empty_position(
+      _rng, map[0], diamond_pos=diamond_pos, max_distance=5
+    )
     map = map.at[0, pos[0], pos[1]].set(BlockType.CRAFTING_TABLE.value)
 
     # Place second table
     rng, _rng = jax.random.split(_rng)
-    pos, _rng = find_empty_position(_rng, map[0])
+    pos, _rng = find_empty_position(
+      _rng, map[0], diamond_pos=diamond_pos, max_distance=5
+    )
     map = map.at[0, pos[0], pos[1]].set(BlockType.CRAFTING_TABLE.value)
 
+  # ========================================
+  # NOTE: give agent pickaxe to mine stone easily
+  # ========================================
+  inventory = inventory.replace(pickaxe=3)
+
+  if params.start_positions is not None:
+    start_positions = jnp.array(params.start_positions)
+    if start_positions.ndim == 2:
+      # [N, 2]
+      # Instead of boolean masking, use a scan to find valid positions
+      valid_positions = start_positions.sum(axis=1) > 0
+
+      # Sample from valid positions using distrax
+      rng, _rng = jax.random.split(rng)
+      probs = valid_positions.astype(jnp.float32)
+      probs = probs / probs.sum()
+      chosen_idx = distrax.Categorical(probs=probs).sample(seed=_rng)
+      player_position = jax.lax.dynamic_index_in_dim(
+        start_positions,
+        chosen_idx,
+        keepdims=False,
+      )
+    elif start_positions.ndim == 1:
+      # [2]
+      player_position = start_positions
+    else:
+      raise NotImplementedError(start_positions.ndim)
+
+  ########################################################
+  # NOTE: MAIN DIFFERENCE:
+  # Place multiple goals at locations
+  ########################################################
+  index = lambda x, i: jax.lax.dynamic_index_in_dim(
+    x, i, keepdims=False,
+  )
+  goal_locations = jnp.asarray(params.goal_locations) 
+  placed_goals = jnp.asarray(params.placed_goals)
+  def place_goal_at_index(i, m):
+    goal_pos = goal_locations[i]
+    def place_goal(m_):
+      goal_value = index(placed_goals, i).astype(jnp.int32)
+      return m_.at[0, goal_pos[0], goal_pos[1]].set(goal_value)
+
+    return jax.lax.cond(
+        jnp.asarray(goal_pos).sum() > 0,
+        place_goal,
+        lambda m_: m_,
+        m
+    )
+
+  map = jax.lax.fori_loop(
+    0,
+    len(params.goal_locations),
+    place_goal_at_index,
+    map
+  )
+
+  flat_index = jnp.argmax(map[0] == params.current_goal)
+  y = flat_index // map[0].shape[1]
+  x = flat_index % map[0].shape[1]
+  goal_pos = jnp.array([y, x], dtype=jnp.int32)
   state = EnvState(
     map=map,
     item_map=item_map,
@@ -277,6 +466,9 @@ def generate_world(rng, params, static_params):
     light_level=jnp.asarray(calculate_light_level(0, params), dtype=jnp.float32),
     state_rng=_rng,
     timestep=jnp.asarray(0, dtype=jnp.int32),
+    start_position=jnp.asarray(player_position, dtype=jnp.int32),
+    current_goal=jnp.asarray(params.current_goal, dtype=jnp.int32),
+    goal_location=goal_pos,
   )
 
   return state
@@ -306,20 +498,20 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
     Changes:
      1. have single achievement complete task.
      2. collapse multiple actions to "do" action. this makes it easier for people.
-
+     3. Stopped having params be a static parameter. It will change as a function of the goal.
     """
 
-    def step(state, action, params):
+    def step(state: EnvState, action: int, params: EnvParams):
       state, _ = craftax_step(rng, state, action, params, self.static_env_params)
       goal_achieved = jax.lax.dynamic_index_in_dim(
         state.achievements,
-        params.current_goal.astype(jnp.int32),
+        state.current_goal.astype(jnp.int32),
         keepdims=False,
       )
       goal_achieved = goal_achieved.astype(jnp.float32)
       return state, goal_achieved
 
-    def mapped_do_step(state, params):
+    def mapped_do_step(state: EnvState, params: EnvParams):
       do_mapped_actions = jnp.asarray(
         (Action.DO.value, Action.MAKE_WOOD_SWORD.value),
       )
@@ -355,6 +547,12 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
       done,
       info,
     )
+
+  @partial(jax.jit, static_argnums=(0,))
+  def reset(self, key: chex.PRNGKey, params):
+    """Performs resetting of environment."""
+    obs, state = self.reset_env(key, params)
+    return obs, state
 
   def reset_env(
     self, rng: chex.PRNGKey, params: EnvParams
@@ -405,3 +603,187 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
       (obs_shape,),
       dtype=jnp.float32,
     )
+
+
+
+class CraftaxSymbolicWebEnvNoAutoResetDummy(EnvironmentNoAutoReset):
+  """
+  A dummy version of the Craftax environment with empty core functions.
+  """
+
+  def __init__(self, static_env_params: StaticEnvParams = None):
+    super().__init__()
+    if static_env_params is None:
+      static_env_params = self.default_static_params()
+    self.static_env_params = static_env_params
+
+  @property
+  def default_params(self) -> EnvParams:
+    return EnvParams()
+
+  @staticmethod
+  def default_static_params() -> StaticEnvParams:
+    return StaticEnvParams()
+
+  def step_env(
+    self, key: jnp.ndarray, state: EnvState, action: int, params: EnvParams
+  ) -> Tuple[jnp.ndarray, EnvState, float, bool, dict]:
+    """Simple step function that moves the player based on action"""
+    # Get map dimensions from static params
+    map_height, map_width = self.static_env_params.map_size
+
+    # Update player position based on action
+    y, x = state.player_position
+
+    def up(xy):
+      return (xy[0], jnp.clip(xy[1] - 1, 0, map_height - 1))
+
+    def down(xy):
+      return (xy[0], jnp.clip(xy[1] + 1, 0, map_height - 1))
+
+    def left(xy):
+      return (jnp.clip(xy[0] - 1, 0, map_width - 1), xy[1])
+
+    def right(xy):
+      return (jnp.clip(xy[0] + 1, 0, map_width - 1), xy[1])
+
+    def noop(xy):
+      return xy
+
+    x, y = jax.lax.switch(action, [noop, left, right, up, down], (x, y))
+
+    # Update state with new position
+    new_state = state.replace(player_position=jnp.array([y, x]))
+
+    reward = 1.0
+    done = False
+    info = {}
+    obs = self.get_obs(new_state, params)
+    return obs, new_state, reward, done, info
+
+  def reset_env(
+    self, key: jnp.ndarray, params: EnvParams
+  ) -> Tuple[jnp.ndarray, EnvState]:
+    """Reset function that initializes player at params-determined position"""
+    static_params = self.static_env_params
+    map_height, map_width = static_params.map_size
+
+    player_position = jnp.array(
+      [static_params.map_size[0] // 2, static_params.map_size[1] // 2]
+    )
+    if params.start_positions is not None:
+      start_positions = jnp.array(params.start_positions)
+      if start_positions.ndim == 2:
+        # [N, 2]
+        # Instead of boolean masking, use a scan to find valid positions
+        valid_positions = start_positions.sum(axis=1) > 0
+
+        # Sample from valid positions using distrax
+        rng, _rng = jax.random.split(key)
+        probs = valid_positions.astype(jnp.float32)
+        probs = probs / probs.sum()
+        chosen_idx = distrax.Categorical(probs=probs).sample(seed=_rng)
+        player_position = jax.lax.dynamic_index_in_dim(
+          start_positions,
+          chosen_idx,
+          keepdims=False,
+        )
+      elif start_positions.ndim == 1:
+        # [2]
+        player_position = start_positions
+      else:
+        raise NotImplementedError(start_positions.ndim)
+
+    current_goal = jnp.array(params.current_goal, dtype=jnp.int32)
+    placed_goals = jnp.array(params.placed_goals, dtype=jnp.int32)
+    match = placed_goals == current_goal
+
+    goal_locations = jnp.array(params.goal_locations, dtype=jnp.int32)
+    goal_location = jax.lax.dynamic_index_in_dim(goal_locations, jnp.argmax(match), keepdims=False)
+
+    state = EnvState(
+      map=jnp.full(
+        static_params.map_size, params.world_seeds[0]
+      ),  # Fill map with world seed value
+      item_map=jnp.zeros(static_params.map_size),
+      mob_map=jnp.zeros(static_params.map_size),
+      light_map=jnp.zeros(static_params.map_size),
+      down_ladders=jnp.zeros(static_params.map_size),
+      up_ladders=jnp.zeros(static_params.map_size),
+      chests_opened=jnp.zeros(static_params.map_size),
+      monsters_killed=jnp.zeros(static_params.map_size),
+      player_position=player_position,  # Set starting position from params
+      player_direction=jnp.asarray(0, dtype=jnp.int32),
+      player_level=jnp.asarray(0, dtype=jnp.int32),
+      player_health=jnp.asarray(9.0, dtype=jnp.float32),
+      player_food=jnp.asarray(9, dtype=jnp.int32),
+      player_drink=jnp.asarray(9, dtype=jnp.int32),
+      player_energy=jnp.asarray(9, dtype=jnp.int32),
+      player_mana=jnp.asarray(9, dtype=jnp.int32),
+      player_recover=jnp.asarray(0.0, dtype=jnp.float32),
+      player_hunger=jnp.asarray(0.0, dtype=jnp.float32),
+      player_thirst=jnp.asarray(0.0, dtype=jnp.float32),
+      player_fatigue=jnp.asarray(0.0, dtype=jnp.float32),
+      player_recover_mana=jnp.asarray(0.0, dtype=jnp.float32),
+      is_sleeping=False,
+      is_resting=False,
+      player_xp=jnp.asarray(0, dtype=jnp.int32),
+      player_dexterity=jnp.asarray(1, dtype=jnp.int32),
+      player_strength=jnp.asarray(static_params.initial_strength, dtype=jnp.int32),
+      player_intelligence=jnp.asarray(1, dtype=jnp.int32),
+      inventory=jnp.zeros((1)),
+      sword_enchantment=jnp.asarray(0, dtype=jnp.int32),
+      bow_enchantment=jnp.asarray(0, dtype=jnp.int32),
+      armour_enchantments=jnp.array([0, 0, 0, 0], dtype=jnp.int32),
+      melee_mobs=jnp.zeros((1)),
+      ranged_mobs=jnp.zeros((1)),
+      passive_mobs=jnp.zeros((1)),
+      mob_projectiles=jnp.zeros((1)),
+      mob_projectile_directions=jnp.zeros((1)),
+      player_projectiles=jnp.zeros((1)),
+      player_projectile_directions=jnp.zeros((1)),
+      growing_plants_positions=jnp.zeros((1)),
+      growing_plants_age=jnp.zeros((1)),
+      growing_plants_mask=jnp.zeros((1)),
+      potion_mapping=jnp.zeros((1)),
+      learned_spells=jnp.array([False, False], dtype=bool),
+      boss_progress=jnp.asarray(0, dtype=jnp.int32),
+      boss_timesteps_to_spawn_this_round=jnp.asarray(0, dtype=jnp.int32),
+      achievements=jnp.zeros((1)),
+      light_level=jnp.asarray(0.0, dtype=jnp.float32),
+      state_rng=jnp.zeros((1)),
+      timestep=jnp.asarray(0, dtype=jnp.int32),
+      current_goal=jnp.asarray(params.current_goal, dtype=jnp.int32),
+      start_position=jnp.asarray(player_position, dtype=jnp.int32),
+      goal_location=goal_location,
+    )
+    obs = self.get_obs(state, params)
+    return obs, state
+
+  def get_obs(self, state: EnvState, params: EnvParams) -> jnp.ndarray:
+    """Returns the map with player position marked as a 3-channel observation"""
+    # Create a 3-channel observation array
+    obs = jnp.zeros((*state.map.shape, 3), dtype=jnp.uint8)
+
+    # Mark player position in the second channel
+    y, x = state.player_position
+    obs = obs.at[y, x, :].set(255)
+
+    return obs
+
+  def observation_space(self, params: EnvParams) -> spaces.Box:
+    """Define observation space as map size"""
+    map_height, map_width = self.static_env_params.map_size
+    return spaces.Box(0, 255, (map_height, map_width), dtype=jnp.uint8)
+
+  def action_space(self, params: EnvParams) -> spaces.Discrete:
+    """Define action space"""
+    return spaces.Discrete(5)  # Assuming 5 actions as in original
+
+  @property
+  def name(self) -> str:
+    return "Craftax-Symbolic-NoAutoReset-v1"
+
+  @property
+  def num_actions(self) -> int:
+    return 5  # Assuming 5 actions as in original
