@@ -66,13 +66,15 @@ class EnvParams:
 
   god_mode: bool = False
   world_seeds: Tuple[int, ...] = tuple()
-  #possible_goals: Tuple[int, ...] = tuple()
-  active_goals: Tuple[int, ...] = tuple()
+  # possible_goals: Tuple[int, ...] = tuple()
   current_goal: int = 0
   start_positions: Optional[Union[Tuple[Tuple[int, int]], Tuple[int, int]]] = None
   goal_locations: Tuple[Tuple[int, int]] = ((-1, -1),)
   placed_goals: Tuple[int] = (-1,)
   fractal_noise_angles: tuple[int, int, int, int] = (None, None, None, None)
+  # for env wrapper
+  active_goals: Tuple[int, ...] = tuple()
+  num_success: int = 5
 
 
 @struct.dataclass
@@ -163,7 +165,7 @@ class EnvState:
   state_rng: Any
 
   timestep: int
-  
+
   # ADDED FOR EXPERIMENT
   current_goal: int
   start_position: jnp.ndarray
@@ -198,7 +200,7 @@ def get_inventory_obs_shape():
   return 51
 
 
-def generate_world(rng, params, static_params):
+def generate_world(rng, rng_select, params, static_params):
   # Get default or random start position
   player_position = jnp.array(
     [static_params.map_size[0] // 2, static_params.map_size[1] // 2]
@@ -353,7 +355,7 @@ def generate_world(rng, params, static_params):
   # ========================================
   # NOTE: give agent pickaxe to mine stone easily
   # ========================================
-  inventory = inventory.replace(pickaxe=3)
+  inventory = inventory.replace(pickaxe=5)
 
   if params.start_positions is not None:
     start_positions = jnp.array(params.start_positions)
@@ -363,7 +365,7 @@ def generate_world(rng, params, static_params):
       valid_positions = start_positions.sum(axis=1) > 0
 
       # Sample from valid positions using distrax
-      rng, _rng = jax.random.split(rng)
+      rng_select, _rng = jax.random.split(rng_select)
       probs = valid_positions.astype(jnp.float32)
       probs = probs / probs.sum()
       chosen_idx = distrax.Categorical(probs=probs).sample(seed=_rng)
@@ -383,29 +385,23 @@ def generate_world(rng, params, static_params):
   # Place multiple goals at locations
   ########################################################
   index = lambda x, i: jax.lax.dynamic_index_in_dim(
-    x, i, keepdims=False,
+    x,
+    i,
+    keepdims=False,
   )
-  goal_locations = jnp.asarray(params.goal_locations) 
+  goal_locations = jnp.asarray(params.goal_locations)
   placed_goals = jnp.asarray(params.placed_goals)
+
   def place_goal_at_index(i, m):
     goal_pos = goal_locations[i]
+
     def place_goal(m_):
       goal_value = index(placed_goals, i).astype(jnp.int32)
       return m_.at[0, goal_pos[0], goal_pos[1]].set(goal_value)
 
-    return jax.lax.cond(
-        jnp.asarray(goal_pos).sum() > 0,
-        place_goal,
-        lambda m_: m_,
-        m
-    )
+    return jax.lax.cond(jnp.asarray(goal_pos).sum() > 0, place_goal, lambda m_: m_, m)
 
-  map = jax.lax.fori_loop(
-    0,
-    len(params.goal_locations),
-    place_goal_at_index,
-    map
-  )
+  map = jax.lax.fori_loop(0, len(params.goal_locations), place_goal_at_index, map)
 
   flat_index = jnp.argmax(map[0] == params.current_goal)
   y = flat_index // map[0].shape[1]
@@ -511,31 +507,44 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
       goal_achieved = goal_achieved.astype(jnp.float32)
       return state, goal_achieved
 
-    def mapped_do_step(state: EnvState, params: EnvParams):
-      do_mapped_actions = jnp.asarray(
-        (Action.DO.value, Action.MAKE_WOOD_SWORD.value),
-      )
-      states, rewards = jax.vmap(step, in_axes=(None, 0, None))(
-        state, do_mapped_actions, params
-      )
-      best_idx = jnp.argmax(rewards)
+    # def mapped_do_step(state: EnvState, params: EnvParams):
+    #  do_mapped_actions = jnp.asarray(
+    #    (Action.DO.value, Action.MAKE_WOOD_SWORD.value),
+    #  )
+    #  states, rewards = jax.vmap(step, in_axes=(None, 0, None))(
+    #    state, do_mapped_actions, params
+    #  )
+    #  best_idx = jnp.argmax(rewards)
 
-      best_state = jax.tree_map(
-        lambda x: jax.lax.dynamic_index_in_dim(x, best_idx, keepdims=False),
-        states,
-      )
-      best_reward = jax.lax.dynamic_index_in_dim(rewards, best_idx, keepdims=False)
-      return best_state, best_reward
+    #  best_state = jax.tree_map(
+    #    lambda x: jax.lax.dynamic_index_in_dim(x, best_idx, keepdims=False),
+    #    states,
+    #  )
+    #  best_reward = jax.lax.dynamic_index_in_dim(rewards, best_idx, keepdims=False)
+    #  return best_state, best_reward
 
-    state, reward = jax.lax.cond(
-      action == Action.DO.value,
-      lambda s, p: mapped_do_step(s, p),
-      lambda s, p: step(s, action, p),
-      state,
-      params,
+    state, reward = step(state, action, params)
+    # jax.lax.cond(
+    #  action == Action.DO.value,
+    #  lambda s, p: mapped_do_step(s, p),
+    #  lambda s, p: step(s, action, p),
+    #  state,
+    #  params,
+    # )
+
+    of_interest = jnp.asarray(
+      (
+        Achievement.COLLECT_DIAMOND.value,
+        Achievement.COLLECT_SAPPHIRE.value,
+        Achievement.COLLECT_RUBY.value,
+        Achievement.COLLECT_IRON.value,
+        Achievement.COLLECT_COAL.value,
+      ),
+      dtype=jnp.int32,
     )
-
-    done = jnp.logical_or(reward > 0, self.is_terminal(state, params))
+    of_interest = state.achievements[of_interest]
+    done = jnp.logical_or(of_interest.sum() > 0, reward > 0)
+    done = jnp.logical_or(done, self.is_terminal(state, params))
 
     info = log_achievements_to_info(state, done)
     info["discount"] = self.discount(state, params)
@@ -548,7 +557,6 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
       info,
     )
 
-  @partial(jax.jit, static_argnums=(0,))
   def reset(self, key: chex.PRNGKey, params):
     """Performs resetting of environment."""
     obs, state = self.reset_env(key, params)
@@ -565,7 +573,9 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
       world_rng = jax.random.PRNGKey(selected_seed)
     else:
       rng, world_rng = jax.random.split(rng)
-    state = generate_world(world_rng, params, self.static_env_params)
+
+    rng, rng_select = jax.random.split(rng)
+    state = generate_world(world_rng, rng_select, params, self.static_env_params)
 
     obs = self.get_obs(
       state=state,
@@ -603,7 +613,6 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
       (obs_shape,),
       dtype=jnp.float32,
     )
-
 
 
 class CraftaxSymbolicWebEnvNoAutoResetDummy(EnvironmentNoAutoReset):
@@ -656,7 +665,7 @@ class CraftaxSymbolicWebEnvNoAutoResetDummy(EnvironmentNoAutoReset):
     new_state = state.replace(player_position=jnp.array([y, x]))
 
     reward = 1.0
-    done = False
+    done = True
     info = {}
     obs = self.get_obs(new_state, params)
     return obs, new_state, reward, done, info
@@ -699,7 +708,9 @@ class CraftaxSymbolicWebEnvNoAutoResetDummy(EnvironmentNoAutoReset):
     match = placed_goals == current_goal
 
     goal_locations = jnp.array(params.goal_locations, dtype=jnp.int32)
-    goal_location = jax.lax.dynamic_index_in_dim(goal_locations, jnp.argmax(match), keepdims=False)
+    goal_location = jax.lax.dynamic_index_in_dim(
+      goal_locations, jnp.argmax(match), keepdims=False
+    )
 
     state = EnvState(
       map=jnp.full(
