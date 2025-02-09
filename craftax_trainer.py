@@ -589,14 +589,14 @@ def sweep(search: str = ''):
           "SEED": {'values': list(range(1,4))},
           "NUM_ENV_SEEDS": {'values': [128]},
           #"NUM_AUX_LAYERS": {'values': [1,2]},
-          "SUBTASK_COEFF": {'values': [1, 1.5]},
-          "OFFTASK_COEFF": {'values': [1, 1e-1, 1e-2]},
+          "SUBTASK_COEFF": {'values': [2]},
+          "OFFTASK_COEFF": {'values': [1e-1]},
           #"LR": {'values': [0.0003, 0.00003]},
           #"INCLUDE_ACHIEVABLE": {'values': [True, False]},
           #"NUM_OFFTASK_GOALS": {'values': [1, 4]},
       },
       'overrides': ['alg=preplay', 'rlenv=craftax-1m-dyna', 'user=wilka'],
-      'group': 'preplay-17-off-task-goals',
+      'group': 'preplay-19-subtask-coeff',
     }
   elif search == 'pqn':
     sweep_config = {
@@ -619,29 +619,29 @@ def sweep(search: str = ''):
     sweep_config = {
         'metric': metric,
         'parameters': {
-            "NUM_ENV_SEEDS": {'values': [32]},
-            "SEED": {'values': list(range(1,11))},
+            "NUM_ENV_SEEDS": {'values': [8, 16]},
+            "SEED": {'values': list(range(1,6))},
         },
         'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'ql-eval-3',
+        'group': 'ql-eval-5',
     }
   elif search == 'ql_sf-eval':
     sweep_config = {
         'metric': metric,
         'parameters': {
             "ALG": {'values': ['qlearning_sf_aux']},
-            "NUM_ENV_SEEDS": {'values': [32]},
-            "SEED": {'values': list(range(1,11))},
+            "NUM_ENV_SEEDS": {'values': [8, 16]},
+            "SEED": {'values': list(range(1,6))},
         },
         'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'ql-sf-eval-3',
+        'group': 'ql-sf-eval-4',
     }
   elif search == 'dyna-eval':
     sweep_config = {
         'metric': metric,
         'parameters': {
             "ALG": {'values': ['dyna']},
-            "NUM_ENV_SEEDS": {'values': [32, 64, 128, 256, 512]},
+            "NUM_ENV_SEEDS": {'values': [8, 16]},
             "SEED": {'values': list(range(1,6))},
             "NUM_SIMULATIONS": {'values': [4]},
         },
@@ -667,11 +667,13 @@ def sweep(search: str = ''):
       'metric': metric,
       'parameters': {
           "ALG": {'values': ['preplay']},
-          "NUM_ENV_SEEDS": {'values': [256, 512]},
-          "SEED": {'values': list(range(1,11))},
+          "SEED": {'values': list(range(1,6))},
+          "NUM_ENV_SEEDS": {'values': [8, 16, 32, 64, 128, 256, 512]},
+          "OFFTASK_COEFF": {'values': [1e-1]},
+          "SUBTASK_COEFF": {'values': [2]},
       },
       'overrides': ['alg=preplay', 'rlenv=craftax-1m-dyna', 'user=wilka'],
-      'group': 'preplay-eval-4',
+      'group': 'preplay-eval-5',
     }
   #elif search == 'alphazero-eval':
   #  sweep_config = {

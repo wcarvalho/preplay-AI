@@ -630,7 +630,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
       x_t = last(t)
 
       # reset achievements at the beginning of the simulation
-      x_t = reset_achievements(x_t)
+      #x_t = reset_achievements(x_t)
 
       next_t, sim_outputs_t = simulate(
           h_tm1=last(h_on),    # [D]
