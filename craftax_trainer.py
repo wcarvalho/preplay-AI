@@ -301,10 +301,6 @@ def craftax_experience_logger(
   )
 
 
-<<<<<<< HEAD
-    rng = jax.random.PRNGKey(config["SEED"])
-    config["TEST_NUM_ENVS"] = config.get("TEST_NUM_ENVS", 10_000)
-=======
 def make_logger(
   config: dict,
   env,
@@ -323,7 +319,6 @@ def make_logger(
       else None
     ),
   )
->>>>>>> bd3505aa1be39d98fe0e512e9c1df29b47c9a435
 
 
 def run_single(config: dict, save_path: str = None):
@@ -359,8 +354,8 @@ def run_single(config: dict, save_path: str = None):
       test_env_params = env.default_params.replace(
         world_seeds=tuple(
           np.arange(
-            config["NUM_ENV_SEEDS"],
-            config["NUM_ENV_SEEDS"] + config["TEST_NUM_ENVS"],
+            100_000,
+            100_000 + config["TEST_NUM_ENVS"],
           )
         )
       )
@@ -487,21 +482,8 @@ def run_single(config: dict, save_path: str = None):
   else:
     raise NotImplementedError(config["ALG"])
 
-<<<<<<< HEAD
-      env = CraftaxSymbolicEnvNoAutoReset(static_env_params=static_env_params)
-      
-      if config['NUM_ENV_SEEDS']:
-        env_params = env.default_params.replace(
-          world_seeds=tuple(np.arange(config['NUM_ENV_SEEDS'])))
-        test_env_params = env.default_params.replace(
-          world_seeds=tuple(np.arange(10_000, 10_000 + config['TEST_NUM_ENVS'])))
-      else:
-        env_params = env.default_params
-        test_env_params = env.default_params
-=======
   start_time = time.time()
   train_vjit = jax.jit(jax.vmap(train_fn))
->>>>>>> bd3505aa1be39d98fe0e512e9c1df29b47c9a435
 
   rngs = jax.random.split(rng, config["NUM_SEEDS"])
   outs = jax.block_until_ready(train_vjit(rngs))
@@ -587,62 +569,49 @@ def sweep(search: str = ""):
 
   elif search == "alphazero":
     sweep_config = {
-<<<<<<< HEAD
-        'metric': metric,
-        'parameters': {
-            "NUM_ENV_SEEDS": {'values': [0]},
-            "NUM_SIMULATIONS": {'values': [2]},
-            "GUMBEL_SCALE": {'values': [1.0, .1, 10.]},
-            "value_coef": {'values': [.25, 1.0, .025]},
-            "MAX_PRIORITY_WEIGHT": {'values': [0.]},
-            "IMPORTANCE_SAMPLING_EXPONENT": {'values': [0.]},
-            #"MAX_VALUE": {'values': [10, 20]},
-            #"SAMPLE_LENGTH": {'values': [40, 60, 80]},
-        },
-        'overrides': ['alg=alphazero', 'rlenv=craftax-1m-dyna', 'user=wilka'],
-        'group': 'alphazero-4',
-    }
-  elif search == 'dyna':
-    sweep_config = {
-        'metric': metric,
-        'parameters': {
-            "ALG": {'values': ['dyna']},
-            "SEED": {'values': list(range(1,4))},
-            "NUM_ENV_SEEDS": {'values': [128]},
-            "NUM_SIMULATIONS": {'values': [4]},
-            "FIXED_EPSILON": {'values': [2]},
-        },
-        'overrides': ['alg=dyna', 'rlenv=craftax-1m-dyna', 'user=wilka'],
-        'group': 'dyna-19-epsilon',
-    }
-  elif search == 'preplay':
-    sweep_config = {
-      'metric': metric,
-      'parameters': {
-          "ALG": {'values': ['preplay']},
-          "SEED": {'values': list(range(1,4))},
-          "NUM_ENV_SEEDS": {'values': [128]},
-          #"NUM_AUX_LAYERS": {'values': [1,2]},
-          "SUBTASK_COEFF": {'values': [2]},
-          "OFFTASK_COEFF": {'values': [1e-1]},
-          #"LR": {'values': [0.0003, 0.00003]},
-          #"INCLUDE_ACHIEVABLE": {'values': [True, False]},
-          #"NUM_OFFTASK_GOALS": {'values': [1, 4]},
-      },
-      'overrides': ['alg=preplay', 'rlenv=craftax-1m-dyna', 'user=wilka'],
-      'group': 'preplay-19-subtask-coeff',
-=======
       "metric": metric,
       "parameters": {
         "NUM_ENV_SEEDS": {"values": [0]},
         "NUM_SIMULATIONS": {"values": [2]},
-        "TRAINING_INTERVAL": {"values": [1, 5]},
-        "MAX_VALUE": {"values": [10, 20]},
-        "SAMPLE_LENGTH": {"values": [40, 60, 80]},
+        "GUMBEL_SCALE": {"values": [1.0, 0.1, 10.0]},
+        "value_coef": {"values": [0.25, 1.0, 0.025]},
+        "MAX_PRIORITY_WEIGHT": {"values": [0.0]},
+        "IMPORTANCE_SAMPLING_EXPONENT": {"values": [0.0]},
+        # "MAX_VALUE": {'values': [10, 20]},
+        # "SAMPLE_LENGTH": {'values': [40, 60, 80]},
       },
       "overrides": ["alg=alphazero", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "alphazero-3",
->>>>>>> bd3505aa1be39d98fe0e512e9c1df29b47c9a435
+      "group": "alphazero-4",
+    }
+  elif search == "dyna":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["dyna"]},
+        "SEED": {"values": list(range(1, 4))},
+        "NUM_ENV_SEEDS": {"values": [128]},
+        "NUM_SIMULATIONS": {"values": [4]},
+        "FIXED_EPSILON": {"values": [2]},
+      },
+      "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "group": "dyna-19-epsilon",
+    }
+  elif search == "preplay":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["preplay"]},
+        "SEED": {"values": list(range(1, 4))},
+        "NUM_ENV_SEEDS": {"values": [128]},
+        # "NUM_AUX_LAYERS": {'values': [1,2]},
+        "SUBTASK_COEFF": {"values": [2]},
+        "OFFTASK_COEFF": {"values": [1e-1]},
+        # "LR": {'values': [0.0003, 0.00003]},
+        # "INCLUDE_ACHIEVABLE": {'values': [True, False]},
+        # "NUM_OFFTASK_GOALS": {'values': [1, 4]},
+      },
+      "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "group": "preplay-19-subtask-coeff",
     }
   elif search == "dyna":
     sweep_config = {
@@ -686,121 +655,48 @@ def sweep(search: str = ""):
   ############################################################
   elif search == "ql-eval":
     sweep_config = {
-<<<<<<< HEAD
-        'metric': metric,
-        'parameters': {
-            "NUM_ENV_SEEDS": {'values': [8, 16]},
-            "SEED": {'values': list(range(1,6))},
-        },
-        'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'ql-eval-5',
-=======
       "metric": metric,
       "parameters": {
-        "NUM_ENV_SEEDS": {"values": [64, 0]},
-        "SEED": {"values": list(range(1, 3))},
+        "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512, 1024]},
+        "SEED": {"values": list(range(1, 6))},
       },
       "overrides": ["alg=ql", "rlenv=craftax-10m", "user=wilka"],
-      "group": "ql-eval-2",
->>>>>>> bd3505aa1be39d98fe0e512e9c1df29b47c9a435
+      "group": "ql-final-1",
     }
   elif search == "ql_sf-eval":
     sweep_config = {
-<<<<<<< HEAD
-        'metric': metric,
-        'parameters': {
-            "ALG": {'values': ['qlearning_sf_aux']},
-            "NUM_ENV_SEEDS": {'values': [8, 16]},
-            "SEED": {'values': list(range(1,6))},
-        },
-        'overrides': ['alg=ql', 'rlenv=craftax-10m', 'user=wilka'],
-        'group': 'ql-sf-eval-4',
-    }
-  elif search == 'dyna-eval':
-    sweep_config = {
-        'metric': metric,
-        'parameters': {
-            "ALG": {'values': ['dyna']},
-            "NUM_ENV_SEEDS": {'values': [8, 16]},
-            "SEED": {'values': list(range(1,6))},
-            "NUM_SIMULATIONS": {'values': [4]},
-        },
-        'overrides': ['alg=dyna', 'rlenv=craftax-1m-dyna', 'user=wilka'],
-        'group': 'dyna-eval-5',
-    }
-  elif search == 'dyna-eval-eps':
-    sweep_config = {
-        'metric': metric,
-        'parameters': {
-            "ALG": {'values': ['dyna']},
-            "NUM_ENV_SEEDS": {'values': [64]},
-            "SEED": {'values': list(range(1,6))},
-            "NUM_SIMULATIONS": {'values': [4]},
-            #"SIM_EPSILON": {'values': [.1, .5, .9]},
-            "SIM_EPSILON_SETTING": {'values': [1, 2]},
-        },
-        'overrides': ['alg=dyna', 'rlenv=craftax-1m-dyna', 'user=wilka'],
-        'group': 'dyna-eval-eps-1',
-    }
-  elif search == 'preplay-eval':
-    sweep_config = {
-      'metric': metric,
-      'parameters': {
-          "ALG": {'values': ['preplay']},
-          "SEED": {'values': list(range(1,6))},
-          "NUM_ENV_SEEDS": {'values': [8, 16, 32, 64, 128, 256, 512]},
-          "OFFTASK_COEFF": {'values': [1e-1]},
-          "SUBTASK_COEFF": {'values': [2]},
-      },
-      'overrides': ['alg=preplay', 'rlenv=craftax-1m-dyna', 'user=wilka'],
-      'group': 'preplay-eval-5',
-=======
       "metric": metric,
       "parameters": {
         "ALG": {"values": ["qlearning_sf_aux"]},
-        "NUM_ENV_SEEDS": {"values": [64, 0]},
-        "SEED": {"values": list(range(1, 4))},
+        "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512, 1024]},
+        "SEED": {"values": list(range(1, 6))},
       },
       "overrides": ["alg=ql", "rlenv=craftax-10m", "user=wilka"],
-      "group": "ql-sf-eval-2",
-    }
-
-  elif search == "alphazero-eval":
-    sweep_config = {
-      "metric": metric,
-      "parameters": {
-        "NUM_ENV_SEEDS": {"values": [64, 0]},
-        "SEED": {"values": list(range(1, 4))},
-      },
-      "overrides": ["alg=alphazero", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "alphazero-eval-2",
+      "group": "ql-sf-final-1",
     }
   elif search == "dyna-eval":
     sweep_config = {
       "metric": metric,
       "parameters": {
         "ALG": {"values": ["dyna"]},
-        "NUM_ENV_SEEDS": {"values": [64, 0]},
-        "SEED": {"values": list(range(1, 4))},
-        "NUM_SIMULATIONS": {"values": [1, 2, 5, 7]},
+        "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512, 1024]},
+        "SEED": {"values": list(range(1, 6))},
       },
       "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "dyna-eval-2",
+      "group": "dyna-final-1",
     }
   elif search == "preplay-eval":
     sweep_config = {
       "metric": metric,
       "parameters": {
         "ALG": {"values": ["preplay"]},
-        "NUM_ENV_SEEDS": {"values": [64, 0]},
-        "SEED": {"values": list(range(1, 4))},
-        "NUM_OFFTASK_GOALS": {"values": [1, 4, 6]},
+        "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512, 1024]},
+        "SEED": {"values": list(range(1, 6))},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "preplay-eval-2",
->>>>>>> bd3505aa1be39d98fe0e512e9c1df29b47c9a435
+      "group": "preplay-eval-final-1",
     }
-  #elif search == 'alphazero-eval':
+  # elif search == 'alphazero-eval':
   #  sweep_config = {
   #      'metric': metric,
   #      'parameters': {

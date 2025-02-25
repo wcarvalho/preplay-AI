@@ -993,26 +993,6 @@ def make_train(**kwargs):
   config = kwargs["config"]
   rng = jax.random.PRNGKey(config["SEED"])
 
-<<<<<<< HEAD
-    epsilon_setting = config['SIM_EPSILON_SETTING']
-    num_simulations = config['NUM_SIMULATIONS']
-    sim_epsilon = config.get('SIM_EPSILON', 0)
-    if epsilon_setting == 1:
-      # ACME default
-      # range of ~(0.001, .1)
-      vals = np.logspace(num=256, start=1, stop=3, base=.1)
-    elif epsilon_setting == 2:
-        # range of ~(.9,.1)
-        vals = np.logspace(num=256, start=.05, stop=.9, base=.1)
-    elif epsilon_setting == 3:
-        # very random
-        vals = np.ones(256)*sim_epsilon
-
-    epsilons = jax.random.choice(
-        rng, vals, shape=(num_simulations - 1,))
-    epsilons = jnp.concatenate((jnp.array((0,)), epsilons))
-    #greedy_idx = int(epsilons.argmin())
-=======
   epsilon_setting = config["SIM_EPSILON_SETTING"]
   num_simulations = config["NUM_SIMULATIONS"]
   sim_epsilon = config.get("SIM_EPSILON", 0)
@@ -1025,12 +1005,11 @@ def make_train(**kwargs):
     vals = np.logspace(num=256, start=0.05, stop=0.9, base=0.1)
   elif epsilon_setting == 3:
     # very random
-    vals = np.ones(256) * 0.9
+    vals = np.ones(256) * sim_epsilon
 
   epsilons = jax.random.choice(rng, vals, shape=(num_simulations - 1,))
-  epsilons = jnp.concatenate((jnp.array((sim_epsilon,)), epsilons))
+  epsilons = jnp.concatenate((jnp.array((0,)), epsilons))
   # greedy_idx = int(epsilons.argmin())
->>>>>>> bd3505aa1be39d98fe0e512e9c1df29b47c9a435
 
   def simulation_policy(preds: Predictions, sim_rng: jax.Array):
     q_values = preds.q_vals
