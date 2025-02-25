@@ -1,4 +1,3 @@
-
 import abc
 import collections
 from typing import Dict, Union, Optional, Callable, Optional
@@ -27,12 +26,15 @@ class BasicObserverState:
   idx: jax.Array = jnp.array(0, dtype=jnp.int32)
 
 
-def get_first(b): return jax.tree_map(lambda x:x[0], b)
+def get_first(b):
+  return jax.tree_map(lambda x: x[0], b)
+
 
 def add_first_to_buffer(
-    buffer: fbx.trajectory_buffer.TrajectoryBufferState,
-    buffer_state: struct.PyTreeNode,
-    x: struct.PyTreeNode):
+  buffer: fbx.trajectory_buffer.TrajectoryBufferState,
+  buffer_state: struct.PyTreeNode,
+  x: struct.PyTreeNode,
+):
   """
   x: [num_envs, ...]
   get first env data and dummy dummy time dim.
@@ -41,35 +43,32 @@ def add_first_to_buffer(
   return buffer.add(buffer_state, x)
 
 
-
 class Observer:
   """This is an observer that keeps track of timesteps, actions, and predictions.
 
   It only uses information from the first envionment. Annoying to track each env.
 
   """
+
   def __init__(
-      self,
-      log_period: int = 50_000,
-      max_episode_length: int = 200,
-      max_num_episodes: int = 200,
-      **kwargs,
-      ):
-
-
+    self,
+    log_period: int = 50_000,
+    max_episode_length: int = 200,
+    max_num_episodes: int = 200,
+    **kwargs,
+  ):
     self.log_period = log_period
     self.max_episode_length = max_episode_length
     self.buffer = fbx.make_trajectory_buffer(
-        max_length_time_axis=max_episode_length*max_num_episodes,
-        min_length_time_axis=1,
-        sample_batch_size=1,  # unused
-        add_batch_size=1,
-        sample_sequence_length=1,  # unused
-        period=1,
+      max_length_time_axis=max_episode_length * max_num_episodes,
+      min_length_time_axis=1,
+      sample_batch_size=1,  # unused
+      add_batch_size=1,
+      sample_sequence_length=1,  # unused
+      period=1,
     )
 
-  def init(self, *args, example_timestep, example_action, ** kwargs):
-
+  def init(self, *args, example_timestep, example_action, **kwargs):
     shape = (self.log_period,) + example_action.shape
     observer_state = BasicObserverState(
       episode_returns=jnp.zeros(shape, dtype=jnp.float32),
@@ -84,7 +83,7 @@ class Observer:
     observer_state: BasicObserverState,
     first_timestep: TimeStep,
     agent_state: Optional[struct.PyTreeNode] = None,
-    ) -> BasicObserverState:
+  ) -> BasicObserverState:
     del first_timestep, agent_state
     return observer_state
 
@@ -96,7 +95,7 @@ class Observer:
     next_timestep: TimeStep,
     agent_state: Optional[struct.PyTreeNode] = None,
     **kwargs,
-    ) -> None:
+  ) -> None:
     """Update log and flush if terminal + log period hit.
 
 
@@ -109,15 +108,15 @@ class Observer:
     del agent_state
     # NOTE: THIS IS WRONG!!!!!! NEED TO RETHINK THROUGH THE LOGIC!!!
     return observer_state
-    #next_timestep_last = (next_timestep.last()).astype(jnp.int32)
-    #idx = observer_state.idx
-    #next_idx = observer_state.idx + next_timestep_last
-    #import pdb; pdb.set_trace()
-    #observer_state = observer_state.replace(
+    # next_timestep_last = (next_timestep.last()).astype(jnp.int32)
+    # idx = observer_state.idx
+    # next_idx = observer_state.idx + next_timestep_last
+    # import pdb; pdb.set_trace()
+    # observer_state = observer_state.replace(
     #    idx=next_idx,
     #    finished=observer_state.finished.at[idx].add(next_timestep_last),
     #    episode_lengths=observer_state.episode_lengths.at[idx].add(1),
     #    episode_returns=observer_state.episode_returns.at[idx].add(next_timestep.reward),
-    #)
+    # )
 
     return observer_state
