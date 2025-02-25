@@ -342,7 +342,7 @@ def run_single(
         env_params = env.default_params.replace(
           world_seeds=tuple(np.arange(config['NUM_ENV_SEEDS'])))
         test_env_params = env.default_params.replace(
-          world_seeds=tuple(np.arange(config['NUM_ENV_SEEDS'], config['NUM_ENV_SEEDS'] + config['TEST_NUM_ENVS'])))
+          world_seeds=tuple(np.arange(10_000, 10_000 + config['TEST_NUM_ENVS'])))
       else:
         env_params = env.default_params
         test_env_params = env.default_params
