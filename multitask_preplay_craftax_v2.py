@@ -312,6 +312,16 @@ def simulate_n_trajectories(
   return all_timesteps, sim_outputs
 
 
+def reset_achievements(x_t):
+  return x_t.replace(
+    state=x_t.state.replace(
+      env_state=x_t.state.env_state.replace(
+        achievements=jnp.zeros_like(x_t.state.env_state.achievements),
+      )
+    )
+  )
+
+
 ################################
 # function to copy something n times
 ################################
@@ -617,9 +627,14 @@ class DynaLossFn(vbb.RecurrentLossFn):
       key, key_ = jax.random.split(key)
       # [sim_length, num_sim, ...]
       last = lambda y: jax.tree.map(lambda x: x[-1], y)
+      x_t = last(t)
+
+      # reset achievements at the beginning of the simulation
+      # x_t = reset_achievements(x_t)
+
       next_t, sim_outputs_t = simulate(
         h_tm1=last(h_on),  # [D]
-        x_t=last(t),  # [D, ...]
+        x_t=x_t,  # [D, ...]
         rng=key_,
         goal=g,  # [num_sims, G]
         use_offtask_policy=jnp.ones((1,)),
@@ -677,6 +692,9 @@ class DynaLossFn(vbb.RecurrentLossFn):
       achievement_coefficients = achievement_coefficients[..., : g.shape[-1]]
 
       coeff_mask = g.astype(jnp.float32)
+      # coeff_time_mask = jnp.conj(
+      #   jnp.zeros_like(achievements)
+      # )
       # [T, K, D] * [T, K, D] * [1, K, D] --> [T, K]
       offtask_reward = (achievements * achievement_coefficients * coeff_mask[None]).sum(
         -1
@@ -1561,14 +1579,38 @@ def make_agent(
     q_head_type=config.get("QHEAD_TYPE", "dot"),
   )
 
-  rng, _rng = jax.random.split(rng)
-  network_params = agent.init(_rng, example_timestep, method=agent.initialize)
-
-  def reset_fn(params, example_timestep, reset_rng):
-    batch_dims = example_timestep.reward.shape
-    return agent.apply(
-      params, batch_dims=batch_dims, rng=reset_rng, method=agent.initialize_carry
-    )
+  agent = AgentCls(
+    observation_encoder=CraftaxObsEncoder(
+      hidden_dim=config["MLP_HIDDEN_DIM"],
+      num_layers=config["NUM_MLP_LAYERS"],
+      activation=config["ACTIVATION"],
+      norm_type=config.get("NORM_TYPE", "none"),
+      structured_inputs=config.get("STRUCTURED_INPUTS", False),
+      use_bias=config.get("USE_BIAS", True),
+      include_achievable=config.get("INCLUDE_ACHIEVABLE", True),
+      action_dim=env.action_space(env_params).n,
+    ),
+    rnn=rnn,
+    q_fn=QFnCls(
+      hidden_dim=config.get("Q_HIDDEN_DIM", 512),
+      num_layers=config.get("NUM_Q_LAYERS", 1),
+      out_dim=env.action_space(env_params).n,
+      activation=config["ACTIVATION"],
+      activate_final=False,
+      use_bias=config.get("USE_BIAS", True),
+    ),
+    q_fn_subtask=QFnCls(
+      hidden_dim=config.get("Q_HIDDEN_DIM", 512),
+      num_layers=config.get("NUM_AUX_LAYERS", 0),
+      out_dim=env.action_space(env_params).n,
+      activation=config["ACTIVATION"],
+      activate_final=False,
+      use_bias=config.get("USE_BIAS", True),
+    ),
+    env=model_env,
+    env_params=model_env_params,
+    q_head_type=config.get("QHEAD_TYPE", "dot"),
+  )
 
   return agent, network_params, reset_fn
 

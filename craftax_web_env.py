@@ -301,7 +301,10 @@ def generate_world(rng, rng_select, params, static_params):
       if diamond_pos is not None:
         # Generate offsets from -max_distance to +max_distance
         offsets = jax.random.randint(
-          rng, shape=(num_candidates, 2), minval=-max_distance, maxval=max_distance + 1
+          rng,
+          shape=(num_candidates, 2),
+          minval=-max_distance,
+          maxval=max_distance + 1,
         )
         # Add offsets to diamond position
         positions = diamond_pos + offsets

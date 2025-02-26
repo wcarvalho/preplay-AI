@@ -1005,10 +1005,10 @@ def make_train(**kwargs):
     vals = np.logspace(num=256, start=0.05, stop=0.9, base=0.1)
   elif epsilon_setting == 3:
     # very random
-    vals = np.ones(256) * 0.9
+    vals = np.ones(256) * sim_epsilon
 
   epsilons = jax.random.choice(rng, vals, shape=(num_simulations - 1,))
-  epsilons = jnp.concatenate((jnp.array((sim_epsilon,)), epsilons))
+  epsilons = jnp.concatenate((jnp.array((0,)), epsilons))
   # greedy_idx = int(epsilons.argmin())
 
   def simulation_policy(preds: Predictions, sim_rng: jax.Array):
