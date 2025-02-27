@@ -23,6 +23,7 @@ import chex
 from flax import struct
 from functools import partial
 import distrax
+from typing import List
 
 from craftax.craftax.envs.common import log_achievements_to_info
 from craftax.environment_base.environment_bases import EnvironmentNoAutoReset
@@ -602,13 +603,43 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
       dtype=jnp.float32,
     )
 
+########################################################
+# Multi-goal version of the Craftax environment
+########################################################
+
+@struct.dataclass
+class SimulationEnvParams(EnvParams):
+  task_configs: List[struct.PyTreeNode] = None
+
+
 class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset):
 
   """
   This is a multi-goal version of the Craftax environment.
-
   """
 
+  @property
+  def default_params(self) -> EnvParams:
+    return SimulationEnvParams()
+
+  def reset(self, key: chex.PRNGKey, params: SimulationEnvParams):
+    """
+    Sample a task config from the list of task configs.
+    Input goal_objects, goal_locations, world_seed, start_positions.
+    """
+    task_config = jax.random.choice(key, params.task_configs)
+    params = params.replace(
+      world_seeds=task_config.world_seed,
+      current_goal=task_config.goal_object.astype(jnp.int32),
+      start_positions=task_config.start_positions.astype(jnp.int32),
+      goal_locations=task_config.goal_location.astype(jnp.int32),
+    )
+    return super().reset(key, params)
+
+
+########################################################
+# Dummy version of the Craftax environment
+########################################################
 class CraftaxSymbolicWebEnvNoAutoResetDummy(EnvironmentNoAutoReset):
   """
   A dummy version of the Craftax environment with empty core functions.

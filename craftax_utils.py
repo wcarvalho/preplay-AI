@@ -3,12 +3,15 @@ import jax
 import jax.numpy as jnp
 from collections import deque
 from craftax.craftax.constants import Action, BlockType, ItemType, BLOCK_PIXEL_SIZE_IMG
-from craftax_fullmap_renderer import TEXTURES
-from craftax_fullmap_renderer import render_craftax_pixels as render_craftax_pixels_full
+try:
+  from craftax_fullmap_renderer import TEXTURES
+  from craftax_fullmap_renderer import render_craftax_pixels as render_craftax_pixels_full
+  #import craftax_fullmap_constants as constants
+except ModuleNotFoundError:
+  pass
 from craftax.craftax.renderer import (
   render_craftax_pixels as render_craftax_pixels_partial,
 )
-import craftax_fullmap_constants as constants
 import matplotlib.pyplot as plt
 import os
 import numpy as np
@@ -16,7 +19,7 @@ from collections import namedtuple
 from matplotlib.animation import FuncAnimation
 
 try:
-  from tqdm.notebook import tqdm
+  from tqdm.auto import tqdm
 except ImportError:
   from tqdm import tqdm
 
@@ -214,14 +217,17 @@ def astar(
 
   # Handle different goal types
   is_position_goal = isinstance(goal, (tuple, jnp.ndarray)) and len(goal) == 2
+
   if is_position_goal:
     goal_object_type = map[goal[0], goal[1]]
     walkable_blocks.append(goal_object_type)
     goal_pos = goal
   else:
     # For BlockType goals, find the closest matching block
+    walkable_blocks.append(goal)
     matches = jnp.where(map == goal)
     if len(matches[0]) == 0:
+      print(f"No matches found for goal {goal}")
       return [], 0
     # Use Manhattan distance to find closest goal
     distances = [
@@ -241,7 +247,7 @@ def astar(
   g_scores = {tuple(agent_pos): 0}  # Cost from start to node
   iterations = 0
 
-  pbar = tqdm(desc="A* Iterations")
+  pbar = tqdm(desc=f"A* {goal} Iterations")
 
   while open_set:
     iterations += 1
@@ -429,7 +435,7 @@ def get_object_positions(state, block_type):
   return positions
 
 
-def render_fn(state, show_agent=True, block_pixel_size=constants.BLOCK_PIXEL_SIZE_IMG):
+def render_fn(state, show_agent=True, block_pixel_size=BLOCK_PIXEL_SIZE_IMG):
   image = render_craftax_pixels_full(
     state, block_pixel_size=block_pixel_size, show_agent=show_agent
   )
@@ -466,7 +472,7 @@ def save_path_to_cache(path, world, start_pos, goal_pos):
 def display_map(
   state,
   params,
-  block_pixel_size: int = constants.BLOCK_PIXEL_SIZE_IMG,
+  block_pixel_size: int = BLOCK_PIXEL_SIZE_IMG,
   goals: Optional[Union[BlockType, List[BlockType]]] = None,
   refresh_cache: bool = False,
   show_agent: bool = True,
@@ -685,7 +691,7 @@ def train_test_paths(
     fig, ax = plt.subplots(1, figsize=(8, 8))
   with jax.disable_jit():
     image = render_fn(
-      state, show_agent=False, block_pixel_size=constants.BLOCK_PIXEL_SIZE_IMG
+      state, show_agent=False, block_pixel_size=BLOCK_PIXEL_SIZE_IMG
     )
     ax.imshow(image)
     ax.axis("off")  # This removes the axes and grid

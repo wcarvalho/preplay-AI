@@ -2,10 +2,14 @@ import math
 from typing import List, Tuple
 from flax import struct
 import numpy as np
+import jax.numpy as jnp
 import os.path
 import matplotlib.pyplot as plt
 from craftax.craftax.renderer import render_craftax_pixels as render_partial
-from craftax_fullmap_renderer import render_craftax_pixels as render_full
+try:
+  from craftax_fullmap_renderer import render_craftax_pixels as render_full
+except ModuleNotFoundError:
+  pass
 from craftax.craftax.constants import (
   BlockType,
   Achievement,
@@ -15,7 +19,6 @@ from craftax.craftax.constants import (
 )
 import jax
 import craftax_utils
-from craftax_web_env import EnvParams, CraftaxSymbolicWebEnvNoAutoReset
 
 BUCKET_NAME = "craftax-human-dyna"
 
@@ -457,38 +460,3 @@ def visualize_block_config(config: BlockConfig, jax_env, **kwargs):
   plt.tight_layout()
   return fig_map, fig_views
 
-
-def make_start_position(start_positions):
-  start_position = jnp.zeros((MAX_START_POSITIONS, 2), dtype=jnp.int32)
-  return start_position.at[: len(start_positions)].set(jnp.asarray(start_positions))
-
-OPTIMAL_TEST_PATHS = {}
-env = CraftaxSymbolicWebEnvNoAutoReset()
-for i in range(len(PATHS_CONFIGS)):
-  PATHS_CONFIGS[i] = PATHS_CONFIGS[i].replace(
-    train_objects=POSSIBLE_BLOCKS_MOD[i : i + 2],
-    test_objects=POSSIBLE_BLOCKS_MOD[i + 2 : i + 3],
-  )
-  config = PATHS_CONFIGS[i]
-  # Create cache path
-  cache_dir = "craftax_cache/optimal_paths"
-  os.makedirs(cache_dir, exist_ok=True)
-  cache_file = os.path.join(cache_dir, f"path_{hash(str(config))}.npy")
-
-  # Try to load from cache
-  if os.path.exists(cache_file):
-      path = np.load(cache_file)
-  else:
-    env_params = EnvParams()
-    # Calculate path for each start position + test object location
-    for start_position in config.start_eval_positions + config.start_train_positions:
-      env_params = env_params.replace(
-        start_positions=make_start_position(start_position),
-      )
-    timestep = experiment.jax_web_env.reset(jax.random.PRNGKey(0), env_params)
-    goal_position = config.test_object_location
-    path, _ = craftax_utils.astar(timestep.state, goal_position)
-    path = np.array(path)
-
-    np.save(cache_file, path)
-  OPTIMAL_TEST_PATHS[config.world_seed] = path
