@@ -47,11 +47,18 @@ from craftax.craftax.game_logic import *
 from craftax.craftax.util.game_logic_utils import *
 
 try:
-  from craftax_game_logic import craftax_step, is_game_over
+  from craftax_game_logic import craftax_step
 except ImportError:
-  from simulations.craftax_game_logic import craftax_step, is_game_over
+  from simulations.craftax_game_logic import craftax_step
 except Exception as e:
   raise e
+
+
+def is_game_over(state, params, static_env_params):
+  done_steps = state.timestep >= params.max_timesteps
+  is_dead = state.player_health <= 0
+
+  return jnp.logical_or(done_steps, is_dead)
 
 
 @struct.dataclass
@@ -72,9 +79,9 @@ class EnvParams:
   goal_locations: Tuple[Tuple[int, int]] = ((-1, -1),)
   placed_goals: Tuple[int] = (-1,)
   fractal_noise_angles: tuple[int, int, int, int] = (None, None, None, None)
-  # for env wrapper
-  active_goals: Tuple[int, ...] = tuple()
-  num_success: int = 5
+  ## for env wrapper
+  # active_goals: Tuple[int, ...] = tuple()
+  # num_success: int = 5
 
 
 @struct.dataclass
@@ -379,6 +386,7 @@ def generate_world(rng, rng_select, params, static_params):
       )
     elif start_positions.ndim == 1:
       # [2]
+      assert start_positions.shape == (2,), "should be (y, z)"
       player_position = start_positions
     else:
       raise NotImplementedError(start_positions.ndim)
@@ -510,30 +518,7 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
       goal_achieved = goal_achieved.astype(jnp.float32)
       return state, goal_achieved
 
-    # def mapped_do_step(state: EnvState, params: EnvParams):
-    #  do_mapped_actions = jnp.asarray(
-    #    (Action.DO.value, Action.MAKE_WOOD_SWORD.value),
-    #  )
-    #  states, rewards = jax.vmap(step, in_axes=(None, 0, None))(
-    #    state, do_mapped_actions, params
-    #  )
-    #  best_idx = jnp.argmax(rewards)
-
-    #  best_state = jax.tree_map(
-    #    lambda x: jax.lax.dynamic_index_in_dim(x, best_idx, keepdims=False),
-    #    states,
-    #  )
-    #  best_reward = jax.lax.dynamic_index_in_dim(rewards, best_idx, keepdims=False)
-    #  return best_state, best_reward
-
     state, reward = step(state, action, params)
-    # jax.lax.cond(
-    #  action == Action.DO.value,
-    #  lambda s, p: mapped_do_step(s, p),
-    #  lambda s, p: step(s, action, p),
-    #  state,
-    #  params,
-    # )
 
     of_interest = jnp.asarray(
       (
@@ -708,6 +693,7 @@ class CraftaxSymbolicWebEnvNoAutoResetDummy(EnvironmentNoAutoReset):
         )
       elif start_positions.ndim == 1:
         # [2]
+        assert start_positions.shape == (2,), "should be (y, z)"
         player_position = start_positions
       else:
         raise NotImplementedError(start_positions.ndim)
