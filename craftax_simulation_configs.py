@@ -17,7 +17,7 @@ class TaskConfig(struct.PyTreeNode):
   """Configuration for a single experimental block"""
 
   world_seed: int
-  start_positions: Tuple[int, int]
+  start_position: Tuple[int, int]
   goal_object: int = None
   placed_goals: List[Tuple[int, int]] = None
   goal_locations: List[Tuple[int, int]] = None
@@ -35,18 +35,16 @@ env_params = EnvParams()
 
 TRAIN_CONFIGS = []
 TEST_CONFIGS = []
-for i in range(len(PATHS_CONFIGS)):
-  config = PATHS_CONFIGS[i]
-  # Create cache path
-  cache_dir = "craftax_cache/optimal_paths"
-  os.makedirs(cache_dir, exist_ok=True)
-
+# Create cache path
+cache_dir = "craftax_cache/optimal_paths"
+os.makedirs(cache_dir, exist_ok=True)
+for config in PATHS_CONFIGS:
   block_env_params = make_block_env_params(config, env_params)
   def get_params_and_path(
     world_seed,
     start_position,
     goal_object,
-    recompute=True,
+    recompute=False,
   ):
     cache_file = f"path_{world_seed}_{start_position}_{goal_object}.npy"
     cache_file = os.path.join(cache_dir, cache_file)
@@ -83,10 +81,10 @@ for i in range(len(PATHS_CONFIGS)):
       configs.append(
         TaskConfig(
           world_seed=world_seed,
-          start_positions=waypoint,
+          start_position=waypoint,
           goal_object=goal_object,
-          placed_goals=params.placed_goals,
-          goal_locations=params.goal_locations,
+          placed_goals=jnp.asarray(params.placed_goals),
+          goal_locations=jnp.asarray(params.goal_locations),
         )
       )
   for start_position in config.start_eval_positions + config.start_train_positions:
@@ -114,8 +112,7 @@ for i in range(len(PATHS_CONFIGS)):
         configs=TRAIN_CONFIGS,
       )
 
-TRAIN_CONFIGS = jtu.tree_map(lambda *x: jnp.array(x), *TRAIN_CONFIGS)
-TEST_CONFIGS = jtu.tree_map(lambda *x: jnp.array(x), *TEST_CONFIGS)
-from pprint import pprint
-pprint(TRAIN_CONFIGS)
-pprint(TEST_CONFIGS)
+TRAIN_CONFIGS = jtu.tree_map(lambda *x: jnp.stack(x), *TRAIN_CONFIGS)
+TEST_CONFIGS = jtu.tree_map(lambda *x: jnp.stack(x), *TEST_CONFIGS)
+
+

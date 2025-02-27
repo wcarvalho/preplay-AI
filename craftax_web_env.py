@@ -627,12 +627,18 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
     Sample a task config from the list of task configs.
     Input goal_objects, goal_locations, world_seed, start_positions.
     """
-    task_config = jax.random.choice(key, params.task_configs)
+    n_tasks = len(params.task_configs.world_seed)
+    task_idx = jax.random.randint(key, (n_tasks,), 0, n_tasks)
+    index = lambda x, i: jax.lax.dynamic_index_in_dim(
+      x, i, keepdims=False)
+    task_config = jax.tree_map(index, params.task_configs, task_idx)
+
     params = params.replace(
-      world_seeds=task_config.world_seed,
+      world_seeds=(task_config.world_seed,),
       current_goal=task_config.goal_object.astype(jnp.int32),
-      start_positions=task_config.start_positions.astype(jnp.int32),
-      goal_locations=task_config.goal_location.astype(jnp.int32),
+      start_positions=task_config.start_position.astype(jnp.int32),
+      placed_goals=task_config.placed_goals.astype(jnp.int32),
+      goal_locations=task_config.goal_locations.astype(jnp.int32),
     )
     return super().reset(key, params)
 
