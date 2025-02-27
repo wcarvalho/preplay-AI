@@ -61,7 +61,7 @@ class EnvParams:
 
   always_diamond: bool = False
 
-  mob_despawn_distance: int = 14
+  mob_despawn_distance: int = 100000
   max_attribute: int = 5
 
   god_mode: bool = False
@@ -80,13 +80,13 @@ class EnvParams:
 @struct.dataclass
 class StaticEnvParams:
   map_size: Tuple[int, int] = (48, 48)
-  num_levels: int = 9
+  num_levels: int = 1
 
   # Mobs
-  max_melee_mobs: int = 3
-  max_passive_mobs: int = 3
+  max_melee_mobs: int = 1
+  max_passive_mobs: int = 10
   max_growing_plants: int = 10
-  max_ranged_mobs: int = 2
+  max_ranged_mobs: int = 1
   max_mob_projectiles: int = 3
   max_player_projectiles: int = 3
   use_precondition: bool = False
@@ -617,6 +617,12 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
       dtype=jnp.float32,
     )
 
+class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset):
+
+  """
+  This is a multi-goal version of the Craftax environment.
+
+  """
 
 class CraftaxSymbolicWebEnvNoAutoResetDummy(EnvironmentNoAutoReset):
   """

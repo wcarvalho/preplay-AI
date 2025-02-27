@@ -1555,38 +1555,6 @@ def make_agent(
       norm_type=config.get("NORM_TYPE", "none"),
       structured_inputs=config.get("STRUCTURED_INPUTS", False),
       use_bias=config.get("USE_BIAS", True),
-      action_dim=env.action_space(env_params).n,
-    ),
-    rnn=rnn,
-    q_fn=QFnCls(
-      hidden_dim=config.get("Q_HIDDEN_DIM", 512),
-      num_layers=config.get("NUM_Q_LAYERS", 1),
-      out_dim=env.action_space(env_params).n,
-      activation=config["ACTIVATION"],
-      activate_final=False,
-      use_bias=config.get("USE_BIAS", True),
-    ),
-    q_fn_subtask=QFnCls(
-      hidden_dim=config.get("Q_HIDDEN_DIM", 512),
-      num_layers=config.get("NUM_AUX_LAYERS", 0),
-      out_dim=env.action_space(env_params).n,
-      activation=config["ACTIVATION"],
-      activate_final=False,
-      use_bias=config.get("USE_BIAS", True),
-    ),
-    env=model_env,
-    env_params=model_env_params,
-    q_head_type=config.get("QHEAD_TYPE", "dot"),
-  )
-
-  agent = AgentCls(
-    observation_encoder=CraftaxObsEncoder(
-      hidden_dim=config["MLP_HIDDEN_DIM"],
-      num_layers=config["NUM_MLP_LAYERS"],
-      activation=config["ACTIVATION"],
-      norm_type=config.get("NORM_TYPE", "none"),
-      structured_inputs=config.get("STRUCTURED_INPUTS", False),
-      use_bias=config.get("USE_BIAS", True),
       include_achievable=config.get("INCLUDE_ACHIEVABLE", True),
       action_dim=env.action_space(env_params).n,
     ),
@@ -1612,6 +1580,14 @@ def make_agent(
     q_head_type=config.get("QHEAD_TYPE", "dot"),
   )
 
+  rng, _rng = jax.random.split(rng)
+  network_params = agent.init(_rng, example_timestep, method=agent.initialize)
+
+  def reset_fn(params, example_timestep, reset_rng):
+    batch_dims = example_timestep.reward.shape
+    return agent.apply(
+      params, batch_dims=batch_dims, rng=reset_rng, method=agent.initialize_carry
+    )
   return agent, network_params, reset_fn
 
 

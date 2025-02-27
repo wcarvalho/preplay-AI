@@ -653,7 +653,7 @@ def sweep(search: str = ""):
   ############################################################
   # More "final" experiments
   ############################################################
-  elif search == "ql-eval":
+  elif search == "ql-final":
     sweep_config = {
       "metric": metric,
       "parameters": {
@@ -661,9 +661,9 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 6))},
       },
       "overrides": ["alg=ql", "rlenv=craftax-10m", "user=wilka"],
-      "group": "ql-final-1",
+      "group": "ql-final-2",
     }
-  elif search == "ql_sf-eval":
+  elif search == "ql_sf-final":
     sweep_config = {
       "metric": metric,
       "parameters": {
@@ -672,9 +672,9 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 6))},
       },
       "overrides": ["alg=ql", "rlenv=craftax-10m", "user=wilka"],
-      "group": "ql-sf-final-1",
+      "group": "ql-sf-final-2",
     }
-  elif search == "dyna-eval":
+  elif search == "dyna-final":
     sweep_config = {
       "metric": metric,
       "parameters": {
@@ -683,9 +683,9 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 6))},
       },
       "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "dyna-final-1",
+      "group": "dyna-final-2",
     }
-  elif search == "preplay-eval":
+  elif search == "preplay-final":
     sweep_config = {
       "metric": metric,
       "parameters": {
@@ -694,7 +694,7 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 6))},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "preplay-eval-final-1",
+      "group": "preplay-final-2",
     }
   # elif search == 'alphazero-eval':
   #  sweep_config = {
