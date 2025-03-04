@@ -54,6 +54,13 @@ except ImportError:
 except Exception as e:
   raise e
 
+# much smaller action space for web env
+class Action(Enum):
+    NOOP = 0  #
+    LEFT = 1  # a
+    RIGHT = 2  # d
+    UP = 3  # w
+    DOWN = 4  # s
 
 def is_game_over(state, params, static_env_params):
   done_steps = state.timestep >= params.max_timesteps
@@ -611,6 +618,12 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
 class SimulationEnvParams(EnvParams):
   task_configs: List[struct.PyTreeNode] = None
 
+@struct.dataclass
+class MultiGoalObservation(struct.PyTreeNode):
+  observation: chex.Array
+  goal: chex.Array
+  goals: chex.Array
+
 
 class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset):
 
@@ -625,7 +638,7 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
   def reset(self, key: chex.PRNGKey, params: SimulationEnvParams):
     """
     Sample a task config from the list of task configs.
-    Input goal_objects, goal_locations, world_seed, start_positions.
+    Fill in information
     """
     n_tasks = len(params.task_configs.world_seed)
     task_idx = jax.random.randint(key, (n_tasks,), 0, n_tasks)
@@ -641,6 +654,26 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
       goal_locations=task_config.goal_locations.astype(jnp.int32),
     )
     return super().reset(key, params)
+
+  def get_obs(self, state: EnvState, params: EnvParams):
+    del params
+
+    # [D]
+    image = render_craftax_symbolic(state)
+
+    # [G]
+
+    goal = jax.nn.one_hot(state.current_goal, len(Achievement))
+    # [N, G]
+    goals = jax.nn.one_hot(state.placed_goals, len(Achievement))
+    import ipdb; ipdb.set_trace()
+    return MultiGoalObservation(
+      image=image,
+      goal=goal,
+      goals=goals,
+    )
+
+
 
 
 ########################################################

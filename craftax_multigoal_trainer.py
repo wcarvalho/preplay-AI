@@ -64,6 +64,8 @@ import qlearning_craftax
 import qlearning_sf_aux_craftax
 import usfa_craftax as usfa
 
+import craftax_simulation_configs
+from craftax_web_env import CraftaxMultiGoalSymbolicWebEnvNoAutoReset
 
 @struct.dataclass
 class AlgorithmConstructor:
@@ -320,8 +322,6 @@ def make_logger(
     ),
   )
 
-import craftax_simulation_configs
-from craftax_web_env import CraftaxMultiGoalSymbolicWebEnvNoAutoReset
 
 def run_single(config: dict, save_path: str = None):
   rng = jax.random.PRNGKey(config["SEED"])
@@ -352,26 +352,10 @@ def run_single(config: dict, save_path: str = None):
     train_fn = vbb.make_train(
       config=config,
       env=vec_env,
-      make_agent=qlearning_craftax.make_craftax_agent,
+      make_agent=qlearning_craftax.make_multigoal_craftax_agent,
       make_optimizer=qlearning_craftax.make_optimizer,
       make_loss_fn_class=qlearning_craftax.make_loss_fn_class,
       make_actor=qlearning_craftax.make_actor,
-      make_logger=partial(
-        make_logger, learner_log_extra=qlearning_craftax.learner_log_extra
-      ),
-      train_env_params=env_params,
-      test_env_params=test_env_params,
-      ObserverCls=craftax_observer.Observer,
-      vmap_env=vmap_env,
-    )
-  elif config["ALG"] == "qlearning_sf_aux":
-    train_fn = vbb.make_train(
-      config=config,
-      env=vec_env,
-      make_agent=qlearning_sf_aux_craftax.make_craftax_agent,
-      make_optimizer=qlearning_sf_aux_craftax.make_optimizer,
-      make_loss_fn_class=qlearning_sf_aux_craftax.make_loss_fn_class,
-      make_actor=qlearning_sf_aux_craftax.make_actor,
       make_logger=partial(
         make_logger, learner_log_extra=qlearning_craftax.learner_log_extra
       ),
@@ -393,19 +377,6 @@ def run_single(config: dict, save_path: str = None):
       ObserverCls=craftax_observer.Observer,
       vmap_env=vmap_env,
     )
-  elif config["ALG"] == "alphazero":
-    train_fn = alphazero_craftax.make_train(
-      config=config,
-      env=vec_env,
-      model_env=env,
-      make_logger=partial(
-        make_logger, learner_log_extra=alphazero_craftax.learner_log_extra
-      ),
-      train_env_params=env_params,
-      test_env_params=test_env_params,
-      ObserverCls=craftax_observer.Observer,
-      vmap_env=vmap_env,
-    )
   elif config["ALG"] in ["preplay"]:
     train_fn = multitask_preplay_craftax_v2.make_train(
       config=config,
@@ -415,21 +386,6 @@ def run_single(config: dict, save_path: str = None):
         make_logger,
         learner_log_extra=multitask_preplay_craftax_v2.learner_log_extra,
       ),
-      train_env_params=env_params,
-      test_env_params=test_env_params,
-      ObserverCls=craftax_observer.Observer,
-      vmap_env=vmap_env,
-    )
-  elif config["ALG"] == "pqn":
-    constructor = get_pqn_fns(config)
-    train_fn = vpq.make_train(
-      config=config,
-      env=vec_env,
-      make_agent=constructor.make_agent,
-      make_optimizer=constructor.make_optimizer,
-      make_loss_fn_class=constructor.make_loss_fn_class,
-      make_actor=constructor.make_actor,
-      make_logger=make_logger,
       train_env_params=env_params,
       test_env_params=test_env_params,
       ObserverCls=craftax_observer.Observer,

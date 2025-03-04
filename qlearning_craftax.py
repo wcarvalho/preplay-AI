@@ -314,6 +314,52 @@ def make_craftax_agent(
 
   return agent, network_params, reset_fn
 
+def make_multigoal_craftax_agent(
+  config: dict,
+  env: environment.Environment,
+  env_params: environment.EnvParams,
+  example_timestep: TimeStep,
+  rng: jax.random.PRNGKey,
+):
+  rnn = vbb.ScannedRNN(hidden_dim=config["AGENT_RNN_DIM"])
+  achievable = example_timestep.observation.achievable
+  achievements = example_timestep.observation.achievements
+  n_achieve = achievable.shape[-1] + achievements.shape[-1]
+
+  agent = RnnAgent(
+    observation_encoder=CraftaxMultiGoalObsEncoder(
+      hidden_dim=config["MLP_HIDDEN_DIM"],
+      num_layers=config["NUM_MLP_LAYERS"],
+      activation=config["ACTIVATION"],
+      norm_type=config.get("NORM_TYPE", "none"),
+      use_bias=config.get("USE_BIAS", True),
+      action_dim=env.action_space(env_params).n,
+    ),
+    rnn=rnn,
+    q_fn=DuellingMLP(
+      hidden_dim=config.get("Q_HIDDEN_DIM", 512),
+      num_layers=config.get("NUM_Q_LAYERS", 2),
+      out_dim=env.action_space(env_params).n,
+      use_bias=config.get("USE_BIAS", True),
+    ),
+    achieve_fn=MLP(
+      hidden_dim=config.get("Q_HIDDEN_DIM", 512),
+      num_layers=config.get("NUM_AUX_LAYERS", 0),
+      out_dim=n_achieve,
+      use_bias=config.get("USE_BIAS", True),
+    ),
+  )
+
+  rng, _rng = jax.random.split(rng)
+  network_params = agent.init(_rng, example_timestep, method=agent.initialize)
+
+  def reset_fn(params, example_timestep, reset_rng):
+    batch_dims = (example_timestep.reward.shape[0],)
+    return agent.apply(
+      params, batch_dims=batch_dims, rng=reset_rng, method=agent.initialize_carry
+    )
+
+  return agent, network_params, reset_fn
 
 from craftax.craftax.constants import Action, BLOCK_PIXEL_SIZE_IMG, Achievement
 from craftax.craftax.renderer import render_craftax_pixels

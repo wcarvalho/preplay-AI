@@ -110,7 +110,6 @@ class CraftaxObsEncoder(nn.Module):
     structured_inputs: bool = False
     use_bias: bool = True
     include_achievable: bool = True
-
     @nn.compact
     def __call__(self, obs: Observation, train: bool = False):
         act = get_activation_fn(self.activation)
@@ -159,6 +158,67 @@ class CraftaxObsEncoder(nn.Module):
                 # main benefit comes from adding action
                 action = nn.Dense(128, kernel_init=kernel_init, use_bias=False)(action)
                 to_concat = to_concat + (action,)
-                outputs = jnp.concatenate(to_concat, axis=-1)
+            outputs = jnp.concatenate(to_concat, axis=-1)
+
+        return outputs
+
+class CraftaxMultiGoalObsEncoder(nn.Module):
+    """
+    Follows: https://github.com/mttga/purejaxql/blob/2205ae5308134d2cedccd749074bff2871832dc8/purejaxql/pqn_rnn_craftax.py#L199
+
+    - observation encoder: CNN over binary inputs
+    - MLP with truncated-normal-initialized Linear layer as initial layer for other inputs
+    """
+
+    action_dim: int = None
+    hidden_dim: int = 512
+    num_layers: int = 0
+    norm_type: str = "batch_norm"
+    activation: str = "relu"
+    use_bias: bool = True
+
+    @nn.compact
+    def __call__(self, obs: Observation, train: bool = False):
+
+        act = get_activation_fn(self.activation)
+        if self.norm_type == "layer_norm":
+            norm = lambda x: act(nn.LayerNorm()(x))
+        elif self.norm_type == "batch_norm":
+            norm = lambda x: act(BatchRenorm(use_running_average=not train)(x))
+        elif self.norm_type == "none":
+            norm = lambda x: x
+        else:
+            raise NotImplementedError(self.norm_type)
+
+        image = norm(obs.image)
+
+        if self.num_layers == 1:
+            outputs = nn.Dense(self.hidden_dim, use_bias=self.use_bias)(image)
+        else:
+            outputs = MLP(
+                hidden_dim=self.hidden_dim,
+                num_layers=self.num_layers,
+                norm_type=self.norm_type,
+                use_bias=self.use_bias,
+                activation=self.activation,
+            )(image, train)
+
+        kernel_init = nn.initializers.variance_scaling(
+            1.0, "fan_in", "normal", out_axis=0
+        )
+        goal = nn.Dense(
+            # binary vector
+            128,
+            kernel_init=kernel_init,
+            use_bias=False,
+        )(obs.goal.astype(jnp.float32))
+        to_concat = (outputs, goal)
+        if obs.previous_action is not None:
+            action = jax.nn.one_hot(obs.previous_action, self.action_dim or 50)
+            # common trick for one-hot encodings, same as nn.Embed
+            # main benefit comes from adding action
+            action = nn.Dense(128, kernel_init=kernel_init, use_bias=False)(action)
+            to_concat = to_concat + (action,)
+        outputs = jnp.concatenate(to_concat, axis=-1)
 
         return outputs

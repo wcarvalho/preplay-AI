@@ -226,6 +226,7 @@ def experience_logger(
   extract_task_info: Callable[[TimeStep], struct.PyTreeNode] = lambda t: t,
   get_task_name: Callable = lambda t: "Task",
   max_len: int = 40,
+  trajectory: Optional[struct.PyTreeNode] = None,
 ):
   def callback(ts: TrainState, os: BasicObserverState):
     # main

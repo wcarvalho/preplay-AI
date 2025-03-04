@@ -989,6 +989,59 @@ def make_agent(
   return agent, network_params, reset_fn
 
 
+def make_multigoal_agent(
+  config: dict,
+  env: environment.Environment,
+  env_params: environment.EnvParams,
+  example_timestep: TimeStep,
+  rng: jax.random.PRNGKey,
+  model_env: Optional[environment.Environment] = None,
+  model_env_params: Optional[environment.EnvParams] = None,
+) -> Tuple[nn.Module, Params, vbb.AgentResetFn]:
+  model_env_params = model_env_params or env_params
+  cell_type = config.get("RNN_CELL_TYPE", "OptimizedLSTMCell")
+  if cell_type.lower() == "none":
+    rnn = vbb.DummyRNN()
+  else:
+    rnn = vbb.ScannedRNN(
+      hidden_dim=config.get("AGENT_RNN_DIM", 256),
+      cell_type=cell_type,
+      unroll_output_state=True,
+    )
+  agent = DynaAgentEnvModel(
+    observation_encoder=CraftaxMultiGoalObsEncoder(
+      hidden_dim=config["MLP_HIDDEN_DIM"],
+      num_layers=config["NUM_MLP_LAYERS"],
+      activation=config["ACTIVATION"],
+      norm_type=config.get("NORM_TYPE", "none"),
+      use_bias=config.get("USE_BIAS", True),
+      action_dim=env.action_space(env_params).n,
+    ),
+    rnn=rnn,
+    q_fn=DuellingMLP(
+      hidden_dim=config.get("Q_HIDDEN_DIM", 512),
+      num_layers=config.get("NUM_Q_LAYERS", 1),
+      out_dim=env.action_space(env_params).n,
+      activation=config["ACTIVATION"],
+      activate_final=False,
+      use_bias=config.get("USE_BIAS", True),
+    ),
+    env=model_env,
+    env_params=model_env_params,
+  )
+
+  rng, _rng = jax.random.split(rng)
+  network_params = agent.init(_rng, example_timestep, method=agent.initialize)
+
+  def reset_fn(params, example_timestep, reset_rng):
+    batch_dims = example_timestep.reward.shape
+    return agent.apply(
+      params, batch_dims=batch_dims, rng=reset_rng, method=agent.initialize_carry
+    )
+
+  return agent, network_params, reset_fn
+
+
 def make_train(**kwargs):
   config = kwargs["config"]
   rng = jax.random.PRNGKey(config["SEED"])
