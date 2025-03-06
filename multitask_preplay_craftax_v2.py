@@ -1588,6 +1588,7 @@ def make_agent(
     return agent.apply(
       params, batch_dims=batch_dims, rng=reset_rng, method=agent.initialize_carry
     )
+
   return agent, network_params, reset_fn
 
 

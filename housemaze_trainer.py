@@ -462,9 +462,9 @@ def run_single(config: dict, save_path: str = None):
   elif alg_name in ("dynaq", "dynaq_shared"):
     import distrax
 
-    #sim_policy = config["SIM_POLICY"]
+    # sim_policy = config["SIM_POLICY"]
     num_simulations = config["NUM_SIMULATIONS"]
-    #if sim_policy == "gamma":
+    # if sim_policy == "gamma":
     #  temp_dist = distrax.Gamma(
     #    concentration=config["TEMP_CONCENTRATION"], rate=config["TEMP_RATE"]
     #  )
@@ -480,7 +480,7 @@ def run_single(config: dict, save_path: str = None):
     #    logits = q_values / jnp.expand_dims(temperatures, -1)
     #    return distrax.Categorical(logits=logits).sample(seed=sim_rng)
 
-    #elif sim_policy == "epsilon":
+    # elif sim_policy == "epsilon":
     epsilon_setting = config["SIM_EPSILON_SETTING"]
     if epsilon_setting == 1:
       vals = np.logspace(num=256, start=1, stop=3, base=0.1)
@@ -500,7 +500,7 @@ def run_single(config: dict, save_path: str = None):
         q_values, epsilons, sim_rng
       )
 
-    #else:
+    # else:
     #  raise NotImplementedError
 
     def make_init_offtask_timestep(x: multitask_env.TimeStep, offtask_w: jax.Array):

@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import os.path
 import matplotlib.pyplot as plt
 from craftax.craftax.renderer import render_craftax_pixels as render_partial
+
 try:
   from craftax_fullmap_renderer import render_craftax_pixels as render_full
 except ModuleNotFoundError:
@@ -150,7 +151,6 @@ for i in range(len(PATHS_CONFIGS)):
   )
 
 
-
 ########################################################
 # Juncture manipulation configs
 ########################################################
@@ -225,8 +225,6 @@ for i in range(len(JUNCTURE_CONFIGS)):
     train_objects=POSSIBLE_BLOCKS_MOD[i : i + 1],
     test_objects=POSSIBLE_BLOCKS_MOD[i + 1 : i + 2],
   )
-
-
 
 
 def get_fullmap_image(world_seed, type="paths"):
@@ -368,9 +366,8 @@ def visualize_block_config(config: BlockConfig, jax_env, **kwargs):
       state,
       show_agent=False,
       show_center_agent=True,
-      block_pixel_size=BLOCK_PIXEL_SIZE_HUMAN).astype(
-      np.uint8
-    )
+      block_pixel_size=BLOCK_PIXEL_SIZE_HUMAN,
+    ).astype(np.uint8)
   plt.imshow(full_map)
   title = f"Rendered Environment (World Seed: {config.world_seed})"
   title += f"\nTrain objects: {[BlockType(o).name for o in config.train_objects]}"
@@ -459,4 +456,3 @@ def visualize_block_config(config: BlockConfig, jax_env, **kwargs):
   plt.figure(fig_views.number)  # Ensure we're adjusting the views figure
   plt.tight_layout()
   return fig_map, fig_views
-

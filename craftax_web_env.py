@@ -54,13 +54,15 @@ except ImportError:
 except Exception as e:
   raise e
 
+
 # much smaller action space for web env
 class Action(Enum):
-    NOOP = 0  #
-    LEFT = 1  # a
-    RIGHT = 2  # d
-    UP = 3  # w
-    DOWN = 4  # s
+  NOOP = 0  #
+  LEFT = 1  # a
+  RIGHT = 2  # d
+  UP = 3  # w
+  DOWN = 4  # s
+
 
 def is_game_over(state, params, static_env_params):
   done_steps = state.timestep >= params.max_timesteps
@@ -505,6 +507,18 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
   def default_static_params() -> StaticEnvParams:
     return StaticEnvParams()
 
+  def step(
+    self,
+    key: chex.PRNGKey,
+    state,
+    action: Union[int, float],
+    params=None,
+  ):
+    """Performs step transitions in the environment."""
+    # Use default env parameters if no others specified
+    obs, state, reward, done, info = self.step_env(key, state, action, params)
+    return obs, state, reward, done, info
+
   def step_env(
     self, rng: chex.PRNGKey, state: EnvState, action: int, params: EnvParams
   ) -> Tuple[chex.Array, EnvState, float, bool, dict]:
@@ -610,23 +624,42 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
       dtype=jnp.float32,
     )
 
+
 ########################################################
 # Multi-goal version of the Craftax environment
 ########################################################
+Achiement_to_idx = {
+  Achievement.COLLECT_DIAMOND.value: 0,
+  Achievement.COLLECT_SAPPHIRE.value: 1,
+  Achievement.COLLECT_RUBY.value: 2,
+}
+
+task_vectors = jnp.zeros((len(Achievement), len(Achiement_to_idx)))
+active_task_vectors = []
+for achievement, i in Achiement_to_idx.items():
+  task_vectors = task_vectors.at[achievement, i].set(1)
+  active_task_vectors.append(task_vectors[achievement])
+active_task_vectors = jnp.stack(active_task_vectors)
+
+def task_onehot(goal):
+  return jax.lax.dynamic_index_in_dim(task_vectors, goal, keepdims=False)
+
+
 
 @struct.dataclass
 class SimulationEnvParams(EnvParams):
   task_configs: List[struct.PyTreeNode] = None
 
+
 @struct.dataclass
 class MultiGoalObservation(struct.PyTreeNode):
-  observation: chex.Array
-  goal: chex.Array
-  goals: chex.Array
+  image: chex.Array
+  task_w: chex.Array
+  #goals: chex.Array
+  state_features: chex.Array
 
 
 class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset):
-
   """
   This is a multi-goal version of the Craftax environment.
   """
@@ -641,10 +674,9 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
     Fill in information
     """
     n_tasks = len(params.task_configs.world_seed)
-    task_idx = jax.random.randint(key, (n_tasks,), 0, n_tasks)
-    index = lambda x, i: jax.lax.dynamic_index_in_dim(
-      x, i, keepdims=False)
-    task_config = jax.tree_map(index, params.task_configs, task_idx)
+    task_idx = jax.random.randint(key, (), 0, n_tasks)
+    index = lambda x: jax.lax.dynamic_index_in_dim(x, task_idx, keepdims=False)
+    task_config = jax.tree_map(index, params.task_configs)
 
     params = params.replace(
       world_seeds=(task_config.world_seed,),
@@ -656,24 +688,38 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
     return super().reset(key, params)
 
   def get_obs(self, state: EnvState, params: EnvParams):
-    del params
-
     # [D]
     image = render_craftax_symbolic(state)
 
-    # [G]
+    ngoals = len(Achiement_to_idx)
 
-    goal = jax.nn.one_hot(state.current_goal, len(Achievement))
+    # [G]
+    task_w = task_onehot(state.current_goal)
+
     # [N, G]
-    goals = jax.nn.one_hot(state.placed_goals, len(Achievement))
-    import ipdb; ipdb.set_trace()
+    #placed_goals = jnp.asarray([Achiement_to_idx[i] for i in params.placed_goals])
+    #goals = jax.nn.one_hot(placed_goals, ngoals)
+
+    # compute state features as whether any params.placed_goal is achieved
+    def goal_achieved(goal):
+      goal_achieved = jax.lax.dynamic_index_in_dim(
+        state.achievements,
+        goal.astype(jnp.int32),
+        keepdims=False).astype(jnp.float32)
+
+      return task_onehot(goal) * goal_achieved
+
+    state_features = jax.vmap(goal_achieved)(params.placed_goals)
+
+    # place them all in same vector
+    state_features = state_features.sum(axis=0)
+
     return MultiGoalObservation(
       image=image,
-      goal=goal,
-      goals=goals,
+      task_w=task_w,
+      #goals=active_task_vectors,
+      state_features=state_features
     )
-
-
 
 
 ########################################################

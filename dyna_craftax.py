@@ -31,7 +31,7 @@ from jaxneurorl import losses
 from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
 from jaxneurorl.agents import qlearning as base_agent
-from networks import MLP, CraftaxObsEncoder
+from networks import MLP, CraftaxObsEncoder, CraftaxMultiGoalObsEncoder
 
 from visualizer import plot_frames
 
@@ -764,14 +764,15 @@ def learner_log_extra(
         f"\nr={timesteps.reward[i + 1]:.2f}, $\\gamma={timesteps.discount[i + 1]}$"
       )
 
-      achieved = timesteps.observation.achievements[i + 1]
-      if achieved.sum() > 1e-5:
-        achievement_idx = achieved.argmax()
-        try:
-          achievement = Achievement(achievement_idx).name
-          title += f"\n{achievement}"
-        except ValueError:
-          title += f"\nHealth?"
+      if hasattr(timesteps.observation, "achievements"):
+        achieved = timesteps.observation.achievements[i + 1]
+        if achieved.sum() > 1e-5:
+          achievement_idx = achieved.argmax()
+          try:
+            achievement = Achievement(achievement_idx).name
+            title += f"\n{achievement}"
+          except ValueError:
+            title += f"\nHealth?"
       return title
 
     fig = plot_frames(
@@ -954,8 +955,15 @@ def make_agent(
       cell_type=cell_type,
       unroll_output_state=True,
     )
-  agent = DynaAgentEnvModel(
-    observation_encoder=CraftaxObsEncoder(
+  if config.get("MULTIGOAL", False):
+    observation_encoder = CraftaxMultiGoalObsEncoder(
+      hidden_dim=config["MLP_HIDDEN_DIM"],
+      num_layers=config["NUM_MLP_LAYERS"],
+      activation=config["ACTIVATION"],
+      norm_type=config.get("NORM_TYPE", "none"),
+    )
+  else:
+    observation_encoder = CraftaxObsEncoder(
       hidden_dim=config["MLP_HIDDEN_DIM"],
       num_layers=config["NUM_MLP_LAYERS"],
       activation=config["ACTIVATION"],
@@ -963,7 +971,9 @@ def make_agent(
       structured_inputs=config.get("STRUCTURED_INPUTS", False),
       use_bias=config.get("USE_BIAS", True),
       action_dim=env.action_space(env_params).n,
-    ),
+    )
+  agent = DynaAgentEnvModel(
+    observation_encoder=observation_encoder,
     rnn=rnn,
     q_fn=DuellingMLP(
       hidden_dim=config.get("Q_HIDDEN_DIM", 512),

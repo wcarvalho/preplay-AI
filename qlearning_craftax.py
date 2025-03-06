@@ -23,7 +23,7 @@ from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
 from jaxneurorl.agents.qlearning import *
 from jaxneurorl import losses
-from networks import CraftaxObsEncoder
+from networks import CraftaxObsEncoder, CraftaxMultiGoalObsEncoder
 
 MAX_REWARD = 1.0
 
@@ -35,8 +35,8 @@ RNNInput = vbb.RNNInput
 
 class Predictions(NamedTuple):
   q_vals: jax.Array
-  achievements: jax.Array
   rnn_states: jax.Array
+  achievements: jax.Array = None
 
 
 class RnnAgent(nn.Module):
@@ -53,7 +53,7 @@ class RnnAgent(nn.Module):
   observation_encoder: nn.Module
   rnn: vbb.ScannedRNN
   q_fn: nn.Module
-  achieve_fn: nn.Module
+  achieve_fn: nn.Module = None
 
   def initialize(self, x: TimeStep):
     """Only used for initialization."""
@@ -72,8 +72,18 @@ class RnnAgent(nn.Module):
     new_rnn_state, rnn_out = self.rnn(rnn_state, rnn_in, _rng)
 
     q_vals = self.q_fn(rnn_out)
-    achieve_vals = self.achieve_fn(rnn_out)
-    return Predictions(q_vals, achieve_vals, rnn_out), new_rnn_state
+    if self.achieve_fn is not None:
+      achieve_vals = self.achieve_fn(rnn_out)
+      return Predictions(
+        q_vals=q_vals,
+        achievements=achieve_vals,
+        rnn_states=rnn_out,
+      ), new_rnn_state
+    else:
+      return Predictions(
+        q_vals=q_vals,
+        rnn_states=rnn_out,
+      ), new_rnn_state
 
   def unroll(self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey):
     # rnn_state: [B]
@@ -86,8 +96,11 @@ class RnnAgent(nn.Module):
     new_rnn_state, rnn_out = self.rnn.unroll(rnn_state, rnn_in, _rng)
 
     q_vals = nn.BatchApply(self.q_fn)(rnn_out)
-    achieve_vals = nn.BatchApply(self.achieve_fn)(rnn_out)
-    return Predictions(q_vals, achieve_vals, rnn_out), new_rnn_state
+    if self.achieve_fn is not None:
+      achieve_vals = nn.BatchApply(self.achieve_fn)(rnn_out)
+      return Predictions(q_vals, achieve_vals, rnn_out), new_rnn_state
+    else:
+      return Predictions(q_vals, rnn_out), new_rnn_state
 
   def initialize_carry(self, *args, **kwargs):
     """Initializes the RNN state."""
@@ -314,6 +327,7 @@ def make_craftax_agent(
 
   return agent, network_params, reset_fn
 
+
 def make_multigoal_craftax_agent(
   config: dict,
   env: environment.Environment,
@@ -322,9 +336,6 @@ def make_multigoal_craftax_agent(
   rng: jax.random.PRNGKey,
 ):
   rnn = vbb.ScannedRNN(hidden_dim=config["AGENT_RNN_DIM"])
-  achievable = example_timestep.observation.achievable
-  achievements = example_timestep.observation.achievements
-  n_achieve = achievable.shape[-1] + achievements.shape[-1]
 
   agent = RnnAgent(
     observation_encoder=CraftaxMultiGoalObsEncoder(
@@ -342,12 +353,6 @@ def make_multigoal_craftax_agent(
       out_dim=env.action_space(env_params).n,
       use_bias=config.get("USE_BIAS", True),
     ),
-    achieve_fn=MLP(
-      hidden_dim=config.get("Q_HIDDEN_DIM", 512),
-      num_layers=config.get("NUM_AUX_LAYERS", 0),
-      out_dim=n_achieve,
-      use_bias=config.get("USE_BIAS", True),
-    ),
   )
 
   rng, _rng = jax.random.split(rng)
@@ -360,6 +365,7 @@ def make_multigoal_craftax_agent(
     )
 
   return agent, network_params, reset_fn
+
 
 from craftax.craftax.constants import Action, BLOCK_PIXEL_SIZE_IMG, Achievement
 from craftax.craftax.renderer import render_craftax_pixels
@@ -466,14 +472,15 @@ def learner_log_extra(data: dict, config: dict):
         f"\nr={timesteps.reward[i + 1]:.2f}, $\\gamma={timesteps.discount[i + 1]}$"
       )
 
-      achieved = timesteps.observation.achievements[i + 1]
-      if achieved.sum() > 1e-5:
-        achievement_idx = achieved.argmax()
-        try:
-          achievement = Achievement(achievement_idx).name
-          title += f"\n{achievement}"
-        except ValueError:
-          title += f"\nHealth?"
+      if hasattr(timesteps.observation, "achievements"):
+        achieved = timesteps.observation.achievements[i + 1]
+        if achieved.sum() > 1e-5:
+          achievement_idx = achieved.argmax()
+          try:
+            achievement = Achievement(achievement_idx).name
+            title += f"\n{achievement}"
+          except ValueError:
+            title += f"\nHealth?"
       return title
 
     fig = plot_frames(
