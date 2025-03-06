@@ -1,6 +1,6 @@
 from typing import Tuple, List
-from craftax_web_env import CraftaxSymbolicWebEnvNoAutoReset, EnvParams
-from craftax_experiment_configs import PATHS_CONFIGS, make_block_env_params
+from craftax_web_env import CraftaxSymbolicWebEnvNoAutoReset, EnvParams, MultigoalEnvParams
+from craftax_experiment_configs import PATHS_CONFIGS, make_block_env_params, BLOCK_TO_GOAL
 import jax.random
 import jax.numpy as jnp
 import jax.tree_util as jtu
@@ -64,8 +64,11 @@ for config in PATHS_CONFIGS:
 
   def get_path_waypoints(path, num_segments=10):
     indices = np.linspace(0, len(path) - 1, num_segments + 1, dtype=int)
+
+    indices = indices[:-1]
     # Get waypoints at those indices
-    return path[indices]
+    positions = path[indices]
+    return positions
 
   def add_to_configs(world_seed, start_position, goal_object, configs):
     params, path = get_params_and_path(
@@ -73,13 +76,14 @@ for config in PATHS_CONFIGS:
       start_position=start_position,
       goal_object=goal_object,
     )
+
     waypoints = get_path_waypoints(path)
     for waypoint in waypoints:
       configs.append(
         TaskConfig(
           world_seed=world_seed,
           start_position=waypoint,
-          goal_object=goal_object,
+          goal_object=BLOCK_TO_GOAL[goal_object],
           placed_goals=jnp.asarray(params.placed_goals),
           goal_locations=jnp.asarray(params.goal_locations),
         )
@@ -114,10 +118,12 @@ TRAIN_CONFIGS = jtu.tree_map(lambda *x: jnp.stack(x), *TRAIN_CONFIGS)
 TEST_CONFIGS = jtu.tree_map(lambda *x: jnp.stack(x), *TEST_CONFIGS)
 
 dummy_config = jax.tree.map(lambda x: x[0], TRAIN_CONFIGS)
-default_params = EnvParams().replace(
+
+default_params = MultigoalEnvParams().replace(
   world_seeds=(dummy_config.world_seed,),
   current_goal=dummy_config.goal_object.astype(jnp.int32),
   start_positions=dummy_config.start_position.astype(jnp.int32),
   placed_goals=dummy_config.placed_goals.astype(jnp.int32),
   goal_locations=dummy_config.goal_locations.astype(jnp.int32),
+  task_configs=TRAIN_CONFIGS,
 )

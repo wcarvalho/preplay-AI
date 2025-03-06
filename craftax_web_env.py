@@ -647,7 +647,7 @@ def task_onehot(goal):
 
 
 @struct.dataclass
-class SimulationEnvParams(EnvParams):
+class MultigoalEnvParams(EnvParams):
   task_configs: List[struct.PyTreeNode] = None
 
 
@@ -666,9 +666,9 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
 
   @property
   def default_params(self) -> EnvParams:
-    return SimulationEnvParams()
+    return MultigoalEnvParams()
 
-  def reset(self, key: chex.PRNGKey, params: SimulationEnvParams):
+  def reset(self, key: chex.PRNGKey, params: MultigoalEnvParams):
     """
     Sample a task config from the list of task configs.
     Fill in information
@@ -685,6 +685,7 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
       placed_goals=task_config.placed_goals.astype(jnp.int32),
       goal_locations=task_config.goal_locations.astype(jnp.int32),
     )
+
     return super().reset(key, params)
 
   def get_obs(self, state: EnvState, params: EnvParams):

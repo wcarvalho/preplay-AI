@@ -490,7 +490,7 @@ def learner_log_extra(data: dict, config: dict):
       ncols=6,
     )
     if wandb.run is not wandb.sdk.lib.disabled.RunDisabled:
-      wandb.log({f"learner_example/trajecotry": wandb.Image(fig)})
+      wandb.log({"learner_example/trajectory": wandb.Image(fig)})
     plt.close(fig)
 
   # this will be the value after update is applied
