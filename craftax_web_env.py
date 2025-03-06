@@ -642,9 +642,9 @@ for achievement, i in Achiement_to_idx.items():
   active_task_vectors.append(task_vectors[achievement])
 active_task_vectors = jnp.stack(active_task_vectors)
 
+
 def task_onehot(goal):
   return jax.lax.dynamic_index_in_dim(task_vectors, goal, keepdims=False)
-
 
 
 @struct.dataclass
@@ -656,7 +656,7 @@ class MultigoalEnvParams(EnvParams):
 class MultiGoalObservation(struct.PyTreeNode):
   image: chex.Array
   task_w: chex.Array
-  #goals: chex.Array
+  # goals: chex.Array
   state_features: chex.Array
 
 
@@ -703,9 +703,8 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
     # compute state features as whether any params.placed_goal is achieved
     def achieved(achievement):
       complete = jax.lax.dynamic_index_in_dim(
-        state.achievements,
-        achievement.astype(jnp.int32),
-        keepdims=False).astype(jnp.float32)
+        state.achievements, achievement.astype(jnp.int32), keepdims=False
+      ).astype(jnp.float32)
 
       return task_onehot(achievement) * complete
 
@@ -717,8 +716,8 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
     return MultiGoalObservation(
       image=image,
       task_w=task_w,
-      #goals=active_task_vectors,
-      state_features=state_features
+      # goals=active_task_vectors,
+      state_features=state_features,
     )
 
 

@@ -1,6 +1,14 @@
 from typing import Tuple, List
-from craftax_web_env import CraftaxSymbolicWebEnvNoAutoReset, EnvParams, MultigoalEnvParams
-from craftax_experiment_configs import PATHS_CONFIGS, make_block_env_params, BLOCK_TO_GOAL
+from craftax_web_env import (
+  CraftaxSymbolicWebEnvNoAutoReset,
+  EnvParams,
+  MultigoalEnvParams,
+)
+from craftax_experiment_configs import (
+  PATHS_CONFIGS,
+  make_block_env_params,
+  BLOCK_TO_GOAL,
+)
 import jax.random
 import jax.numpy as jnp
 import jax.tree_util as jtu
@@ -11,6 +19,7 @@ import jax
 import craftax_utils
 
 MAX_START_POSITIONS = 5
+
 
 class TaskConfig(struct.PyTreeNode):
   """Configuration for a single experimental block"""
@@ -86,7 +95,9 @@ for config in PATHS_CONFIGS:
           start_position=waypoint,
           goal_object=BLOCK_TO_GOAL[goal_object],
           placed_goals=jnp.asarray(params.placed_goals),
-          placed_achievements=jnp.asarray([BLOCK_TO_GOAL[i] for i in params.placed_goals]),
+          placed_achievements=jnp.asarray(
+            [BLOCK_TO_GOAL[i] for i in params.placed_goals]
+          ),
           goal_locations=jnp.asarray(params.goal_locations),
         )
       )
@@ -118,7 +129,6 @@ for config in PATHS_CONFIGS:
 
 TRAIN_CONFIGS = jtu.tree_map(lambda *x: jnp.stack(x), *TRAIN_CONFIGS)
 TEST_CONFIGS = jtu.tree_map(lambda *x: jnp.stack(x), *TEST_CONFIGS)
-
 dummy_config = jax.tree.map(lambda x: x[0], TRAIN_CONFIGS)
 
 default_params = MultigoalEnvParams().replace(
