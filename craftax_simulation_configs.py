@@ -1,6 +1,14 @@
 from typing import Tuple, List
-from craftax_web_env import CraftaxSymbolicWebEnvNoAutoReset, EnvParams, MultigoalEnvParams
-from craftax_experiment_configs import PATHS_CONFIGS, make_block_env_params, BLOCK_TO_GOAL
+from craftax_web_env import (
+  CraftaxSymbolicWebEnvNoAutoReset,
+  EnvParams,
+  MultigoalEnvParams,
+)
+from craftax_experiment_configs import (
+  PATHS_CONFIGS,
+  make_block_env_params,
+  BLOCK_TO_GOAL,
+)
 import jax.random
 import jax.numpy as jnp
 import jax.tree_util as jtu
@@ -12,6 +20,7 @@ import craftax_utils
 
 MAX_START_POSITIONS = 5
 
+
 class TaskConfig(struct.PyTreeNode):
   """Configuration for a single experimental block"""
 
@@ -19,6 +28,7 @@ class TaskConfig(struct.PyTreeNode):
   start_position: Tuple[int, int]
   goal_object: int = None
   placed_goals: List[Tuple[int, int]] = None
+  placed_achievements: List[Tuple[int, int]] = None
   goal_locations: List[Tuple[int, int]] = None
 
 
@@ -85,6 +95,9 @@ for config in PATHS_CONFIGS:
           start_position=waypoint,
           goal_object=BLOCK_TO_GOAL[goal_object],
           placed_goals=jnp.asarray(params.placed_goals),
+          placed_achievements=jnp.asarray(
+            [BLOCK_TO_GOAL[i] for i in params.placed_goals]
+          ),
           goal_locations=jnp.asarray(params.goal_locations),
         )
       )
@@ -116,7 +129,6 @@ for config in PATHS_CONFIGS:
 
 TRAIN_CONFIGS = jtu.tree_map(lambda *x: jnp.stack(x), *TRAIN_CONFIGS)
 TEST_CONFIGS = jtu.tree_map(lambda *x: jnp.stack(x), *TEST_CONFIGS)
-
 dummy_config = jax.tree.map(lambda x: x[0], TRAIN_CONFIGS)
 
 default_params = MultigoalEnvParams().replace(
@@ -124,6 +136,7 @@ default_params = MultigoalEnvParams().replace(
   current_goal=dummy_config.goal_object.astype(jnp.int32),
   start_positions=dummy_config.start_position.astype(jnp.int32),
   placed_goals=dummy_config.placed_goals.astype(jnp.int32),
+  placed_achievements=dummy_config.placed_achievements.astype(jnp.int32),
   goal_locations=dummy_config.goal_locations.astype(jnp.int32),
   task_configs=TRAIN_CONFIGS,
 )

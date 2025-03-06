@@ -65,7 +65,10 @@ import qlearning_sf_aux_craftax
 import usfa_craftax as usfa
 
 import craftax_simulation_configs
-from craftax_web_env import CraftaxMultiGoalSymbolicWebEnvNoAutoReset, active_task_vectors
+from craftax_web_env import (
+  CraftaxMultiGoalSymbolicWebEnvNoAutoReset,
+  active_task_vectors,
+)
 
 
 @struct.dataclass
@@ -307,27 +310,14 @@ def run_single(config: dict, save_path: str = None):
   rng = jax.random.PRNGKey(config["SEED"])
   config["TEST_NUM_ENVS"] = config.get("TEST_NUM_ENVS", None) or config["NUM_ENVS"]
 
-  # numpify = lambda x: jax.tree_map(lambda y: np.asarray(y), x)
-  # train_configs = numpify(craftax_simulation_configs.TRAIN_CONFIGS)
-  # test_configs = numpify(craftax_simulation_configs.TEST_CONFIGS)
-  # numpify = lambda x: jax.tree_map(lambda y: np.asarray(y), x)
   train_configs = craftax_simulation_configs.TRAIN_CONFIGS
   test_configs = craftax_simulation_configs.TEST_CONFIGS
-  dummy_config = jax.tree.map(lambda x: x[0], train_configs)
 
   env = CraftaxMultiGoalSymbolicWebEnvNoAutoReset()
-  # just to match up shapes
-  env_params = env.default_params.replace(
-    world_seeds=(dummy_config.world_seed,),
-    current_goal=dummy_config.goal_object.astype(jnp.int32),
-    start_positions=dummy_config.start_position.astype(jnp.int32),
-    placed_goals=dummy_config.placed_goals.astype(jnp.int32),
-    goal_locations=dummy_config.goal_locations.astype(jnp.int32),
-  )
-
-  env_params = env_params.replace(task_configs=train_configs)
-  test_env_params = env_params.replace(task_configs=test_configs)
-  train_tasks = active_task_vectors
+  default_params = craftax_simulation_configs.default_params
+  env_params = default_params.replace(task_configs=train_configs)
+  test_env_params = default_params.replace(task_configs=test_configs)
+  train_tasks = active_task_vectors  # relevant for successor features
 
   if config["OPTIMISTIC_RESET_RATIO"] == 1:
     vec_env = env = TimestepWrapper(LogWrapper(env), autoreset=True)
@@ -362,7 +352,8 @@ def run_single(config: dict, save_path: str = None):
       config=config,
       env=vec_env,
       make_agent=functools.partial(
-        usfa.make_multigoal_craftax_agent, train_tasks=train_tasks),
+        usfa.make_multigoal_craftax_agent, train_tasks=train_tasks
+      ),
       make_optimizer=usfa.make_optimizer,
       make_loss_fn_class=usfa.make_loss_fn_class,
       make_actor=usfa.make_actor,
@@ -386,7 +377,7 @@ def run_single(config: dict, save_path: str = None):
       vmap_env=vmap_env,
     )
   elif config["ALG"] in ["preplay"]:
-    train_fn = multitask_preplay_craftax_v2.make_train(
+    train_fn = multitask_preplay_craftax_v2.make_train_multigoal(
       config=config,
       env=vec_env,
       model_env=env,
@@ -455,7 +446,7 @@ def sweep(search: str = ""):
         "FIXED_EPSILON": {"values": [1, 2]},
       },
       "overrides": ["alg=ql", "rlenv=craftax-multigoal", "user=wilka"],
-      "group": "ql-testing-1",
+      "group": "ql-testing-2",
     }
   elif search == "usfa":
     sweep_config = {
@@ -466,7 +457,7 @@ def sweep(search: str = ""):
         "FIXED_EPSILON": {"values": [1, 2]},
       },
       "overrides": ["alg=usfa_craftax", "rlenv=craftax-multigoal", "user=wilka"],
-      "group": "usfa-testing-1",
+      "group": "usfa-testing-2",
     }
   elif search == "dyna":
     sweep_config = {
@@ -477,7 +468,7 @@ def sweep(search: str = ""):
         "FIXED_EPSILON": {"values": [1, 2]},
       },
       "overrides": ["alg=dyna", "rlenv=craftax-dyna-multigoal", "user=wilka"],
-      "group": "dyna-testing-1",
+      "group": "dyna-testing-2",
     }
   elif search == "preplay":
     sweep_config = {
@@ -487,7 +478,7 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 2))},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-dyna-multigoal", "user=wilka"],
-      "group": "preplay-testing-1",
+      "group": "preplay-testing-2",
     }
 
   ############################################################

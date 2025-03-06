@@ -88,6 +88,7 @@ class EnvParams:
   start_positions: Optional[Union[Tuple[Tuple[int, int]], Tuple[int, int]]] = None
   goal_locations: Tuple[Tuple[int, int]] = ((-1, -1),)
   placed_goals: Tuple[int] = (-1,)
+  placed_achievements: Tuple[int] = (-1,)
   fractal_noise_angles: tuple[int, int, int, int] = (None, None, None, None)
   ## for env wrapper
   # active_goals: Tuple[int, ...] = tuple()
@@ -641,9 +642,9 @@ for achievement, i in Achiement_to_idx.items():
   active_task_vectors.append(task_vectors[achievement])
 active_task_vectors = jnp.stack(active_task_vectors)
 
+
 def task_onehot(goal):
   return jax.lax.dynamic_index_in_dim(task_vectors, goal, keepdims=False)
-
 
 
 @struct.dataclass
@@ -655,7 +656,7 @@ class MultigoalEnvParams(EnvParams):
 class MultiGoalObservation(struct.PyTreeNode):
   image: chex.Array
   task_w: chex.Array
-  #goals: chex.Array
+  # goals: chex.Array
   state_features: chex.Array
 
 
@@ -683,6 +684,7 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
       current_goal=task_config.goal_object.astype(jnp.int32),
       start_positions=task_config.start_position.astype(jnp.int32),
       placed_goals=task_config.placed_goals.astype(jnp.int32),
+      placed_achievements=task_config.placed_achievements.astype(jnp.int32),
       goal_locations=task_config.goal_locations.astype(jnp.int32),
     )
 
@@ -696,19 +698,15 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
     task_w = task_onehot(state.current_goal)
 
     # [N, G]
-    #placed_goals = jnp.asarray([Achiement_to_idx[i] for i in params.placed_goals])
-    #goals = jax.nn.one_hot(placed_goals, ngoals)
-
     # compute state features as whether any params.placed_goal is achieved
-    def goal_achieved(goal):
-      goal_achieved = jax.lax.dynamic_index_in_dim(
-        state.achievements,
-        goal.astype(jnp.int32),
-        keepdims=False).astype(jnp.float32)
+    def achieved(achievement):
+      complete = jax.lax.dynamic_index_in_dim(
+        state.achievements, achievement.astype(jnp.int32), keepdims=False
+      ).astype(jnp.float32)
 
-      return task_onehot(goal) * goal_achieved
+      return task_onehot(achievement) * complete
 
-    state_features = jax.vmap(goal_achieved)(params.placed_goals)
+    state_features = jax.vmap(achieved)(params.placed_achievements)
 
     # place them all in same vector
     state_features = state_features.sum(axis=0)
@@ -716,8 +714,8 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
     return MultiGoalObservation(
       image=image,
       task_w=task_w,
-      #goals=active_task_vectors,
-      state_features=state_features
+      # goals=active_task_vectors,
+      state_features=state_features,
     )
 
 

@@ -347,7 +347,6 @@ def make_multigoal_craftax_agent(
   rng: jax.random.PRNGKey,
   train_tasks: Optional[jnp.ndarray],
 ) -> Tuple[nn.Module, Params, vbb.AgentResetFn]:
-
   sf_head = SfGpiHead(
     num_actions=env.action_space(env_params).n,
     state_features_dim=example_timestep.observation.task_w.shape[-1],
@@ -379,6 +378,7 @@ def make_multigoal_craftax_agent(
     )
 
   return agent, network_params, reset_fn
+
 
 # only redoing this
 def learner_log_extra(
@@ -526,6 +526,11 @@ def learner_log_extra(
       title = f"t={i}\n"
       title += f"{actions_taken[i]}\n"
       title += f"r={timesteps.reward[i]}, $\\gamma={timesteps.discount[i]}$"
+      if hasattr(timesteps.state, "current_goal"):
+        start_location = timesteps.state.start_position
+        goal = timesteps.state.current_goal
+        goal_name = Achievement(goal).name
+        title += f"\nstart={start_location}\ngoal={goal}\ngoal={goal_name}"
       return title
 
     fig = plot_frames(
