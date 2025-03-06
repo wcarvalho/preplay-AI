@@ -354,7 +354,9 @@ def make_multigoal_craftax_agent(
       use_bias=config.get("USE_BIAS", True),
     ),
   )
+  import pdb
 
+  pdb.set_trace()
   rng, _rng = jax.random.split(rng)
   network_params = agent.init(_rng, example_timestep, method=agent.initialize)
 

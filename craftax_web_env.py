@@ -692,8 +692,6 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
     # [D]
     image = render_craftax_symbolic(state)
 
-    ngoals = len(Achiement_to_idx)
-
     # [G]
     task_w = task_onehot(state.current_goal)
 
