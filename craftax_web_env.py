@@ -62,6 +62,7 @@ class Action(Enum):
   RIGHT = 2  # d
   UP = 3  # w
   DOWN = 4  # s
+  DO = 5  # s
 
 
 def is_game_over(state, params, static_env_params):
@@ -561,7 +562,7 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
     info["discount"] = self.discount(state, params)
 
     return (
-      lax.stop_gradient(self.get_obs(state=state, params=params)),
+      lax.stop_gradient(self.get_obs(state=state, action=action, params=params)),
       lax.stop_gradient(state),
       reward,
       done,
@@ -594,8 +595,9 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
     )
     return obs, state
 
-  def get_obs(self, state: EnvState, params: EnvParams):
+  def get_obs(self, state: EnvState, action: int, params: EnvParams):
     del params
+    del action
     return render_craftax_symbolic(state)
 
   def is_terminal(self, state: EnvState, params: EnvParams) -> bool:
@@ -658,7 +660,7 @@ class MultiGoalObservation(struct.PyTreeNode):
   task_w: chex.Array
   # goals: chex.Array
   state_features: chex.Array
-
+  previous_action: int = None
 
 class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset):
   """
@@ -690,7 +692,7 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
 
     return super().reset(key, params)
 
-  def get_obs(self, state: EnvState, params: EnvParams):
+  def get_obs(self, state: EnvState, action: int, params: EnvParams):
     # [D]
     image = render_craftax_symbolic(state)
 
@@ -714,6 +716,7 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
     return MultiGoalObservation(
       image=image,
       task_w=task_w,
+      previous_action=action,
       # goals=active_task_vectors,
       state_features=state_features,
     )
