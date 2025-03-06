@@ -112,3 +112,12 @@ for config in PATHS_CONFIGS:
 
 TRAIN_CONFIGS = jtu.tree_map(lambda *x: jnp.stack(x), *TRAIN_CONFIGS)
 TEST_CONFIGS = jtu.tree_map(lambda *x: jnp.stack(x), *TEST_CONFIGS)
+
+dummy_config = jax.tree.map(lambda x: x[0], TRAIN_CONFIGS)
+default_params = EnvParams().replace(
+  world_seeds=(dummy_config.world_seed,),
+  current_goal=dummy_config.goal_object.astype(jnp.int32),
+  start_positions=dummy_config.start_position.astype(jnp.int32),
+  placed_goals=dummy_config.placed_goals.astype(jnp.int32),
+  goal_locations=dummy_config.goal_locations.astype(jnp.int32),
+)
