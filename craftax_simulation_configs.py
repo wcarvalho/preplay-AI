@@ -19,6 +19,7 @@ class TaskConfig(struct.PyTreeNode):
   start_position: Tuple[int, int]
   goal_object: int = None
   placed_goals: List[Tuple[int, int]] = None
+  placed_achievements: List[Tuple[int, int]] = None
   goal_locations: List[Tuple[int, int]] = None
 
 
@@ -85,6 +86,7 @@ for config in PATHS_CONFIGS:
           start_position=waypoint,
           goal_object=BLOCK_TO_GOAL[goal_object],
           placed_goals=jnp.asarray(params.placed_goals),
+          placed_achievements=jnp.asarray([BLOCK_TO_GOAL[i] for i in params.placed_goals]),
           goal_locations=jnp.asarray(params.goal_locations),
         )
       )
@@ -124,6 +126,7 @@ default_params = MultigoalEnvParams().replace(
   current_goal=dummy_config.goal_object.astype(jnp.int32),
   start_positions=dummy_config.start_position.astype(jnp.int32),
   placed_goals=dummy_config.placed_goals.astype(jnp.int32),
+  placed_achievements=dummy_config.placed_achievements.astype(jnp.int32),
   goal_locations=dummy_config.goal_locations.astype(jnp.int32),
   task_configs=TRAIN_CONFIGS,
 )

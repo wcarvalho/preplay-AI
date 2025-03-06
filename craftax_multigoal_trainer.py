@@ -307,27 +307,14 @@ def run_single(config: dict, save_path: str = None):
   rng = jax.random.PRNGKey(config["SEED"])
   config["TEST_NUM_ENVS"] = config.get("TEST_NUM_ENVS", None) or config["NUM_ENVS"]
 
-  # numpify = lambda x: jax.tree_map(lambda y: np.asarray(y), x)
-  # train_configs = numpify(craftax_simulation_configs.TRAIN_CONFIGS)
-  # test_configs = numpify(craftax_simulation_configs.TEST_CONFIGS)
-  # numpify = lambda x: jax.tree_map(lambda y: np.asarray(y), x)
   train_configs = craftax_simulation_configs.TRAIN_CONFIGS
   test_configs = craftax_simulation_configs.TEST_CONFIGS
-  dummy_config = jax.tree.map(lambda x: x[0], train_configs)
 
   env = CraftaxMultiGoalSymbolicWebEnvNoAutoReset()
-  # just to match up shapes
-  env_params = env.default_params.replace(
-    world_seeds=(dummy_config.world_seed,),
-    current_goal=dummy_config.goal_object.astype(jnp.int32),
-    start_positions=dummy_config.start_position.astype(jnp.int32),
-    placed_goals=dummy_config.placed_goals.astype(jnp.int32),
-    goal_locations=dummy_config.goal_locations.astype(jnp.int32),
-  )
-
-  env_params = env_params.replace(task_configs=train_configs)
-  test_env_params = env_params.replace(task_configs=test_configs)
-  train_tasks = active_task_vectors
+  default_params = craftax_simulation_configs.default_params
+  env_params = default_params.replace(task_configs=train_configs)
+  test_env_params = default_params.replace(task_configs=test_configs)
+  train_tasks = active_task_vectors  # relevant for successor features
 
   if config["OPTIMISTIC_RESET_RATIO"] == 1:
     vec_env = env = TimestepWrapper(LogWrapper(env), autoreset=True)
