@@ -178,6 +178,7 @@ class CraftaxMultiGoalObsEncoder(nn.Module):
   norm_type: str = "batch_norm"
   activation: str = "relu"
   use_bias: bool = True
+  include_goal: bool = True
 
   @nn.compact
   def __call__(self, obs: Observation, train: bool = False):
@@ -205,13 +206,16 @@ class CraftaxMultiGoalObsEncoder(nn.Module):
       )(image, train)
 
     kernel_init = nn.initializers.variance_scaling(1.0, "fan_in", "normal", out_axis=0)
-    goal = nn.Dense(
-      # binary vector
-      128,
-      kernel_init=kernel_init,
-      use_bias=False,
-    )(obs.task_w.astype(jnp.float32))
-    to_concat = (outputs, goal)
+    if self.include_goal:
+      goal = nn.Dense(
+        # binary vector
+        128,
+        kernel_init=kernel_init,
+        use_bias=False,
+      )(obs.task_w.astype(jnp.float32))
+      to_concat = (outputs, goal)
+    else:
+      to_concat = (outputs,)
     if hasattr(obs, "previous_action") and obs.previous_action is not None:
       action = jax.nn.one_hot(obs.previous_action, self.action_dim or 50)
       # common trick for one-hot encodings, same as nn.Embed

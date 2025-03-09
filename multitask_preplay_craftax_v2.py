@@ -1165,9 +1165,11 @@ def learner_log_extra(
           for name in achievable_list:
             title += f"\n- {name}"
       elif hasattr(timesteps.state.env_state, "current_goal"):
-        start_location = timesteps.state.env_state.start_position
-        goal = timesteps.state.env_state.current_goal[i]
-        goal_name = Achievement(int(goal)).name
+        start_location = timesteps.state.env_state.start_position[i]
+        env_goal = timesteps.state.env_state.current_goal[i]
+        env_goal_name = Achievement(int(env_goal)).name
+        sim_goal_name = Achievement(int(goal.argmax(-1))).name
+
         title = f"t={i}"
         title += f"\nA={actions_taken[i]}"
         if i >= len(timesteps.reward) - 1:
@@ -1175,7 +1177,8 @@ def learner_log_extra(
         title += (
           f"\nr={timesteps.reward[i + 1]:.2f}, $\\gamma={timesteps.discount[i + 1]}$"
         )
-        title += f"\nstart={start_location}\ngoal={goal}\ngoal={goal_name}"
+        title += f"\nstart={start_location}\nmain_goal={env_goal_name}\nsim_goal={sim_goal_name}"
+        import ipdb; ipdb.set_trace()
 
       return title
 
@@ -1623,6 +1626,7 @@ class DynaAgentEnvModelMultigoal(nn.Module):
   q_fn_subtask: nn.Module
   env: environment.Environment
   env_params: environment.EnvParams
+  share_q_fn: bool = True
 
   def setup(self):
     kernel_init = nn.initializers.variance_scaling(1.0, "fan_in", "normal", out_axis=0)
@@ -1662,13 +1666,17 @@ class DynaAgentEnvModelMultigoal(nn.Module):
     return predictions, new_rnn_state
 
   def reg_q_fn(self, rnn_out, task):
-    # just so both have same signature
-    return self.q_fn(rnn_out)
-
-  def subtask_q_fn(self, rnn_out, task):
     task = self.task_fn(task)
     inp = jnp.concatenate((rnn_out, task), axis=-1)
-    return self.q_fn_subtask(inp)
+    return self.q_fn(inp)
+
+  def subtask_q_fn(self, rnn_out, task):
+    if self.share_q_fn:
+      return self.reg_q_fn(rnn_out, task)
+    else:
+      task = self.task_fn(task)
+      inp = jnp.concatenate((rnn_out, task), axis=-1)
+      return self.q_fn_subtask(inp)
 
   def unroll(
     self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey
@@ -1715,7 +1723,7 @@ class DynaAgentEnvModelMultigoal(nn.Module):
   def compute_reward(self, timestep, task):
     return self.env.compute_reward(timestep, task, self.env_params)
 
-def make_agent(
+def make_multigoal_agent(
   config: dict,
   env: environment.Environment,
   env_params: environment.EnvParams,
@@ -1749,6 +1757,7 @@ def make_agent(
       activation=config["ACTIVATION"],
       norm_type=config.get("NORM_TYPE", "none"),
       use_bias=config.get("USE_BIAS", True),
+      include_goal=False,
       action_dim=env.action_space(env_params).n,
     ),
     rnn=rnn,
@@ -1770,6 +1779,7 @@ def make_agent(
     ),
     env=model_env,
     env_params=model_env_params,
+    share_q_fn=config.get("SHARE_Q_FN", True),
     #q_head_type=config.get("QHEAD_TYPE", "dot"),
   )
 
@@ -1850,7 +1860,7 @@ def make_train(**kwargs):
     # [T, K, D]
     achievement_coefficients = timesteps.observation.task_w.astype(jnp.float32)
     # [T, K, D]
-    achievement_coefficients = achievement_coefficients[..., : g.shape[-1]]
+    achievement_coefficients = achievement_coefficients[..., : goal_onehot.shape[-1]]
 
     coeff_mask = goal_onehot.astype(jnp.float32)
     # coeff_time_mask = jnp.conj(
@@ -1933,7 +1943,6 @@ def make_train_multigoal(**kwargs):
       seed=key_, sample_shape=(num_offtask_goals)
     )
 
-
     # [num_offtask_goals, G]
     goals = jax.nn.one_hot(goals, num_classes=num_goals)
     return goals, achievable, any_achievable
@@ -1954,7 +1963,7 @@ def make_train_multigoal(**kwargs):
     return jnp.tile(goal, (num_dyna_simulations, 1))
 
   return vbb.make_train(
-    make_agent=partial(make_agent, model_env=kwargs.pop("model_env")),
+    make_agent=partial(make_multigoal_agent, model_env=kwargs.pop("model_env")),
     make_loss_fn_class=functools.partial(
       make_loss_fn_class,
       dyna_policy=dyna_policy,

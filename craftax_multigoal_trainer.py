@@ -476,11 +476,11 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": list(range(1, 2))},
-        "OFFTASK_COEFF": {"values": [1e-1, 1.0]},
-        #"FIXED_EPSILON": {"values": [1, 2]},
+        "SHARE_Q_FN": {"values": [True, False]},
+        #"WINDOW_SIZE": {"values": [.25, .5, .75, 1.0]},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-dyna-multigoal", "user=wilka"],
-      "group": "preplay-testing-4",
+      "group": "preplay-testing-5",
     }
 
   ############################################################
