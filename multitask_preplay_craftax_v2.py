@@ -242,8 +242,7 @@ def simulate_n_trajectories(
     preds = Predictions(q_vals=get_q_vals(beta, lstm_out, w), state=lstm_state)
 
     if make_init_goal_timestep is not None:
-      x = make_init_goal_timestep(x, goal)
-      import ipdb; ipdb.set_trace()
+      x = make_init_goal_timestep(x, w)
     return x, beta, lstm_state, preds
 
   # by giving state as input and returning, will
@@ -1965,6 +1964,7 @@ def make_train_multigoal(**kwargs):
     )
 
     # [num_offtask_goals, G]
+    num_goals = timestep.observation.task_w.shape[-1]
     goals = jax.nn.one_hot(goals, num_classes=num_goals)
     return goals, achievable, any_achievable
 
@@ -1991,7 +1991,9 @@ def make_train_multigoal(**kwargs):
       craftax_web_env.IDX_to_Achievement,
       goal.argmax(-1), keepdims=False)
     new_state = timestep.state.replace(
-      current_goal=achievement_goal,
+      env_state=timestep.state.env_state.replace(
+        current_goal=achievement_goal,
+      ),
     )
     new_observation = timestep.observation.replace(
       task_w=goal,
