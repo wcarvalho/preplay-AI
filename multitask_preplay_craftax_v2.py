@@ -28,6 +28,7 @@ matplotlib.use("Agg")
 import wandb
 
 import craftax_env
+import craftax_web_env
 
 from jaxneurorl import losses
 from jaxneurorl.agents.basics import TimeStep
@@ -1166,9 +1167,16 @@ def learner_log_extra(
             title += f"\n- {name}"
       elif hasattr(timesteps.state.env_state, "current_goal"):
         start_location = timesteps.state.env_state.start_position[i]
+        idx_to_achievement = {v: k for k, v in craftax_web_env.Achiement_to_idx.items()}
         env_goal = timesteps.state.env_state.current_goal[i]
         env_goal_name = Achievement(int(env_goal)).name
-        sim_goal_name = Achievement(int(goal.argmax(-1))).name
+
+        obs_goal = timesteps.observation.task_w[i]
+        obs_goal_idx = int(obs_goal.argmax(-1))
+        obs_goal_name = Achievement(idx_to_achievement[obs_goal_idx]).name
+        
+        sim_goal_idx = int(goal.argmax(-1))
+        sim_goal_name = Achievement(idx_to_achievement[sim_goal_idx]).name
 
         title = f"t={i}"
         title += f"\nA={actions_taken[i]}"
@@ -1178,7 +1186,9 @@ def learner_log_extra(
           f"\nr={timesteps.reward[i + 1]:.2f}, $\\gamma={timesteps.discount[i + 1]}$"
         )
         title += f"\nstart={start_location}\nmain_goal={env_goal_name}\nsim_goal={sim_goal_name}"
-        import ipdb; ipdb.set_trace()
+
+        if obs_goal_name != sim_goal_name:
+          title += f"\nobs_goal={obs_goal_name} != sim_goal={sim_goal_name}"
 
       return title
 
