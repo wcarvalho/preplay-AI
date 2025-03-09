@@ -1,7 +1,7 @@
 # WANDB PARAMS
-PROJECT: "craftax-multigoal"
-#ENV_NAME: "craftax-gen"
-#ENV: "craftax-gen"
+PROJECT: "craftax"
+ENV_NAME: "craftax-gen"
+ENV: "craftax-gen"
 TOTAL_TIMESTEPS: 1_000_000
 
 OPTIMISTIC_RESET_RATIO: 16  # reset every env?

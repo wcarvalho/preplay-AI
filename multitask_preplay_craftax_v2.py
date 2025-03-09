@@ -1164,10 +1164,10 @@ def learner_log_extra(
           title += "\nAchievable:"
           for name in achievable_list:
             title += f"\n- {name}"
-      elif hasattr(timesteps.state, "current_goal"):
-        start_location = timesteps.state.start_position
-        goal = timesteps.state.current_goal
-        goal_name = Achievement(goal).name
+      elif hasattr(timesteps.state.env_state, "current_goal"):
+        start_location = timesteps.state.env_state.start_position
+        goal = timesteps.state.env_state.current_goal[i]
+        goal_name = Achievement(int(goal)).name
         title = f"t={i}"
         title += f"\nA={actions_taken[i]}"
         if i >= len(timesteps.reward) - 1:

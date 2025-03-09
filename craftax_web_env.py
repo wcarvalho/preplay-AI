@@ -57,12 +57,12 @@ except Exception as e:
 
 # much smaller action space for web env
 class Action(Enum):
-  NOOP = 0  #
-  LEFT = 1  # a
-  RIGHT = 2  # d
-  UP = 3  # w
-  DOWN = 4  # s
-  DO = 5  # s
+  NOOP = 0
+  LEFT = 1
+  RIGHT = 2
+  UP = 3
+  DOWN = 4
+  DO = 5
 
 
 def is_game_over(state, params, static_env_params):
@@ -591,6 +591,7 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
 
     obs = self.get_obs(
       state=state,
+      action=jnp.zeros((), dtype=jnp.int32),  # scalar
       params=params,
     )
     return obs, state

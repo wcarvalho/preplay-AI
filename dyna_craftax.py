@@ -773,11 +773,12 @@ def learner_log_extra(
             title += f"\n{achievement}"
           except ValueError:
             title += f"\nHealth?"
-      elif hasattr(timesteps.state, "current_goal"):
-        start_location = timesteps.state.start_position
-        goal = timesteps.state.current_goal
-        goal_name = Achievement(goal).name
+      elif hasattr(timesteps.state.env_state, "current_goal"):
+        start_location = timesteps.state.env_state.start_position
+        goal = timesteps.state.env_state.current_goal[i]
+        goal_name = Achievement(int(goal)).name
         title += f"\nstart={start_location}\ngoal={goal}\ngoal={goal_name}"
+
       return title
 
     fig = plot_frames(

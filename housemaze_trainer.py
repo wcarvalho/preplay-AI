@@ -723,10 +723,11 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["dynaq_shared"]},
         "SEED": {"values": list(range(1, 11))},
+        "OFFTASK_COEFF": {"values": [1.0]},
         "env.exp": {"values": ["exp2"]},
       },
       "overrides": ["alg=preplay", "rlenv=housemaze", "user=wilka"],
-      "group": "preplay-final-1",
+      "group": "preplay-final-2",
     }
 
   else:
