@@ -638,9 +638,11 @@ Achiement_to_idx = {
   Achievement.COLLECT_RUBY.value: 2,
 }
 
-IDX_to_Achievement = {
-  v: k for k, v in Achiement_to_idx.items()
-}
+IDX_to_Achievement = jnp.asarray((
+  Achievement.COLLECT_DIAMOND.value,
+  Achievement.COLLECT_SAPPHIRE.value,
+  Achievement.COLLECT_RUBY.value,
+))
 task_vectors = jnp.zeros((len(Achievement), len(Achiement_to_idx)))
 active_task_vectors = []
 for achievement, i in Achiement_to_idx.items():

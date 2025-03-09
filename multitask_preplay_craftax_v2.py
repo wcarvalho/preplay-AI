@@ -181,6 +181,7 @@ def simulate_n_trajectories(
   use_offtask_policy: jax.Array = None,
   terminate_offtask: bool = False,
   subtask_coeff: float = 1.0,
+  make_init_goal_timestep = None,
 ):
   """
 
@@ -239,6 +240,10 @@ def simulate_n_trajectories(
 
     beta = jnp.zeros((), dtype=jnp.int32)  # scalar
     preds = Predictions(q_vals=get_q_vals(beta, lstm_out, w), state=lstm_state)
+
+    if make_init_goal_timestep is not None:
+      x = make_init_goal_timestep(x, goal)
+      import ipdb; ipdb.set_trace()
     return x, beta, lstm_state, preds
 
   # by giving state as input and returning, will
@@ -409,6 +414,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
   sample_goals: Callable = None
   compute_rewards: Callable = None
   get_main_goal: Callable = None
+  make_init_goal_timestep: Callable = None
 
   def loss_fn(
     self,
@@ -597,6 +603,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
       num_steps=self.simulation_length,
       terminate_offtask=self.terminate_offtask,
       subtask_coeff=self.subtask_coeff,
+      make_init_goal_timestep=self.make_init_goal_timestep,
     )
 
     # first do a rollowing window
@@ -624,6 +631,9 @@ class DynaLossFn(vbb.RecurrentLossFn):
         g (jax.Array): [num_offtask_goals, ...] off-task goals
         key (jax.random.PRNGKey): [2], random key for simulation
       """
+
+      #if self.make_init_goal_timestep is not None:
+      #  t = jax.vmap(self.make_init_goal_timestep)(t, g)
 
       # use same goal for all simulations
       # [G] --> [num_sims, G]
@@ -1185,10 +1195,10 @@ def learner_log_extra(
         title += (
           f"\nr={timesteps.reward[i + 1]:.2f}, $\\gamma={timesteps.discount[i + 1]}$"
         )
-        title += f"\nstart={start_location}\nmain_goal={env_goal_name}\nsim_goal={sim_goal_name}"
+        title += f"\nstart={start_location}\ng={env_goal_name}\ng'={sim_goal_name}"
 
-        if obs_goal_name != sim_goal_name:
-          title += f"\nobs_goal={obs_goal_name} != sim_goal={sim_goal_name}"
+        if obs_goal_name != env_goal_name:
+          title += f"\no={obs_goal_name}!= e={env_goal_name}"
 
       return title
 
@@ -1767,13 +1777,13 @@ def make_multigoal_agent(
       activation=config["ACTIVATION"],
       norm_type=config.get("NORM_TYPE", "none"),
       use_bias=config.get("USE_BIAS", True),
-      include_goal=False,
+      include_goal=config.get("OBS_INCLUDE_GOAL", False),
       action_dim=env.action_space(env_params).n,
     ),
     rnn=rnn,
     q_fn=QFnCls(
       hidden_dim=config.get("Q_HIDDEN_DIM", 512),
-      num_layers=config.get("NUM_Q_LAYERS", 1),
+      num_layers=config.get("NUM_PRED_LAYERS", 1),
       out_dim=env.action_space(env_params).n,
       activation=config["ACTIVATION"],
       activate_final=False,
@@ -1781,7 +1791,7 @@ def make_multigoal_agent(
     ),
     q_fn_subtask=QFnCls(
       hidden_dim=config.get("Q_HIDDEN_DIM", 512),
-      num_layers=config.get("NUM_AUX_LAYERS", 0),
+      num_layers=config.get("NUM_PRED_LAYERS", 0),
       out_dim=env.action_space(env_params).n,
       activation=config["ACTIVATION"],
       activate_final=False,
@@ -1941,15 +1951,16 @@ def make_train_multigoal(**kwargs):
     )
 
   def sample_goals(timestep, key, num_offtask_goals):
-    # [T, G]
-    state_features = timestep.observation.state_features.astype(jnp.float32)
-    num_goals = state_features.shape[-1]
-    equal_probs = jnp.ones(num_goals) / num_goals
-    achievable = jnp.ones_like(equal_probs)
+    # [T, G] --> [G]
+    current_goal = timestep.observation.task_w[0]
+    other_goals = 1. - current_goal
+    other_goal_probs = other_goals/other_goals.sum()
+
+    achievable = jnp.ones_like(other_goal_probs)
     any_achievable = achievable.sum() > 0.1
 
     key, key_ = jax.random.split(key)
-    goals = distrax.Categorical(probs=equal_probs).sample(
+    goals = distrax.Categorical(probs=other_goal_probs).sample(
       seed=key_, sample_shape=(num_offtask_goals)
     )
 
@@ -1972,6 +1983,22 @@ def make_train_multigoal(**kwargs):
     goal = timestep.observation.task_w[:1]
     return jnp.tile(goal, (num_dyna_simulations, 1))
 
+  def make_init_goal_timestep(timestep, goal):
+    """
+    goal is 1-hot vector
+    """
+    achievement_goal = jax.lax.dynamic_index_in_dim(
+      craftax_web_env.IDX_to_Achievement,
+      goal.argmax(-1), keepdims=False)
+    new_state = timestep.state.replace(
+      current_goal=achievement_goal,
+    )
+    new_observation = timestep.observation.replace(
+      task_w=goal,
+    )
+    return timestep.replace(state=new_state, observation=new_observation)
+
+
   return vbb.make_train(
     make_agent=partial(make_multigoal_agent, model_env=kwargs.pop("model_env")),
     make_loss_fn_class=functools.partial(
@@ -1981,6 +2008,7 @@ def make_train_multigoal(**kwargs):
       sample_goals=sample_goals,
       compute_rewards=compute_rewards,
       get_main_goal=get_main_goal,
+      make_init_goal_timestep=make_init_goal_timestep,
     ),
     make_optimizer=base_agent.make_optimizer,
     make_actor=make_actor,
