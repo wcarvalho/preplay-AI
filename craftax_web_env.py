@@ -603,9 +603,11 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
       dtype=jnp.float32,
     )
 
+
 ########################################################
 # Multi-goal version of the Craftax environment
 ########################################################
+
 
 @struct.dataclass
 class SimulationEnvParams(EnvParams):
@@ -613,7 +615,6 @@ class SimulationEnvParams(EnvParams):
 
 
 class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset):
-
   """
   This is a multi-goal version of the Craftax environment.
   """

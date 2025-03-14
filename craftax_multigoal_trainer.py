@@ -239,35 +239,35 @@ def craftax_experience_logger(
   #############################################################
   ## LogWrapper logging
   #############################################################
-  #key_fn = lambda k: f"{k}-{num_seeds}" if num_seeds is not None else k
-  #main_key = key_fn(key)
-  #ach_key = key_fn(f"{key}-achievements")
+  # key_fn = lambda k: f"{k}-{num_seeds}" if num_seeds is not None else k
+  # main_key = key_fn(key)
+  # ach_key = key_fn(f"{key}-achievements")
 
-  #log_state = trajectory.timestep.state
+  # log_state = trajectory.timestep.state
   ## [T, B, A]
-  #achievements = trajectory.timestep.state.env_state.achievements
+  # achievements = trajectory.timestep.state.env_state.achievements
 
   ## [T, B]
-  #done = trajectory.timestep.last()
+  # done = trajectory.timestep.last()
 
-  #achievements = achievements * done[:, :, None] * 100.0
+  # achievements = achievements * done[:, :, None] * 100.0
 
-  #infos = {}
-  #infos[f"{main_key}/0.episode_return"] = log_state.returned_episode_returns
-  #infos[f"{main_key}/0.score"] = (
+  # infos = {}
+  # infos[f"{main_key}/0.episode_return"] = log_state.returned_episode_returns
+  # infos[f"{main_key}/0.score"] = (
   #  log_state.returned_episode_returns / MAX_SCORE
-  #) * 100.0
-  #infos[f"{main_key}/0.episode_length"] = log_state.returned_episode_lengths
-  #for achievement in Achievement:
+  # ) * 100.0
+  # infos[f"{main_key}/0.episode_length"] = log_state.returned_episode_lengths
+  # for achievement in Achievement:
   #  name = f"Achievements/{achievement.name.lower()}"
   #  infos[f"{ach_key}/{name}"] = achievements[:, :, achievement.value]
 
-  #metrics = jax.tree.map(
+  # metrics = jax.tree.map(
   #  lambda x: (x * done).sum() / (1e-5 + done.sum()),
   #  infos,
-  #)
-  #metrics[f"{main_key}/num_actor_steps"] = train_state.timesteps
-  #metrics[f"{main_key}/num_learner_updates"] = train_state.n_updates
+  # )
+  # metrics[f"{main_key}/num_actor_steps"] = train_state.timesteps
+  # metrics[f"{main_key}/num_learner_updates"] = train_state.n_updates
 
   ############################################################
   # Observer logging
@@ -310,9 +310,9 @@ def make_logger(
   return loggers.Logger(
     gradient_logger=loggers.default_gradient_logger,
     learner_logger=loggers.default_learner_logger,
-    #experience_logger=partial(
+    # experience_logger=partial(
     #  craftax_experience_logger, num_seeds=config.get("NUM_ENV_SEEDS", None)
-    #),
+    # ),
     learner_log_extra=(
       partial(learner_log_extra, config=config)
       if learner_log_extra is not None
@@ -320,8 +320,10 @@ def make_logger(
     ),
   )
 
+
 import craftax_simulation_configs
 from craftax_web_env import CraftaxMultiGoalSymbolicWebEnvNoAutoReset
+
 
 def run_single(config: dict, save_path: str = None):
   rng = jax.random.PRNGKey(config["SEED"])

@@ -3,10 +3,13 @@ import jax
 import jax.numpy as jnp
 from collections import deque
 from craftax.craftax.constants import Action, BlockType, ItemType, BLOCK_PIXEL_SIZE_IMG
+
 try:
   from craftax_fullmap_renderer import TEXTURES
-  from craftax_fullmap_renderer import render_craftax_pixels as render_craftax_pixels_full
-  #import craftax_fullmap_constants as constants
+  from craftax_fullmap_renderer import (
+    render_craftax_pixels as render_craftax_pixels_full,
+  )
+  # import craftax_fullmap_constants as constants
 except ModuleNotFoundError:
   pass
 from craftax.craftax.renderer import (
@@ -359,7 +362,6 @@ def place_arrows_on_image(
   if display_image:
     ax.imshow(image)
 
-
   # Calculate the center coordinates near the end position for text placement
   if show_path_length and len(positions) > 3:
     # Position text 3 steps from the end
@@ -690,9 +692,7 @@ def train_test_paths(
   if ax is None:
     fig, ax = plt.subplots(1, figsize=(8, 8))
   with jax.disable_jit():
-    image = render_fn(
-      state, show_agent=False, block_pixel_size=BLOCK_PIXEL_SIZE_IMG
-    )
+    image = render_fn(state, show_agent=False, block_pixel_size=BLOCK_PIXEL_SIZE_IMG)
     ax.imshow(image)
     ax.axis("off")  # This removes the axes and grid
 
@@ -816,17 +816,17 @@ def create_reaction_times_video(
   fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(3 * width, width))
   ax1.imshow(initial_map)
   place_arrows_on_image(
-        image=initial_map,
-        positions=path,
-        actions=actions,
-        maze_height=first_state.map.shape[1],
-        maze_width=first_state.map.shape[2],
-        ax=ax1,
-        display_image=True,
-        arrow_color='red',
-        show_path_length=False,
-        start_color='red',
-      )
+    image=initial_map,
+    positions=path,
+    actions=actions,
+    maze_height=first_state.map.shape[1],
+    maze_width=first_state.map.shape[2],
+    ax=ax1,
+    display_image=True,
+    arrow_color="red",
+    show_path_length=False,
+    start_color="red",
+  )
 
   def update(frame):
     # Clear previous content
@@ -884,7 +884,9 @@ def create_episode_reaction_times_video(
   reaction_times = episode_data.reaction_times
   path = episode_data.timesteps.state.player_position
   actions = actions_from_path(path)
-  assert len(path) == len(actions) == len(reaction_times), f"lengths: {len(path)}, {len(actions)}, {len(reaction_times)}"
+  assert len(path) == len(actions) == len(reaction_times), (
+    f"lengths: {len(path)}, {len(actions)}, {len(reaction_times)}"
+  )
   first_state = jax.tree_map(lambda s: s[0], episode_data.timesteps.state)
   video = create_reaction_times_video(
     initial_map=initial_map,
