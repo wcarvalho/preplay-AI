@@ -55,6 +55,16 @@ except Exception as e:
   raise e
 
 
+# much smaller action space for web env
+class Action(Enum):
+  NOOP = 0
+  LEFT = 1
+  RIGHT = 2
+  UP = 3
+  DOWN = 4
+  DO = 5
+
+
 def is_game_over(state, params, static_env_params):
   done_steps = state.timestep >= params.max_timesteps
   is_dead = state.player_health <= 0
@@ -79,6 +89,7 @@ class EnvParams:
   start_positions: Optional[Union[Tuple[Tuple[int, int]], Tuple[int, int]]] = None
   goal_locations: Tuple[Tuple[int, int]] = ((-1, -1),)
   placed_goals: Tuple[int] = (-1,)
+  placed_achievements: Tuple[int] = (-1,)
   fractal_noise_angles: tuple[int, int, int, int] = (None, None, None, None)
   ## for env wrapper
   # active_goals: Tuple[int, ...] = tuple()
@@ -498,6 +509,18 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
   def default_static_params() -> StaticEnvParams:
     return StaticEnvParams()
 
+  def step(
+    self,
+    key: chex.PRNGKey,
+    state,
+    action: Union[int, float],
+    params=None,
+  ):
+    """Performs step transitions in the environment."""
+    # Use default env parameters if no others specified
+    obs, state, reward, done, info = self.step_env(key, state, action, params)
+    return obs, state, reward, done, info
+
   def step_env(
     self, rng: chex.PRNGKey, state: EnvState, action: int, params: EnvParams
   ) -> Tuple[chex.Array, EnvState, float, bool, dict]:
@@ -539,7 +562,7 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
     info["discount"] = self.discount(state, params)
 
     return (
-      lax.stop_gradient(self.get_obs(state=state, params=params)),
+      lax.stop_gradient(self.get_obs(state=state, action=action, params=params)),
       lax.stop_gradient(state),
       reward,
       done,
@@ -568,12 +591,14 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
 
     obs = self.get_obs(
       state=state,
+      action=jnp.zeros((), dtype=jnp.int32),  # scalar
       params=params,
     )
     return obs, state
 
-  def get_obs(self, state: EnvState, params: EnvParams):
+  def get_obs(self, state: EnvState, action: int, params: EnvParams):
     del params
+    del action
     return render_craftax_symbolic(state)
 
   def is_terminal(self, state: EnvState, params: EnvParams) -> bool:
@@ -607,12 +632,42 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
 ########################################################
 # Multi-goal version of the Craftax environment
 ########################################################
+Achiement_to_idx = {
+  Achievement.COLLECT_DIAMOND.value: 0,
+  Achievement.COLLECT_SAPPHIRE.value: 1,
+  Achievement.COLLECT_RUBY.value: 2,
+}
+
+IDX_to_Achievement = jnp.asarray((
+  Achievement.COLLECT_DIAMOND.value,
+  Achievement.COLLECT_SAPPHIRE.value,
+  Achievement.COLLECT_RUBY.value,
+))
+task_vectors = jnp.zeros((len(Achievement), len(Achiement_to_idx)))
+active_task_vectors = []
+for achievement, i in Achiement_to_idx.items():
+  task_vectors = task_vectors.at[achievement, i].set(1)
+  active_task_vectors.append(task_vectors[achievement])
+active_task_vectors = jnp.stack(active_task_vectors)
+
+
+def task_onehot(goal):
+  return jax.lax.dynamic_index_in_dim(task_vectors, goal, keepdims=False)
+
 
 
 @struct.dataclass
-class SimulationEnvParams(EnvParams):
+class MultigoalEnvParams(EnvParams):
   task_configs: List[struct.PyTreeNode] = None
 
+
+@struct.dataclass
+class MultiGoalObservation(struct.PyTreeNode):
+  image: chex.Array
+  task_w: chex.Array
+  # goals: chex.Array
+  state_features: chex.Array
+  previous_action: int = None
 
 class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset):
   """
@@ -621,21 +676,57 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
 
   @property
   def default_params(self) -> EnvParams:
-    return SimulationEnvParams()
+    return MultigoalEnvParams()
 
-  def reset(self, key: chex.PRNGKey, params: SimulationEnvParams):
+  def reset(self, key: chex.PRNGKey, params: MultigoalEnvParams):
     """
     Sample a task config from the list of task configs.
-    Input goal_objects, goal_locations, world_seed, start_positions.
+    Fill in information
     """
-    task_config = jax.random.choice(key, params.task_configs)
+    n_tasks = len(params.task_configs.world_seed)
+    task_idx = jax.random.randint(key, (), 0, n_tasks)
+    index = lambda x: jax.lax.dynamic_index_in_dim(x, task_idx, keepdims=False)
+    task_config = jax.tree_map(index, params.task_configs)
+
     params = params.replace(
-      world_seeds=task_config.world_seed,
+      world_seeds=(task_config.world_seed,),
       current_goal=task_config.goal_object.astype(jnp.int32),
-      start_positions=task_config.start_positions.astype(jnp.int32),
-      goal_locations=task_config.goal_location.astype(jnp.int32),
+      start_positions=task_config.start_position.astype(jnp.int32),
+      placed_goals=task_config.placed_goals.astype(jnp.int32),
+      placed_achievements=task_config.placed_achievements.astype(jnp.int32),
+      goal_locations=task_config.goal_locations.astype(jnp.int32),
     )
+
     return super().reset(key, params)
+
+  def get_obs(self, state: EnvState, action: int, params: EnvParams):
+    # [D]
+    image = render_craftax_symbolic(state)
+
+    # [G]
+    task_w = task_onehot(state.current_goal)
+
+    # [N, G]
+    # compute state features as whether any params.placed_goal is achieved
+    def achieved(achievement):
+      complete = jax.lax.dynamic_index_in_dim(
+        state.achievements, achievement.astype(jnp.int32), keepdims=False
+      ).astype(jnp.float32)
+
+      return task_onehot(achievement) * complete
+
+    state_features = jax.vmap(achieved)(params.placed_achievements)
+
+    # place them all in same vector
+    state_features = state_features.sum(axis=0)
+
+    return MultiGoalObservation(
+      image=image,
+      task_w=task_w,
+      previous_action=action,
+      # goals=active_task_vectors,
+      state_features=state_features,
+    )
 
 
 ########################################################

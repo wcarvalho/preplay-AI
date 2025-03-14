@@ -3,35 +3,27 @@
 TESTING:
 JAX_DEBUG_NANS=True \
 JAX_DISABLE_JIT=1 \
-HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue craftax_trainer.py \
+HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue craftax_multigoal_trainer.py \
   app.parallel=none \
   app.debug=True \
   app.wandb=False \
   app.search=ql
 
 RUNNING ON SLURM:
-python craftax_trainer.py \
+python craftax_multigoal_trainer.py \
   app.parallel=slurm \
   app.search=usfa
 """
 
 import os
 
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-
-MAX_SCORE = 226.0
-
 
 import wandb
 from functools import partial
 from jaxneurorl import loggers
-from jaxneurorl import utils
 from jaxneurorl import launcher
-from jaxneurorl.agents import value_based_pqn as vpq
 from jaxneurorl.agents import value_based_basics as vbb
 from typing import Any, Callable, Dict, Union, Optional
-from craftax.craftax_env import make_craftax_env_from_name
-from craftax.craftax.constants import Achievement
 
 import jax
 import chex
@@ -63,6 +55,16 @@ import multitask_preplay_craftax_v2
 import qlearning_craftax
 import qlearning_sf_aux_craftax
 import usfa_craftax as usfa
+
+import craftax_simulation_configs
+from craftax_web_env import (
+  CraftaxMultiGoalSymbolicWebEnvNoAutoReset,
+  active_task_vectors,
+)
+
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+
+MAX_SCORE = 226.0
 
 
 @struct.dataclass
@@ -118,14 +120,12 @@ class LogWrapper(GymnaxWrapper):
   def __init__(self, env):
     super().__init__(env)
 
-  @partial(jax.jit, static_argnums=(0, 2))
   def reset(self, key: chex.PRNGKey, params=None):
     obs, env_state = self._env.reset(key, params)
     # NOTE: change, technically episode length is 1 here, not 0
     state = LogEnvState(env_state, 0.0, 1, 0.0, 0, 0)
     return obs, state
 
-  @partial(jax.jit, static_argnums=(0, 4))
   def step(
     self,
     key: chex.PRNGKey,
@@ -183,14 +183,12 @@ class OptimisticResetVecEnvWrapper(object):
     self.reset_fn = jax.vmap(self._env.reset, in_axes=(0, None))
     self.step_fn = jax.vmap(self._env.step, in_axes=(0, 0, 0, None))
 
-  @partial(jax.jit, static_argnums=(0, 2))
   def reset(self, rng, params=None):
     rng, _rng = jax.random.split(rng)
     rngs = jax.random.split(_rng, self.num_envs)
     timestep = self.reset_fn(rngs, params)
     return timestep
 
-  @partial(jax.jit, static_argnums=(0, 4))
   def step(self, rng, prior_timestep, action, params=None):
     rng, _rng = jax.random.split(rng)
     rngs = jax.random.split(_rng, self.num_envs)
@@ -236,59 +234,26 @@ def craftax_experience_logger(
   trajectory: Optional[struct.PyTreeNode] = None,
   **kwargs,
 ):
-  #############################################################
-  ## LogWrapper logging
-  #############################################################
-  # key_fn = lambda k: f"{k}-{num_seeds}" if num_seeds is not None else k
-  # main_key = key_fn(key)
-  # ach_key = key_fn(f"{key}-achievements")
+  ############################################################
+  # LogWrapper logging
+  ############################################################
+  log_state = trajectory.timestep.state
+  infos = {}
+  infos[f"{main_key}/0.episode_return"] = log_state.returned_episode_returns
+  infos[f"{main_key}/0.episode_length"] = log_state.returned_episode_lengths
 
-  # log_state = trajectory.timestep.state
-  ## [T, B, A]
-  # achievements = trajectory.timestep.state.env_state.achievements
-
-  ## [T, B]
-  # done = trajectory.timestep.last()
-
-  # achievements = achievements * done[:, :, None] * 100.0
-
-  # infos = {}
-  # infos[f"{main_key}/0.episode_return"] = log_state.returned_episode_returns
-  # infos[f"{main_key}/0.score"] = (
-  #  log_state.returned_episode_returns / MAX_SCORE
-  # ) * 100.0
-  # infos[f"{main_key}/0.episode_length"] = log_state.returned_episode_lengths
-  # for achievement in Achievement:
-  #  name = f"Achievements/{achievement.name.lower()}"
-  #  infos[f"{ach_key}/{name}"] = achievements[:, :, achievement.value]
-
-  # metrics = jax.tree.map(
-  #  lambda x: (x * done).sum() / (1e-5 + done.sum()),
-  #  infos,
-  # )
-  # metrics[f"{main_key}/num_actor_steps"] = train_state.timesteps
-  # metrics[f"{main_key}/num_learner_updates"] = train_state.n_updates
+  metrics = jax.tree.map(
+    lambda x: (x * done).sum() / (1e-5 + done.sum()),
+    infos,
+  )
+  metrics[f"{k}/num_actor_steps"] = train_state.timesteps
+  metrics[f"{k}/num_learner_updates"] = train_state.n_updates
 
   ############################################################
   # Observer logging
   ############################################################
 
   def callback(m, idx, lengths, returns):
-    # NOTE: WRONG. observation logic is wrong
-    # length_means = []
-    # return_means = []
-    # for env in range(lengths.shape[1]):
-    #  end = min(idx[env] + 1, len(lengths[:, env]))
-    #  length_means.append(lengths[:, env][:end].mean())
-    #  return_means.append(returns[:, env][:end].mean())
-
-    # key = key_fn('observer')
-
-    # m.update({
-    #    f'{key}/0.episode_length': np.mean(length_means),
-    #    f'{key}/0.episode_return': np.mean(return_means),
-    #    f'{key}/0.score': (np.mean(return_means)/MAX_SCORE)*100.0,
-    # })
     if wandb.run is not None:
       wandb.log(m)
 
@@ -310,19 +275,13 @@ def make_logger(
   return loggers.Logger(
     gradient_logger=loggers.default_gradient_logger,
     learner_logger=loggers.default_learner_logger,
-    # experience_logger=partial(
-    #  craftax_experience_logger, num_seeds=config.get("NUM_ENV_SEEDS", None)
-    # ),
+    experience_logger=craftax_experience_logger,
     learner_log_extra=(
       partial(learner_log_extra, config=config)
       if learner_log_extra is not None
       else None
     ),
   )
-
-
-import craftax_simulation_configs
-from craftax_web_env import CraftaxMultiGoalSymbolicWebEnvNoAutoReset
 
 
 def run_single(config: dict, save_path: str = None):
@@ -333,10 +292,10 @@ def run_single(config: dict, save_path: str = None):
   test_configs = craftax_simulation_configs.TEST_CONFIGS
 
   env = CraftaxMultiGoalSymbolicWebEnvNoAutoReset()
-  env_params = env.default_params
-
-  env_params = env_params.replace(task_configs=train_configs)
-  test_env_params = env_params.replace(task_configs=test_configs)
+  default_params = craftax_simulation_configs.default_params
+  env_params = default_params.replace(task_configs=train_configs)
+  test_env_params = default_params.replace(task_configs=test_configs)
+  train_tasks = active_task_vectors  # relevant for successor features
 
   if config["OPTIMISTIC_RESET_RATIO"] == 1:
     vec_env = env = TimestepWrapper(LogWrapper(env), autoreset=True)
@@ -354,7 +313,7 @@ def run_single(config: dict, save_path: str = None):
     train_fn = vbb.make_train(
       config=config,
       env=vec_env,
-      make_agent=qlearning_craftax.make_craftax_agent,
+      make_agent=qlearning_craftax.make_multigoal_craftax_agent,
       make_optimizer=qlearning_craftax.make_optimizer,
       make_loss_fn_class=qlearning_craftax.make_loss_fn_class,
       make_actor=qlearning_craftax.make_actor,
@@ -366,17 +325,17 @@ def run_single(config: dict, save_path: str = None):
       ObserverCls=craftax_observer.Observer,
       vmap_env=vmap_env,
     )
-  elif config["ALG"] == "qlearning_sf_aux":
+  elif config["ALG"] == "usfa":
     train_fn = vbb.make_train(
       config=config,
       env=vec_env,
-      make_agent=qlearning_sf_aux_craftax.make_craftax_agent,
-      make_optimizer=qlearning_sf_aux_craftax.make_optimizer,
-      make_loss_fn_class=qlearning_sf_aux_craftax.make_loss_fn_class,
-      make_actor=qlearning_sf_aux_craftax.make_actor,
-      make_logger=partial(
-        make_logger, learner_log_extra=qlearning_craftax.learner_log_extra
+      make_agent=functools.partial(
+        usfa.make_multigoal_craftax_agent, train_tasks=train_tasks
       ),
+      make_optimizer=usfa.make_optimizer,
+      make_loss_fn_class=usfa.make_loss_fn_class,
+      make_actor=usfa.make_actor,
+      make_logger=partial(make_logger, learner_log_extra=usfa.learner_log_extra),
       train_env_params=env_params,
       test_env_params=test_env_params,
       ObserverCls=craftax_observer.Observer,
@@ -395,21 +354,8 @@ def run_single(config: dict, save_path: str = None):
       ObserverCls=craftax_observer.Observer,
       vmap_env=vmap_env,
     )
-  elif config["ALG"] == "alphazero":
-    train_fn = alphazero_craftax.make_train(
-      config=config,
-      env=vec_env,
-      model_env=env,
-      make_logger=partial(
-        make_logger, learner_log_extra=alphazero_craftax.learner_log_extra
-      ),
-      train_env_params=env_params,
-      test_env_params=test_env_params,
-      ObserverCls=craftax_observer.Observer,
-      vmap_env=vmap_env,
-    )
   elif config["ALG"] in ["preplay"]:
-    train_fn = multitask_preplay_craftax_v2.make_train(
+    train_fn = multitask_preplay_craftax_v2.make_train_multigoal(
       config=config,
       env=vec_env,
       model_env=env,
@@ -417,35 +363,6 @@ def run_single(config: dict, save_path: str = None):
         make_logger,
         learner_log_extra=multitask_preplay_craftax_v2.learner_log_extra,
       ),
-      train_env_params=env_params,
-      test_env_params=test_env_params,
-      ObserverCls=craftax_observer.Observer,
-      vmap_env=vmap_env,
-    )
-  elif config["ALG"] == "pqn":
-    constructor = get_pqn_fns(config)
-    train_fn = vpq.make_train(
-      config=config,
-      env=vec_env,
-      make_agent=constructor.make_agent,
-      make_optimizer=constructor.make_optimizer,
-      make_loss_fn_class=constructor.make_loss_fn_class,
-      make_actor=constructor.make_actor,
-      make_logger=make_logger,
-      train_env_params=env_params,
-      test_env_params=test_env_params,
-      ObserverCls=craftax_observer.Observer,
-      vmap_env=vmap_env,
-    )
-  elif config["ALG"] == "usfa":
-    train_fn = vbb.make_train(
-      config=config,
-      env=vec_env,
-      make_agent=usfa.make_craftax_agent,
-      make_optimizer=usfa.make_optimizer,
-      make_loss_fn_class=usfa.make_loss_fn_class,
-      make_actor=usfa.make_actor,
-      make_logger=partial(make_logger, learner_log_extra=usfa.learner_log_extra),
       train_env_params=env_params,
       test_env_params=test_env_params,
       ObserverCls=craftax_observer.Observer,
@@ -502,182 +419,54 @@ def sweep(search: str = ""):
     sweep_config = {
       "metric": metric,
       "parameters": {
-        # "ENV": {'values': ['craftax']},
-        "NUM_ENV_SEEDS": {"values": [0]},
-        "SEED": {"values": list(range(1, 2))},
+        "ALG": {"values": ["qlearning"]},
+        "SEED": {"values": list(range(1, 3))},
+        "FIXED_EPSILON": {"values": [0]},
       },
-      "overrides": ["alg=ql", "rlenv=craftax-10m", "user=wilka"],
-      "group": "ql-24-achievable",
-    }
-  elif search == "ql_sf":
-    sweep_config = {
-      "metric": metric,
-      "parameters": {
-        "ALG": {"values": ["qlearning_sf_aux"]},
-        # "ENV": {'values': ['craftax']},
-        "SEED": {"values": list(range(1, 2))},
-        "NUM_ENV_SEEDS": {"values": [0]},
-        "NUM_ENVS": {"values": [128]},
-        "AUX_COEFF": {"values": [1e-6, 1e-7]},
-        "USE_PRECONDITION": {"values": [True]},
-      },
-      "overrides": ["alg=ql", "rlenv=craftax-10m", "user=wilka"],
-      "group": "ql-sf-16-achievable",
+      "overrides": ["alg=ql", "rlenv=craftax-multigoal", "user=wilka"],
+      "group": "ql-testing-4",
     }
   elif search == "usfa":
     sweep_config = {
       "metric": metric,
       "parameters": {
-        "NUM_ENV_SEEDS": {"values": [0]},
-        "NUM_ENVS": {"values": [128]},
-        "USE_PRECONDITION": {"values": [True]},
-        "AUX_COEFF": {"values": [1e-5, 1e-6]},
-        "MAX_PRIORITY_WEIGHT": {"values": [0.0, 0.9]},
-        "IMPORTANCE_SAMPLING_EXPONENT": {"values": [0.0, 0.6]},
+        "ALG": {"values": ["usfa"]},
+        "SEED": {"values": list(range(1, 3))},
+        "FIXED_EPSILON": {"values": [0]},
       },
-      "overrides": ["alg=usfa_craftax", "rlenv=craftax-10m", "user=wilka"],
-      "group": "usfa-10-achievable",
+      "overrides": ["alg=usfa_craftax", "rlenv=craftax-multigoal", "user=wilka"],
+      "group": "usfa-testing-4",
+    }
+  elif search == "dyna":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["dyna"]},
+        "SEED": {"values": list(range(1, 3))},
+        "FIXED_EPSILON": {"values": [1, 2]},
+      },
+      "overrides": ["alg=dyna", "rlenv=craftax-dyna-multigoal", "user=wilka"],
+      "group": "dyna-testing-4",
+    }
+  elif search == "preplay":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["preplay"]},
+        "SEED": {"values": list(range(1, 2))},
+        "SHARE_Q_FN": {"values": [True, False]},
+        #"WINDOW_SIZE": {"values": [.5, 1.0]},
+        "NUM_PRED_LAYERS": {"values": [2, 3]},
+        "OBS_INCLUDE_GOAL": {"values": [True, False]},
+        "OPTIMISTIC_RESET_RATIO": {"values": [1]},
+      },
+      "overrides": ["alg=preplay", "rlenv=craftax-dyna-multigoal", "user=wilka"],
+      "group": "preplay-testing-6",
     }
 
-  elif search == "alphazero":
-    sweep_config = {
-      "metric": metric,
-      "parameters": {
-        "NUM_ENV_SEEDS": {"values": [0]},
-        "NUM_SIMULATIONS": {"values": [2]},
-        "GUMBEL_SCALE": {"values": [1.0, 0.1, 10.0]},
-        "value_coef": {"values": [0.25, 1.0, 0.025]},
-        "MAX_PRIORITY_WEIGHT": {"values": [0.0]},
-        "IMPORTANCE_SAMPLING_EXPONENT": {"values": [0.0]},
-        # "MAX_VALUE": {'values': [10, 20]},
-        # "SAMPLE_LENGTH": {'values': [40, 60, 80]},
-      },
-      "overrides": ["alg=alphazero", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "alphazero-4",
-    }
-  elif search == "dyna":
-    sweep_config = {
-      "metric": metric,
-      "parameters": {
-        "ALG": {"values": ["dyna"]},
-        "SEED": {"values": list(range(1, 4))},
-        "NUM_ENV_SEEDS": {"values": [128]},
-        "NUM_SIMULATIONS": {"values": [4]},
-        "FIXED_EPSILON": {"values": [2]},
-      },
-      "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "dyna-19-epsilon",
-    }
-  elif search == "preplay":
-    sweep_config = {
-      "metric": metric,
-      "parameters": {
-        "ALG": {"values": ["preplay"]},
-        "SEED": {"values": list(range(1, 4))},
-        "NUM_ENV_SEEDS": {"values": [128]},
-        # "NUM_AUX_LAYERS": {'values': [1,2]},
-        "SUBTASK_COEFF": {"values": [2]},
-        "OFFTASK_COEFF": {"values": [1e-1]},
-        # "LR": {'values': [0.0003, 0.00003]},
-        # "INCLUDE_ACHIEVABLE": {'values': [True, False]},
-        # "NUM_OFFTASK_GOALS": {'values': [1, 4]},
-      },
-      "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "preplay-19-subtask-coeff",
-    }
-  elif search == "dyna":
-    sweep_config = {
-      "metric": metric,
-      "parameters": {
-        "ALG": {"values": ["dyna"]},
-        "SEED": {"values": list(range(1, 2))},
-        "NUM_ENV_SEEDS": {"values": [0]},
-        "NUM_SIMULATIONS": {"values": [1]},
-      },
-      "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "dyna-17-duelling",
-    }
-  elif search == "preplay":
-    sweep_config = {
-      "metric": metric,
-      "parameters": {
-        "ALG": {"values": ["preplay"]},
-        "SEED": {"values": list(range(1, 2))},
-        "NUM_ENV_SEEDS": {"values": [0]},
-      },
-      "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "preplay-15-sim-policy",
-    }
-  elif search == "pqn":
-    sweep_config = {
-      "metric": metric,
-      "parameters": {
-        "FIXED_EPSILON": {"values": [0, 2]},
-        "LAMBDA": {"values": [0.95, 0.5]},
-        "MAX_GRAD_NORM": {"values": [0.5, 10]},
-        "LR_LINEAR_DECAY": {"values": [True, False]},
-        "LR": {"values": [0.001, 0.0003]},
-        "NUM_ENVS": {"values": [256]},
-      },
-      "overrides": ["alg=pqn-craftax", "rlenv=craftax-10m", "user=wilka"],
-      "group": "pqn-7",
-    }
   ############################################################
   # More "final" experiments
   ############################################################
-  elif search == "ql-final":
-    sweep_config = {
-      "metric": metric,
-      "parameters": {
-        "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512, 1024]},
-        "SEED": {"values": list(range(1, 6))},
-      },
-      "overrides": ["alg=ql", "rlenv=craftax-10m", "user=wilka"],
-      "group": "ql-final-2",
-    }
-  elif search == "ql_sf-final":
-    sweep_config = {
-      "metric": metric,
-      "parameters": {
-        "ALG": {"values": ["qlearning_sf_aux"]},
-        "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512, 1024]},
-        "SEED": {"values": list(range(1, 6))},
-      },
-      "overrides": ["alg=ql", "rlenv=craftax-10m", "user=wilka"],
-      "group": "ql-sf-final-2",
-    }
-  elif search == "dyna-final":
-    sweep_config = {
-      "metric": metric,
-      "parameters": {
-        "ALG": {"values": ["dyna"]},
-        "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512, 1024]},
-        "SEED": {"values": list(range(1, 6))},
-      },
-      "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "dyna-final-2",
-    }
-  elif search == "preplay-final":
-    sweep_config = {
-      "metric": metric,
-      "parameters": {
-        "ALG": {"values": ["preplay"]},
-        "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512, 1024]},
-        "SEED": {"values": list(range(1, 6))},
-      },
-      "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "preplay-final-2",
-    }
-  # elif search == 'alphazero-eval':
-  #  sweep_config = {
-  #      'metric': metric,
-  #      'parameters': {
-  #          "NUM_ENV_SEEDS": {'values': [32]},
-  #          "SEED": {'values': list(range(1,11))},
-  #      },
-  #      'overrides': ['alg=alphazero', 'rlenv=craftax-1m-dyna', 'user=wilka'],
-  #      'group': 'alphazero-eval-3',
-  #  }
   else:
     raise NotImplementedError(search)
 

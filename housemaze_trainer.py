@@ -45,7 +45,7 @@ from jaxneurorl import loggers
 
 import alphazero
 import qlearning_housemaze
-import housemaze_usfa
+import usfa_housemaze
 import multitask_preplay_housemaze
 import networks
 import housemaze_observer as humansf_observers
@@ -132,13 +132,13 @@ def get_sf_fns(
   train_tasks = jnp.array([env.task_runner.task_vector(o) for o in train_objects])
   return AlgorithmConstructor(
     make_agent=functools.partial(
-      housemaze_usfa.make_agent,
+      usfa_housemaze.make_agent,
       train_tasks=train_tasks,
       ObsEncoderCls=HouzemazeObsEncoder,
     ),
-    make_optimizer=housemaze_usfa.make_optimizer,
-    make_loss_fn_class=housemaze_usfa.make_loss_fn_class,
-    make_actor=functools.partial(housemaze_usfa.make_actor, remove_gpi_dim=False),
+    make_optimizer=usfa_housemaze.make_optimizer,
+    make_loss_fn_class=usfa_housemaze.make_loss_fn_class,
+    make_actor=functools.partial(usfa_housemaze.make_actor, remove_gpi_dim=False),
   )
 
 
@@ -364,9 +364,9 @@ def run_single(config: dict, save_path: str = None):
     train_tasks = jnp.array([env.task_runner.task_vector(o) for o in train_objects])
 
     make_train = functools.partial(
-      housemaze_usfa.make_train,
+      usfa_housemaze.make_train,
       make_agent=functools.partial(
-        housemaze_usfa.make_agent,
+        usfa_housemaze.make_agent,
         train_tasks=train_tasks,
         ObsEncoderCls=HouzemazeObsEncoder,
       ),
@@ -377,7 +377,7 @@ def run_single(config: dict, save_path: str = None):
         get_task_name=get_task_name,
         action_names=action_names,
         learner_log_extra=functools.partial(
-          housemaze_usfa.learner_log_extra,
+          usfa_housemaze.learner_log_extra,
           config=config,
           action_names=action_names,
           extract_task_info=extract_task_info,
@@ -462,46 +462,46 @@ def run_single(config: dict, save_path: str = None):
   elif alg_name in ("dynaq", "dynaq_shared"):
     import distrax
 
-    sim_policy = config["SIM_POLICY"]
+    # sim_policy = config["SIM_POLICY"]
     num_simulations = config["NUM_SIMULATIONS"]
-    if sim_policy == "gamma":
-      temp_dist = distrax.Gamma(
-        concentration=config["TEMP_CONCENTRATION"], rate=config["TEMP_RATE"]
+    # if sim_policy == "gamma":
+    #  temp_dist = distrax.Gamma(
+    #    concentration=config["TEMP_CONCENTRATION"], rate=config["TEMP_RATE"]
+    #  )
+
+    #  rng, rng_ = jax.random.split(rng)
+    #  temperatures = temp_dist.sample(seed=rng_, sample_shape=(num_simulations - 1,))
+    #  temperatures = jnp.concatenate((temperatures, jnp.array((1e-5,))))
+    #  greedy_idx = int(temperatures.argmin())
+
+    #  def simulation_policy(preds: struct.PyTreeNode, sim_rng: jax.Array):
+    #    q_values = preds.q_vals
+    #    assert q_values.shape[0] == temperatures.shape[0]
+    #    logits = q_values / jnp.expand_dims(temperatures, -1)
+    #    return distrax.Categorical(logits=logits).sample(seed=sim_rng)
+
+    # elif sim_policy == "epsilon":
+    epsilon_setting = config["SIM_EPSILON_SETTING"]
+    if epsilon_setting == 1:
+      vals = np.logspace(num=256, start=1, stop=3, base=0.1)
+    elif epsilon_setting == 2:
+      vals = np.logspace(num=256, start=0.05, stop=0.9, base=0.1)
+    elif epsilon_setting == 3:
+      vals = np.ones(256) * 0.9
+    epsilons = jax.random.choice(rng, vals, shape=(num_simulations - 1,))
+    epsilons = jnp.concatenate((jnp.zeros(1), epsilons))
+    greedy_idx = int(epsilons.argmin())
+
+    def simulation_policy(preds: struct.PyTreeNode, sim_rng: jax.Array):
+      q_values = preds.q_vals
+      assert q_values.shape[0] == epsilons.shape[0]
+      sim_rng = jax.random.split(sim_rng, q_values.shape[0])
+      return jax.vmap(qlearning_housemaze.epsilon_greedy_act, in_axes=(0, 0, 0))(
+        q_values, epsilons, sim_rng
       )
 
-      rng, rng_ = jax.random.split(rng)
-      temperatures = temp_dist.sample(seed=rng_, sample_shape=(num_simulations - 1,))
-      temperatures = jnp.concatenate((temperatures, jnp.array((1e-5,))))
-      greedy_idx = int(temperatures.argmin())
-
-      def simulation_policy(preds: struct.PyTreeNode, sim_rng: jax.Array):
-        q_values = preds.q_vals
-        assert q_values.shape[0] == temperatures.shape[0]
-        logits = q_values / jnp.expand_dims(temperatures, -1)
-        return distrax.Categorical(logits=logits).sample(seed=sim_rng)
-
-    elif sim_policy == "epsilon":
-      epsilon_setting = config["SIM_EPSILON_SETTING"]
-      if epsilon_setting == 1:
-        vals = np.logspace(num=256, start=1, stop=3, base=0.1)
-      elif epsilon_setting == 2:
-        vals = np.logspace(num=256, start=0.05, stop=0.9, base=0.1)
-      elif epsilon_setting == 3:
-        vals = np.ones(256) * 0.9
-      epsilons = jax.random.choice(rng, vals, shape=(num_simulations - 1,))
-      epsilons = jnp.concatenate((jnp.zeros(1), epsilons))
-      greedy_idx = int(epsilons.argmin())
-
-      def simulation_policy(preds: struct.PyTreeNode, sim_rng: jax.Array):
-        q_values = preds.q_vals
-        assert q_values.shape[0] == epsilons.shape[0]
-        sim_rng = jax.random.split(sim_rng, q_values.shape[0])
-        return jax.vmap(qlearning_housemaze.epsilon_greedy_act, in_axes=(0, 0, 0))(
-          q_values, epsilons, sim_rng
-        )
-
-    else:
-      raise NotImplementedError
+    # else:
+    #  raise NotImplementedError
 
     def make_init_offtask_timestep(x: multitask_env.TimeStep, offtask_w: jax.Array):
       task_object = (task_objects * offtask_w).sum(-1)
@@ -671,77 +671,65 @@ def sweep(search: str = ""):
       "overrides": ["alg=preplay", "rlenv=housemaze", "user=wilka"],
       "group": "dynaq-big-6",
     }
-  # elif search == 'pqn':
-  #  sweep_config = {
-  #      'metric': {
-  #          'name': 'evaluator_performance/0.0 avg_episode_return',
-  #          'goal': 'maximize',
-  #      },
-  #      'parameters': {
-  #          "env.exp": {'values': [
-  #              'maze3_open',
-  #          ]},
-  #          "BATCH_SIZE": {'values': [512*128, 256*128, 128*128]},
-  #          "NORM_TYPE": {'values': ['layer_norm', 'none']},
-  #          "NORM_QFN": {'values': ['layer_norm', 'none']},
-  #          "TOTAL_TIMESTEPS": {'values': [100_000_000]},
-  #      },
-  #      'overrides': ['alg=pqn', 'rlenv=housemaze', 'user=wilka'],
-  #      'group': 'pqn-7',
-  #  }
-  # elif search == 'alpha':
-  #  sweep_config = {
-  #      'metric': {
-  #          'name': 'evaluator_performance/0.0 avg_episode_return',
-  #          'goal': 'maximize',
-  #      },
-  #      'parameters': {
-  #          "config_name": {'values': ['alpha_housemaze']},
-  #          'TOTAL_TIMESTEPS': {'values': [5e6]},
-  #      }
-  #  }
-  # elif search == 'dynaq_replay':
-  #  sweep_config = {
-  #     'metric': {
-  #          'name': 'evaluator_performance/0.0 avg_episode_return',
-  #          'goal': 'maximize',
-  #      },
-  #      'parameters': {
-  #          #'TOTAL_TIMESTEPS': {'values': [5e6]},
-  #          'ACTIVATION': {'values': ['leaky_relu', 'relu', 'tanh']},
-  #          'DYNA_ONLINE_COEFF': {'values': [1., .1, .01]},
-  #          'NUM_EXTRA_SAVE': {'values': [0]},
-  #          "NUM_EMBED_LAYERS": {'values': [0]},
-  #          "NUM_MLP_LAYERS": {'values': [0]},
-  #          "AGENT_RNN_DIM": {'values': [128, 256]},
-  #          "NUM_Q_LAYERS": {'values': [1, 2, 3]},
-  #          "env.exp": {'values': [
-  #            #'maze3_randomize',
-  #            'maze3_open',
-  #            'maze1_all',
-  #          ]},
-  #          #'LR_LINEAR_DECAY': {'values': [False, True]},
-  #      },
-  #      'overrides': ['alg=preplay_replay_split',
-  #                    'rlenv=housemaze',
-  #                    'user=wilka'],
-  #      'group': 'dynaq-29',
-  #  }
-  # elif search == 'test':
-  #  sweep_config = {
-  #     'metric': {
-  #          'name': 'evaluator_performance/0.0 avg_episode_return',
-  #          'goal': 'maximize',
-  #      },
-  #      'parameters': {
-  #          #'TOTAL_TIMESTEPS': {'values': [5e6]},
-  #          'DYNA_COEFF': {'values': [1, .1]},
-  #      },
-  #      'overrides': ['alg=preplay_replay_split',
-  #                    'rlenv=housemaze',
-  #                    'user=wilka'],
-  #      'group': 'dynaq-15',
-  #  }
+  # =================================================================
+  # final
+  # =================================================================
+  elif search == "ql-final":
+    sweep_config = {
+      "metric": {
+        "name": "evaluator_performance/0.0 avg_episode_return",
+        "goal": "maximize",
+      },
+      "parameters": {
+        "SEED": {"values": list(range(1, 11))},
+        "env.exp": {"values": ["exp2"]},
+      },
+      "overrides": ["alg=ql", "rlenv=housemaze", "user=wilka"],
+      "group": "ql-final-1",
+    }
+  elif search == "usfa-final":
+    sweep_config = {
+      "metric": {
+        "name": "evaluator_performance/0.0 avg_episode_return",
+        "goal": "maximize",
+      },
+      "parameters": {
+        "SEED": {"values": list(range(1, 11))},
+        "env.exp": {"values": ["exp2"]},
+      },
+      "overrides": ["alg=usfa", "rlenv=housemaze", "user=wilka"],
+      "group": "usfa-final-1",
+    }
+  elif search == "dyna-final":
+    sweep_config = {
+      "metric": {
+        "name": "evaluator_performance/0.0 avg_episode_return",
+        "goal": "maximize",
+      },
+      "parameters": {
+        "ALG": {"values": ["dynaq_shared"]},
+        "SEED": {"values": list(range(1, 11))},
+        "env.exp": {"values": ["exp2"]},
+      },
+      "overrides": ["alg=dyna", "rlenv=housemaze", "user=wilka"],
+      "group": "dyna-final-1",
+    }
+  elif search == "preplay-final":
+    sweep_config = {
+      "metric": {
+        "name": "evaluator_performance/0.0 avg_episode_return",
+        "goal": "maximize",
+      },
+      "parameters": {
+        "ALG": {"values": ["dynaq_shared"]},
+        "SEED": {"values": list(range(1, 11))},
+        "OFFTASK_COEFF": {"values": [1.0]},
+        "env.exp": {"values": ["exp2"]},
+      },
+      "overrides": ["alg=preplay", "rlenv=housemaze", "user=wilka"],
+      "group": "preplay-final-2",
+    }
+
   else:
     raise NotImplementedError(search)
 

@@ -6,7 +6,7 @@ from craftax.craftax import constants
 from craftax.craftax.constants import Action
 
 from jaxneurorl.agents.usfa import *
-from networks import CraftaxObsEncoder
+from networks import CraftaxObsEncoder, CraftaxMultiGoalObsEncoder
 
 
 def render_fn(state):
@@ -39,9 +39,12 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
     target_sf = target_preds.sf  # [T+1, B, N, A, C]
 
     # NOTE: main change was to concat these
-    achievements = data.timestep.observation.achievements.astype(online_sf.dtype)
-    achievable = data.timestep.observation.achievable.astype(online_sf.dtype)
-    cumulants = jnp.concatenate((achievements, achievable), axis=-1)
+    if hasattr(data.timestep.observation, "achievements"):
+      achievements = data.timestep.observation.achievements.astype(online_sf.dtype)
+      achievable = data.timestep.observation.achievable.astype(online_sf.dtype)
+      cumulants = jnp.concatenate((achievements, achievable), axis=-1)
+    else:
+      cumulants = self.extract_cumulants(data)
     cumulants = cumulants - self.step_cost / cumulants.shape[-1]
 
     # Get selector actions from online Q-values for double Q-learning
@@ -336,6 +339,47 @@ def make_craftax_agent(
   return agent, network_params, reset_fn
 
 
+def make_multigoal_craftax_agent(
+  config: dict,
+  env: environment.Environment,
+  env_params: environment.EnvParams,
+  example_timestep: TimeStep,
+  rng: jax.random.PRNGKey,
+  train_tasks: Optional[jnp.ndarray],
+) -> Tuple[nn.Module, Params, vbb.AgentResetFn]:
+  sf_head = SfGpiHead(
+    num_actions=env.action_space(env_params).n,
+    state_features_dim=example_timestep.observation.task_w.shape[-1],
+    nsamples=config.get("NSAMPLES", 1),
+    eval_task_support=config.get("EVAL_TASK_SUPPORT", "eval"),
+    train_tasks=train_tasks,
+    num_layers=config.get("NUM_SF_LAYERS", 2),
+    hidden_dim=config.get("SF_HIDDEN_DIM", 512),
+  )
+
+  agent = UsfaAgent(
+    observation_encoder=CraftaxMultiGoalObsEncoder(
+      hidden_dim=config["MLP_HIDDEN_DIM"],
+      num_layers=config["NUM_MLP_LAYERS"],
+      activation=config["ACTIVATION"],
+      norm_type=config.get("NORM_TYPE", "none"),
+    ),
+    rnn=vbb.ScannedRNN(hidden_dim=config["AGENT_RNN_DIM"]),
+    sf_head=sf_head,
+  )
+
+  rng, _rng = jax.random.split(rng)
+  network_params = agent.init(_rng, example_timestep, method=agent.initialize)
+
+  def reset_fn(params, example_timestep, reset_rng):
+    batch_dims = (example_timestep.reward.shape[0],)
+    return agent.apply(
+      params, batch_dims=batch_dims, rng=reset_rng, method=agent.initialize_carry
+    )
+
+  return agent, network_params, reset_fn
+
+
 # only redoing this
 def learner_log_extra(
   data: dict,
@@ -482,6 +526,11 @@ def learner_log_extra(
       title = f"t={i}\n"
       title += f"{actions_taken[i]}\n"
       title += f"r={timesteps.reward[i]}, $\\gamma={timesteps.discount[i]}$"
+      if hasattr(timesteps.state, "current_goal"):
+        start_location = timesteps.state.start_position
+        goal = timesteps.state.current_goal
+        goal_name = Achievement(goal).name
+        title += f"\nstart={start_location}\ngoal={goal}\ngoal={goal_name}"
       return title
 
     fig = plot_frames(
@@ -491,7 +540,7 @@ def learner_log_extra(
       ncols=6,
     )
     if wandb.run is not wandb.sdk.lib.disabled.RunDisabled:
-      wandb.log({f"learner_example/trajecotry": wandb.Image(fig)})
+      wandb.log({"learner_example/trajectory": wandb.Image(fig)})
     plt.close(fig)
 
   # this will be the value after update is applied

@@ -23,7 +23,7 @@ from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
 from jaxneurorl.agents.qlearning import *
 from jaxneurorl import losses
-from networks import CraftaxObsEncoder
+from networks import CraftaxObsEncoder, CraftaxMultiGoalObsEncoder
 
 MAX_REWARD = 1.0
 
@@ -35,8 +35,8 @@ RNNInput = vbb.RNNInput
 
 class Predictions(NamedTuple):
   q_vals: jax.Array
-  achievements: jax.Array
   rnn_states: jax.Array
+  achievements: jax.Array = None
 
 
 class RnnAgent(nn.Module):
@@ -53,7 +53,7 @@ class RnnAgent(nn.Module):
   observation_encoder: nn.Module
   rnn: vbb.ScannedRNN
   q_fn: nn.Module
-  achieve_fn: nn.Module
+  achieve_fn: nn.Module = None
 
   def initialize(self, x: TimeStep):
     """Only used for initialization."""
@@ -72,8 +72,18 @@ class RnnAgent(nn.Module):
     new_rnn_state, rnn_out = self.rnn(rnn_state, rnn_in, _rng)
 
     q_vals = self.q_fn(rnn_out)
-    achieve_vals = self.achieve_fn(rnn_out)
-    return Predictions(q_vals, achieve_vals, rnn_out), new_rnn_state
+    if self.achieve_fn is not None:
+      achieve_vals = self.achieve_fn(rnn_out)
+      return Predictions(
+        q_vals=q_vals,
+        achievements=achieve_vals,
+        rnn_states=rnn_out,
+      ), new_rnn_state
+    else:
+      return Predictions(
+        q_vals=q_vals,
+        rnn_states=rnn_out,
+      ), new_rnn_state
 
   def unroll(self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey):
     # rnn_state: [B]
@@ -86,8 +96,11 @@ class RnnAgent(nn.Module):
     new_rnn_state, rnn_out = self.rnn.unroll(rnn_state, rnn_in, _rng)
 
     q_vals = nn.BatchApply(self.q_fn)(rnn_out)
-    achieve_vals = nn.BatchApply(self.achieve_fn)(rnn_out)
-    return Predictions(q_vals, achieve_vals, rnn_out), new_rnn_state
+    if self.achieve_fn is not None:
+      achieve_vals = nn.BatchApply(self.achieve_fn)(rnn_out)
+      return Predictions(q_vals, achieve_vals, rnn_out), new_rnn_state
+    else:
+      return Predictions(q_vals, rnn_out), new_rnn_state
 
   def initialize_carry(self, *args, **kwargs):
     """Initializes the RNN state."""
@@ -315,6 +328,44 @@ def make_craftax_agent(
   return agent, network_params, reset_fn
 
 
+def make_multigoal_craftax_agent(
+  config: dict,
+  env: environment.Environment,
+  env_params: environment.EnvParams,
+  example_timestep: TimeStep,
+  rng: jax.random.PRNGKey,
+):
+  rnn = vbb.ScannedRNN(hidden_dim=config["AGENT_RNN_DIM"])
+
+  agent = RnnAgent(
+    observation_encoder=CraftaxMultiGoalObsEncoder(
+      hidden_dim=config["MLP_HIDDEN_DIM"],
+      num_layers=config["NUM_MLP_LAYERS"],
+      activation=config["ACTIVATION"],
+      norm_type=config.get("NORM_TYPE", "none"),
+      use_bias=config.get("USE_BIAS", True),
+      action_dim=env.action_space(env_params).n,
+    ),
+    rnn=rnn,
+    q_fn=DuellingMLP(
+      hidden_dim=config.get("Q_HIDDEN_DIM", 512),
+      num_layers=config.get("NUM_Q_LAYERS", 2),
+      out_dim=env.action_space(env_params).n,
+      use_bias=config.get("USE_BIAS", True),
+    ),
+  )
+  rng, _rng = jax.random.split(rng)
+  network_params = agent.init(_rng, example_timestep, method=agent.initialize)
+
+  def reset_fn(params, example_timestep, reset_rng):
+    batch_dims = (example_timestep.reward.shape[0],)
+    return agent.apply(
+      params, batch_dims=batch_dims, rng=reset_rng, method=agent.initialize_carry
+    )
+
+  return agent, network_params, reset_fn
+
+
 from craftax.craftax.constants import Action, BLOCK_PIXEL_SIZE_IMG, Achievement
 from craftax.craftax.renderer import render_craftax_pixels
 from visualizer import plot_frames
@@ -420,14 +471,20 @@ def learner_log_extra(data: dict, config: dict):
         f"\nr={timesteps.reward[i + 1]:.2f}, $\\gamma={timesteps.discount[i + 1]}$"
       )
 
-      achieved = timesteps.observation.achievements[i + 1]
-      if achieved.sum() > 1e-5:
-        achievement_idx = achieved.argmax()
-        try:
-          achievement = Achievement(achievement_idx).name
-          title += f"\n{achievement}"
-        except ValueError:
-          title += f"\nHealth?"
+      if hasattr(timesteps.observation, "achievements"):
+        achieved = timesteps.observation.achievements[i + 1]
+        if achieved.sum() > 1e-5:
+          achievement_idx = achieved.argmax()
+          try:
+            achievement = Achievement(achievement_idx).name
+            title += f"\n{achievement}"
+          except ValueError:
+            title += f"\nHealth?"
+      elif hasattr(timesteps.state, "current_goal"):
+        start_location = timesteps.state.start_position
+        goal = timesteps.state.current_goal
+        goal_name = Achievement(goal).name
+        title += f"\nstart={start_location}\ngoal={goal}\ngoal={goal_name}"
       return title
 
     fig = plot_frames(
@@ -437,7 +494,7 @@ def learner_log_extra(data: dict, config: dict):
       ncols=6,
     )
     if wandb.run is not wandb.sdk.lib.disabled.RunDisabled:
-      wandb.log({f"learner_example/trajecotry": wandb.Image(fig)})
+      wandb.log({"learner_example/trajectory": wandb.Image(fig)})
     plt.close(fig)
 
   # this will be the value after update is applied

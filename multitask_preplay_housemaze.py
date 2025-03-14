@@ -354,7 +354,7 @@ class OfftaskDyna(vbb.RecurrentLossFn):
         offtask_w = x_t.state.offtask_w
         x_t = self.make_init_offtask_timestep(x_t, offtask_w)
 
-      T, B = offtask_w.shape[:2]
+      T, B = td_error.shape
       rngs = jax.random.split(key_grad, T * B)
       rngs = rngs.reshape(T, B, -1)
 

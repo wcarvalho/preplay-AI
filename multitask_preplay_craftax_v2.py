@@ -28,12 +28,13 @@ matplotlib.use("Agg")
 import wandb
 
 import craftax_env
+import craftax_web_env
 
 from jaxneurorl import losses
 from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
 from jaxneurorl.agents import qlearning as base_agent
-from networks import MLP, CraftaxObsEncoder
+from networks import MLP, CraftaxObsEncoder, CraftaxMultiGoalObsEncoder
 
 from visualizer import plot_frames
 
@@ -180,6 +181,7 @@ def simulate_n_trajectories(
   use_offtask_policy: jax.Array = None,
   terminate_offtask: bool = False,
   subtask_coeff: float = 1.0,
+  make_init_goal_timestep = None,
 ):
   """
 
@@ -238,6 +240,9 @@ def simulate_n_trajectories(
 
     beta = jnp.zeros((), dtype=jnp.int32)  # scalar
     preds = Predictions(q_vals=get_q_vals(beta, lstm_out, w), state=lstm_state)
+
+    if make_init_goal_timestep is not None:
+      x = make_init_goal_timestep(x, w)
     return x, beta, lstm_state, preds
 
   # by giving state as input and returning, will
@@ -405,6 +410,10 @@ class DynaLossFn(vbb.RecurrentLossFn):
 
   dyna_policy: SimPolicy = None
   offtask_dyna_policy: SimPolicy = None
+  sample_goals: Callable = None
+  compute_rewards: Callable = None
+  get_main_goal: Callable = None
+  make_init_goal_timestep: Callable = None
 
   def loss_fn(
     self,
@@ -573,11 +582,16 @@ class DynaLossFn(vbb.RecurrentLossFn):
         h_tm1 (jax.Array): [D], rnn-state at t-1
         h_tm1_target (jax.Array): [D], rnn-state at t-1 from target network
     """
-    window_size = (
-      self.window_size
-      if isinstance(self.window_size, int)
-      else int(self.window_size * len(actions))
-    )
+    if not isinstance(self.window_size, (int, float)):
+      raise TypeError(
+        f"window_size must be an int or float, got {type(self.window_size)}"
+      )
+
+    if isinstance(self.window_size, int):
+      window_size = self.window_size
+    else:
+      # float (i.e. percent)
+      window_size = int(self.window_size * len(actions))
     window_size = min(window_size, len(actions))
 
     roll = partial(rolling_window, size=window_size)
@@ -588,6 +602,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
       num_steps=self.simulation_length,
       terminate_offtask=self.terminate_offtask,
       subtask_coeff=self.subtask_coeff,
+      make_init_goal_timestep=self.make_init_goal_timestep,
     )
 
     # first do a rollowing window
@@ -615,6 +630,9 @@ class DynaLossFn(vbb.RecurrentLossFn):
         g (jax.Array): [num_offtask_goals, ...] off-task goals
         key (jax.random.PRNGKey): [2], random key for simulation
       """
+
+      #if self.make_init_goal_timestep is not None:
+      #  t = jax.vmap(self.make_init_goal_timestep)(t, g)
 
       # use same goal for all simulations
       # [G] --> [num_sims, G]
@@ -683,22 +701,22 @@ class DynaLossFn(vbb.RecurrentLossFn):
       # Get Off-task loss
       #########################################
       all_t_mask = simulation_finished_mask(l_mask, next_t)
+      offtask_reward = self.compute_rewards(all_t, g)
+      ## [T, K, D]
+      #achievements = all_t.observation.achievements.astype(jnp.float32)
+      ## [T, K, D]
+      #achievement_coefficients = all_t.observation.task_w.astype(jnp.float32)
+      ## [T, K, D]
+      #achievement_coefficients = achievement_coefficients[..., : g.shape[-1]]
 
-      # [T, K, D]
-      achievements = all_t.observation.achievements.astype(jnp.float32)
-      # [T, K, D]
-      achievement_coefficients = all_t.observation.task_w.astype(jnp.float32)
-      # [T, K, D]
-      achievement_coefficients = achievement_coefficients[..., : g.shape[-1]]
-
-      coeff_mask = g.astype(jnp.float32)
-      # coeff_time_mask = jnp.conj(
-      #   jnp.zeros_like(achievements)
-      # )
-      # [T, K, D] * [T, K, D] * [1, K, D] --> [T, K]
-      offtask_reward = (achievements * achievement_coefficients * coeff_mask[None]).sum(
-        -1
-      )
+      #coeff_mask = g.astype(jnp.float32)
+      ## coeff_time_mask = jnp.conj(
+      ##   jnp.zeros_like(achievements)
+      ## )
+      ## [T, K, D] * [T, K, D] * [1, K, D] --> [T, K]
+      #offtask_reward = (achievements * achievement_coefficients * coeff_mask[None]).sum(
+      #  -1
+      #)
 
       (
         offtask_batch_td_error,
@@ -728,9 +746,9 @@ class DynaLossFn(vbb.RecurrentLossFn):
       # offtask_metrics['1.achievable'] = achievable
       offtask_metrics["2.achievable_entropy"] = entropy
       offtask_metrics["2.any_achievable"] = any_achievable
-      offtask_metrics["2.num_achievable"] = all_t.observation.achievable.sum(
-        -1
-      )  # unnormalized
+      #offtask_metrics["2.num_achievable"] = all_t.observation.achievable.sum(
+      #  -1
+      #)  # unnormalized
 
       offtask_log_info["goal"] = g
       offtask_log_info["any_achievable"] = any_achievable
@@ -807,14 +825,12 @@ class DynaLossFn(vbb.RecurrentLossFn):
       key, key_ = jax.random.split(key)
       # [sim_length, num_sim, ...]
 
-      dummy_goal = jnp.zeros(
-        (self.num_dyna_simulations, t.observation.achievements[0].shape[-1])
-      )
+      main_goal = self.get_main_goal(t)
       next_t, sim_outputs_t = simulate(
         h_tm1=jax.tree.map(lambda x: x[-1], h_on),
         x_t=jax.tree.map(lambda x: x[-1], t),
         rng=key_,
-        goal=dummy_goal,
+        goal=main_goal,
         use_offtask_policy=jnp.zeros((1,)),
         num_simulations=self.num_dyna_simulations,
         policy_fn=self.dyna_policy,
@@ -835,7 +851,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
       online_preds = apply_rnn_and_q(
         h_tm1=h_htm1,
         timesteps=all_t,
-        task=dummy_goal,
+        task=main_goal,
         rng=key_,
         network=self.network,
         params=params,
@@ -848,7 +864,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
       target_preds = apply_rnn_and_q(
         h_tm1=h_htm1,
         timesteps=all_t,
-        task=dummy_goal,
+        task=main_goal,
         rng=key_,
         network=self.network,
         params=target_params,
@@ -882,23 +898,24 @@ class DynaLossFn(vbb.RecurrentLossFn):
       #########################################
       # First compute off-task loss
       #########################################
-      # sample goals available at last timestep in window
-      achievable = t.observation.achievable.astype(jnp.float32)
-      achievable = jax.tree.map(lambda x: x[-1], achievable)
-      any_achievable = achievable.sum() > 0.1
-      achieve_poss = achievable + 1e-5
-      achieve_poss = achieve_poss / achieve_poss.sum()
+      goals, achievable, any_achievable = self.sample_goals(t, key, self.num_offtask_goals)
+      ## sample goals available at last timestep in window
+      #achievable = t.observation.achievable.astype(jnp.float32)
+      #achievable = jax.tree.map(lambda x: x[-1], achievable)
+      #any_achievable = achievable.sum() > 0.1
+      #achieve_poss = achievable + 1e-5
+      #achieve_poss = achieve_poss / achieve_poss.sum()
 
-      # sample a different goal for each timestep in window
-      # [num_offtask_goals]
-      key, key_ = jax.random.split(key)
-      goals = distrax.Categorical(probs=achieve_poss).sample(
-        seed=key_, sample_shape=(self.num_offtask_goals)
-      )
+      ## sample a different goal for each timestep in window
+      ## [num_offtask_goals]
+      #key, key_ = jax.random.split(key)
+      #goals = distrax.Categorical(probs=achieve_poss).sample(
+      #  seed=key_, sample_shape=(self.num_offtask_goals)
+      #)
 
-      # [num_offtask_goals, G]
-      num_classes = t.observation.achievable.shape[-1]
-      goals = jax.nn.one_hot(goals, num_classes=num_classes)
+      ## [num_offtask_goals, G]
+      #num_classes = t.observation.achievable.shape[-1]
+      #goals = jax.nn.one_hot(goals, num_classes=num_classes)
 
       key, key_ = jax.random.split(key)
       # [num_offtask_goals, T', num_sim], # [num_offtask_goals, num_sim], ...
@@ -1130,33 +1147,57 @@ def learner_log_extra(
       return jax.tree.map(lambda x: x[idx], t)
 
     def panel_title_fn(timesteps, i):
-      goal_idx = goal.argmax(-1)
-      achievement = Achievement(goal_idx).name
-      title = f"{achievement}. t={i}"
-      title += f"\nA={actions_taken[i]}"
-      if i >= len(timesteps.reward) - 1:
-        return title
-      title += (
-        f"\nr={timesteps.reward[i + 1]:.2f}, $\\gamma={timesteps.discount[i + 1]}$"
-      )
-      title += f"\nr_off={offtask_reward[i + 1]:.2f}"
+      if hasattr(timesteps.observation, "achievements"):
+        goal_idx = goal.argmax(-1)
+        achievement = Achievement(goal_idx).name
+        title = f"{achievement}. t={i}"
+        title += f"\nA={actions_taken[i]}"
+        if i >= len(timesteps.reward) - 1:
+          return title
+        title += (
+          f"\nr={timesteps.reward[i + 1]:.2f}, $\\gamma={timesteps.discount[i + 1]}$"
+        )
+        title += f"\nr_off={offtask_reward[i + 1]:.2f}"
+        achieved = timesteps.observation.achievements[i + 1]
+        if achieved.sum() > 1e-5:
+          achievement_idx = achieved.argmax()
+          try:
+            achievement = Achievement(achievement_idx).name
+            title += f"\n{achievement}"
+          except ValueError:
+            title += f"\nHealth?"
+        achievable_list = craftax_env.print_possible_achievements(
+          timesteps.observation.achievable[i], return_list=True
+        )
 
-      achieved = timesteps.observation.achievements[i + 1]
-      if achieved.sum() > 1e-5:
-        achievement_idx = achieved.argmax()
-        try:
-          achievement = Achievement(achievement_idx).name
-          title += f"\n{achievement}"
-        except ValueError:
-          title += f"\nHealth?"
-      achievable_list = craftax_env.print_possible_achievements(
-        timesteps.observation.achievable[i], return_list=True
-      )
+        if achievable_list:
+          title += "\nAchievable:"
+          for name in achievable_list:
+            title += f"\n- {name}"
+      elif hasattr(timesteps.state.env_state, "current_goal"):
+        start_location = timesteps.state.env_state.start_position[i]
+        idx_to_achievement = {v: k for k, v in craftax_web_env.Achiement_to_idx.items()}
+        env_goal = timesteps.state.env_state.current_goal[i]
+        env_goal_name = Achievement(int(env_goal)).name
 
-      if achievable_list:
-        title += "\nAchievable:"
-        for name in achievable_list:
-          title += f"\n- {name}"
+        obs_goal = timesteps.observation.task_w[i]
+        obs_goal_idx = int(obs_goal.argmax(-1))
+        obs_goal_name = Achievement(idx_to_achievement[obs_goal_idx]).name
+        
+        sim_goal_idx = int(goal.argmax(-1))
+        sim_goal_name = Achievement(idx_to_achievement[sim_goal_idx]).name
+
+        title = f"t={i}"
+        title += f"\nA={actions_taken[i]}"
+        if i >= len(timesteps.reward) - 1:
+          return title
+        title += (
+          f"\nr={timesteps.reward[i + 1]:.2f}, $\\gamma={timesteps.discount[i + 1]}$"
+        )
+        title += f"\nstart={start_location}\ng={env_goal_name}\ng'={sim_goal_name}"
+
+        if obs_goal_name != env_goal_name:
+          title += f"\no={obs_goal_name}!= e={env_goal_name}"
 
       return title
 
@@ -1591,6 +1632,186 @@ def make_agent(
 
   return agent, network_params, reset_fn
 
+class DynaAgentEnvModelMultigoal(nn.Module):
+  """
+
+  Note: predictions contains rnn_state because when you use unroll, you only get the final rnn_state but predictions for all time-steps.
+
+  """
+
+  observation_encoder: nn.Module
+  rnn: vbb.ScannedRNN
+  q_fn: nn.Module
+  q_fn_subtask: nn.Module
+  env: environment.Environment
+  env_params: environment.EnvParams
+  share_q_fn: bool = True
+
+  def setup(self):
+    kernel_init = nn.initializers.variance_scaling(1.0, "fan_in", "normal", out_axis=0)
+    self.task_fn = nn.Dense(128, kernel_init=kernel_init)
+
+  def initialize(self, x: TimeStep):
+    """Only used for initialization."""
+    # [B, D]
+    rng = jax.random.PRNGKey(0)
+    batch_dims = (x.reward.shape[0],)
+    rnn_state = self.initialize_carry(rng, batch_dims)
+    _, rnn_state = self.__call__(rnn_state, x, rng)
+    # dummy_action = jnp.zeros(batch_dims, dtype=jnp.int32)
+    # self.apply_model(predictions.state, dummy_action, rng)
+    dummy_task = jnp.zeros_like(x.observation.state_features)
+    self.subtask_q_fn(rnn_state[1], dummy_task)
+
+  def initialize_carry(self, *args, **kwargs):
+    """Initializes the RNN state."""
+    return self.rnn.initialize_carry(*args, **kwargs)
+
+  def apply_rnn(self, rnn_state, x: TimeStep, rng: jax.random.PRNGKey):
+    embedding = self.observation_encoder(x.observation)
+    rnn_in = vbb.RNNInput(obs=embedding, reset=x.first())
+    rng, _rng = jax.random.split(rng)
+    return self.rnn(rnn_state, rnn_in, _rng)
+
+  def __call__(
+    self, rnn_state, x: TimeStep, rng: jax.random.PRNGKey
+  ) -> Tuple[Predictions, RnnState]:
+    new_rnn_state, rnn_out = self.apply_rnn(rnn_state, x, rng)
+
+    dummy_task = jnp.zeros_like(x.observation.state_features)
+    q_vals = self.reg_q_fn(rnn_out, dummy_task)
+    predictions = Predictions(q_vals=q_vals, state=new_rnn_state)
+
+    return predictions, new_rnn_state
+
+  def reg_q_fn(self, rnn_out, task):
+    task = self.task_fn(task)
+    inp = jnp.concatenate((rnn_out, task), axis=-1)
+    return self.q_fn(inp)
+
+  def subtask_q_fn(self, rnn_out, task):
+    if self.share_q_fn:
+      return self.reg_q_fn(rnn_out, task)
+    else:
+      task = self.task_fn(task)
+      inp = jnp.concatenate((rnn_out, task), axis=-1)
+      return self.q_fn_subtask(inp)
+
+  def unroll(
+    self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey
+  ) -> Tuple[Predictions, RnnState]:
+    # rnn_state: [B]
+    # xs: [T, B]
+
+    embedding = jax.vmap(self.observation_encoder)(xs.observation)
+
+    rnn_in = vbb.RNNInput(obs=embedding, reset=xs.first())
+    rng, _rng = jax.random.split(rng)
+
+    # [B, D], [T, B, D]
+    new_rnn_state, new_rnn_states = self.rnn.unroll(rnn_state, rnn_in, _rng)
+
+    dummy_task = jnp.zeros_like(xs.observation.state_features)
+    rnn_out = self.rnn.output_from_state(new_rnn_states)
+    q_vals = nn.BatchApply(self.reg_q_fn)(rnn_out, dummy_task)
+    predictions = Predictions(q_vals=q_vals, state=new_rnn_states)
+    return predictions, new_rnn_state
+
+  def apply_model(
+    self,
+    state: TimeStep,
+    action: jnp.ndarray,
+    rng: jax.random.PRNGKey,
+  ) -> Tuple[Predictions, RnnState]:
+    """This applies the model to each element in the state, action vectors.
+    Args:
+        state (State): states. [B, D]
+        action (jnp.ndarray): actions to take on states. [B]
+    Returns:
+        Tuple[ModelOutput, State]: muzero outputs and new states for
+          each state state action pair.
+    """
+    # take one step forward in the environment
+    B = action.shape[0]
+
+    def env_step(s, a, rng_):
+      return self.env.step(rng_, s, a, self.env_params)
+
+    return jax.vmap(env_step)(state, action, jax.random.split(rng, B))
+
+  def compute_reward(self, timestep, task):
+    return self.env.compute_reward(timestep, task, self.env_params)
+
+def make_multigoal_agent(
+  config: dict,
+  env: environment.Environment,
+  env_params: environment.EnvParams,
+  example_timestep: TimeStep,
+  rng: jax.random.PRNGKey,
+  model_env: Optional[environment.Environment] = None,
+  model_env_params: Optional[environment.EnvParams] = None,
+) -> Tuple[nn.Module, Params, vbb.AgentResetFn]:
+  model_env_params = model_env_params or env_params
+  cell_type = config.get("RNN_CELL_TYPE", "OptimizedLSTMCell")
+  if cell_type.lower() == "none":
+    rnn = vbb.DummyRNN()
+  else:
+    rnn = vbb.ScannedRNN(
+      hidden_dim=config.get("AGENT_RNN_DIM", 256),
+      cell_type=cell_type,
+      unroll_output_state=True,
+    )
+
+  if config.get("QHEAD_TYPE", "dot") == "dot":
+    QFnCls = DuellingDotMLP
+  elif config.get("QHEAD_TYPE", "dot") == "duelling":
+    QFnCls = DuellingMLP
+  else:
+    QFnCls = MLP
+
+  agent = DynaAgentEnvModelMultigoal(
+    observation_encoder=CraftaxMultiGoalObsEncoder(
+      hidden_dim=config["MLP_HIDDEN_DIM"],
+      num_layers=config["NUM_MLP_LAYERS"],
+      activation=config["ACTIVATION"],
+      norm_type=config.get("NORM_TYPE", "none"),
+      use_bias=config.get("USE_BIAS", True),
+      include_goal=config.get("OBS_INCLUDE_GOAL", False),
+      action_dim=env.action_space(env_params).n,
+    ),
+    rnn=rnn,
+    q_fn=QFnCls(
+      hidden_dim=config.get("Q_HIDDEN_DIM", 512),
+      num_layers=config.get("NUM_PRED_LAYERS", 1),
+      out_dim=env.action_space(env_params).n,
+      activation=config["ACTIVATION"],
+      activate_final=False,
+      use_bias=config.get("USE_BIAS", True),
+    ),
+    q_fn_subtask=QFnCls(
+      hidden_dim=config.get("Q_HIDDEN_DIM", 512),
+      num_layers=config.get("NUM_PRED_LAYERS", 0),
+      out_dim=env.action_space(env_params).n,
+      activation=config["ACTIVATION"],
+      activate_final=False,
+      use_bias=config.get("USE_BIAS", True),
+    ),
+    env=model_env,
+    env_params=model_env_params,
+    share_q_fn=config.get("SHARE_Q_FN", True),
+    #q_head_type=config.get("QHEAD_TYPE", "dot"),
+  )
+
+  rng, _rng = jax.random.split(rng)
+  network_params = agent.init(_rng, example_timestep, method=agent.initialize)
+
+  def reset_fn(params, example_timestep, reset_rng):
+    batch_dims = example_timestep.reward.shape
+    return agent.apply(
+      params, batch_dims=batch_dims, rng=reset_rng, method=agent.initialize_carry
+    )
+
+  return agent, network_params, reset_fn
 
 def make_train(**kwargs):
   config = kwargs["config"]
@@ -1628,6 +1849,53 @@ def make_train(**kwargs):
     return jax.vmap(base_agent.epsilon_greedy_act, in_axes=(0, 0, 0))(
       q_values, eps, sim_rng
     )
+  def sample_goals(timestep, key, num_offtask_goals):
+    # sample goals available at last timestep in window
+    # [T, G]
+    achievable = timestep.observation.achievable.astype(jnp.float32)
+
+    # [G]
+    achievable = jax.tree.map(lambda x: x[-1], achievable)
+    any_achievable = achievable.sum() > 0.1
+    achieve_poss = achievable + 1e-5
+    achieve_poss = achieve_poss / achieve_poss.sum()
+
+    # sample a different goal for each timestep in window
+    # [num_offtask_goals]
+    key, key_ = jax.random.split(key)
+    goals = distrax.Categorical(probs=achieve_poss).sample(
+      seed=key_, sample_shape=(num_offtask_goals)
+    )
+
+    # [num_offtask_goals, G]
+    num_classes = timestep.observation.achievable.shape[-1]
+    goals = jax.nn.one_hot(goals, num_classes=num_classes)
+    return goals, achievable, any_achievable
+    
+
+  def compute_rewards(timesteps, goal_onehot):
+    # [T, K, D]
+    achievements = timesteps.observation.achievements.astype(jnp.float32)
+    # [T, K, D]
+    achievement_coefficients = timesteps.observation.task_w.astype(jnp.float32)
+    # [T, K, D]
+    achievement_coefficients = achievement_coefficients[..., : goal_onehot.shape[-1]]
+
+    coeff_mask = goal_onehot.astype(jnp.float32)
+    # coeff_time_mask = jnp.conj(
+    #   jnp.zeros_like(achievements)
+    # )
+    # [T, K, D] * [T, K, D] * [1, K, D] --> [T, K]
+    offtask_reward = (achievements * achievement_coefficients * coeff_mask[None]).sum(
+      -1
+    )
+    return offtask_reward
+
+  num_dyna_simulations = config.get("NUM_DYNA_SIMULATIONS", 2)
+  def get_main_goal(timestep):
+    return jnp.zeros(
+        (num_dyna_simulations, timestep.observation.achievements[0].shape[-1])
+      )
 
   return vbb.make_train(
     make_agent=partial(make_agent, model_env=kwargs.pop("model_env")),
@@ -1635,6 +1903,114 @@ def make_train(**kwargs):
       make_loss_fn_class,
       dyna_policy=dyna_policy,
       offtask_dyna_policy=offtask_dyna_policy,
+      sample_goals=sample_goals,
+      compute_rewards=compute_rewards,
+      get_main_goal=get_main_goal,
+    ),
+    make_optimizer=base_agent.make_optimizer,
+    make_actor=make_actor,
+    **kwargs,
+  )
+
+def make_train_multigoal(**kwargs):
+  config = kwargs["config"]
+  rng = jax.random.PRNGKey(config["SEED"])
+
+  epsilon_setting = config["SIM_EPSILON_SETTING"]
+
+  if epsilon_setting == 1:
+    # ACME default
+    # range of ~(0.001, .1)
+    vals = np.logspace(num=256, start=1, stop=3, base=0.1)
+  elif epsilon_setting == 2:
+    # range of ~(.9,.1)
+    vals = np.logspace(num=256, start=0.05, stop=0.9, base=0.1)
+  elif epsilon_setting == 3:
+    # very random
+    vals = np.ones(256) * 0.9
+
+  num_offtask_simulations = config["NUM_OFFTASK_SIMULATIONS"]
+
+  assert config["NUM_DYNA_SIMULATIONS"] == 1
+
+  def dyna_policy(preds: Predictions, sim_rng: jax.Array):
+    del sim_rng
+    return jnp.argmax(preds.q_vals, axis=-1)
+
+  def offtask_dyna_policy(preds: Predictions, sim_rng: jax.Array):
+    q_values = preds.q_vals
+    sim_rng, sim_rng_ = jax.random.split(sim_rng)
+    epsilons = jax.random.choice(sim_rng_, vals, shape=(num_offtask_simulations - 1,))
+    epsilons = jnp.concatenate((jnp.array([0.0]), epsilons))
+    eps = epsilons[: q_values.shape[0]]
+    assert q_values.shape[0] == eps.shape[0]
+    sim_rng = jax.random.split(sim_rng, q_values.shape[0])
+    return jax.vmap(base_agent.epsilon_greedy_act, in_axes=(0, 0, 0))(
+      q_values, eps, sim_rng
+    )
+
+  def sample_goals(timestep, key, num_offtask_goals):
+    # [T, G] --> [G]
+    current_goal = timestep.observation.task_w[0]
+    other_goals = 1. - current_goal
+    other_goal_probs = other_goals/other_goals.sum()
+
+    achievable = jnp.ones_like(other_goal_probs)
+    any_achievable = achievable.sum() > 0.1
+
+    key, key_ = jax.random.split(key)
+    goals = distrax.Categorical(probs=other_goal_probs).sample(
+      seed=key_, sample_shape=(num_offtask_goals)
+    )
+
+    # [num_offtask_goals, G]
+    num_goals = timestep.observation.task_w.shape[-1]
+    goals = jax.nn.one_hot(goals, num_classes=num_goals)
+    return goals, achievable, any_achievable
+
+
+  def compute_rewards(timesteps, goal_onehot):
+    # [T, K, D]
+    state_features = timesteps.observation.state_features.astype(jnp.float32)
+    # [T, K, D] * [1, K, D] --> [T, K]
+    offtask_reward = (
+      state_features * goal_onehot.astype(jnp.float32)[None]
+      ).sum(-1)
+    return offtask_reward
+
+  num_dyna_simulations = config.get("NUM_DYNA_SIMULATIONS", 2)
+  def get_main_goal(timestep):
+    goal = timestep.observation.task_w[:1]
+    return jnp.tile(goal, (num_dyna_simulations, 1))
+
+  def make_init_goal_timestep(timestep, goal):
+    """
+    goal is 1-hot vector
+    """
+    achievement_goal = jax.lax.dynamic_index_in_dim(
+      craftax_web_env.IDX_to_Achievement,
+      goal.argmax(-1), keepdims=False)
+    new_state = timestep.state.replace(
+      env_state=timestep.state.env_state.replace(
+        current_goal=achievement_goal,
+      ),
+    )
+    new_observation = timestep.observation.replace(
+      task_w=goal,
+    )
+    return timestep.replace(state=new_state, observation=new_observation)
+
+
+  return vbb.make_train(
+    make_agent=partial(make_multigoal_agent, model_env=kwargs.pop("model_env")),
+    make_loss_fn_class=functools.partial(
+      make_loss_fn_class,
+      dyna_policy=dyna_policy,
+      offtask_dyna_policy=offtask_dyna_policy,
+      sample_goals=sample_goals,
+      compute_rewards=compute_rewards,
+      get_main_goal=get_main_goal,
+      make_init_goal_timestep=make_init_goal_timestep,
     ),
     make_optimizer=base_agent.make_optimizer,
     make_actor=make_actor,

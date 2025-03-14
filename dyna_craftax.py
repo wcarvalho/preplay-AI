@@ -31,7 +31,7 @@ from jaxneurorl import losses
 from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
 from jaxneurorl.agents import qlearning as base_agent
-from networks import MLP, CraftaxObsEncoder
+from networks import MLP, CraftaxObsEncoder, CraftaxMultiGoalObsEncoder
 
 from visualizer import plot_frames
 
@@ -764,14 +764,21 @@ def learner_log_extra(
         f"\nr={timesteps.reward[i + 1]:.2f}, $\\gamma={timesteps.discount[i + 1]}$"
       )
 
-      achieved = timesteps.observation.achievements[i + 1]
-      if achieved.sum() > 1e-5:
-        achievement_idx = achieved.argmax()
-        try:
-          achievement = Achievement(achievement_idx).name
-          title += f"\n{achievement}"
-        except ValueError:
-          title += f"\nHealth?"
+      if hasattr(timesteps.observation, "achievements"):
+        achieved = timesteps.observation.achievements[i + 1]
+        if achieved.sum() > 1e-5:
+          achievement_idx = achieved.argmax()
+          try:
+            achievement = Achievement(achievement_idx).name
+            title += f"\n{achievement}"
+          except ValueError:
+            title += f"\nHealth?"
+      elif hasattr(timesteps.state.env_state, "current_goal"):
+        start_location = timesteps.state.env_state.start_position
+        goal = timesteps.state.env_state.current_goal[i]
+        goal_name = Achievement(int(goal)).name
+        title += f"\nstart={start_location}\ngoal={goal}\ngoal={goal_name}"
+
       return title
 
     fig = plot_frames(
@@ -954,13 +961,75 @@ def make_agent(
       cell_type=cell_type,
       unroll_output_state=True,
     )
-  agent = DynaAgentEnvModel(
-    observation_encoder=CraftaxObsEncoder(
+  if config.get("MULTIGOAL", False):
+    observation_encoder = CraftaxMultiGoalObsEncoder(
+      hidden_dim=config["MLP_HIDDEN_DIM"],
+      num_layers=config["NUM_MLP_LAYERS"],
+      activation=config["ACTIVATION"],
+      norm_type=config.get("NORM_TYPE", "none"),
+    )
+  else:
+    observation_encoder = CraftaxObsEncoder(
       hidden_dim=config["MLP_HIDDEN_DIM"],
       num_layers=config["NUM_MLP_LAYERS"],
       activation=config["ACTIVATION"],
       norm_type=config.get("NORM_TYPE", "none"),
       structured_inputs=config.get("STRUCTURED_INPUTS", False),
+      use_bias=config.get("USE_BIAS", True),
+      action_dim=env.action_space(env_params).n,
+    )
+  agent = DynaAgentEnvModel(
+    observation_encoder=observation_encoder,
+    rnn=rnn,
+    q_fn=DuellingMLP(
+      hidden_dim=config.get("Q_HIDDEN_DIM", 512),
+      num_layers=config.get("NUM_Q_LAYERS", 1),
+      out_dim=env.action_space(env_params).n,
+      activation=config["ACTIVATION"],
+      activate_final=False,
+      use_bias=config.get("USE_BIAS", True),
+    ),
+    env=model_env,
+    env_params=model_env_params,
+  )
+
+  rng, _rng = jax.random.split(rng)
+  network_params = agent.init(_rng, example_timestep, method=agent.initialize)
+
+  def reset_fn(params, example_timestep, reset_rng):
+    batch_dims = example_timestep.reward.shape
+    return agent.apply(
+      params, batch_dims=batch_dims, rng=reset_rng, method=agent.initialize_carry
+    )
+
+  return agent, network_params, reset_fn
+
+
+def make_multigoal_agent(
+  config: dict,
+  env: environment.Environment,
+  env_params: environment.EnvParams,
+  example_timestep: TimeStep,
+  rng: jax.random.PRNGKey,
+  model_env: Optional[environment.Environment] = None,
+  model_env_params: Optional[environment.EnvParams] = None,
+) -> Tuple[nn.Module, Params, vbb.AgentResetFn]:
+  model_env_params = model_env_params or env_params
+  cell_type = config.get("RNN_CELL_TYPE", "OptimizedLSTMCell")
+  if cell_type.lower() == "none":
+    rnn = vbb.DummyRNN()
+  else:
+    rnn = vbb.ScannedRNN(
+      hidden_dim=config.get("AGENT_RNN_DIM", 256),
+      cell_type=cell_type,
+      unroll_output_state=True,
+    )
+  agent = DynaAgentEnvModel(
+    observation_encoder=CraftaxMultiGoalObsEncoder(
+      hidden_dim=config["MLP_HIDDEN_DIM"],
+      num_layers=config["NUM_MLP_LAYERS"],
+      activation=config["ACTIVATION"],
+      norm_type=config.get("NORM_TYPE", "none"),
       use_bias=config.get("USE_BIAS", True),
       action_dim=env.action_space(env_params).n,
     ),
