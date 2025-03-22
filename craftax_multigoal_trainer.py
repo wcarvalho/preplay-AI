@@ -17,21 +17,13 @@ python craftax_multigoal_trainer.py \
 
 import os
 
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-
-MAX_SCORE = 226.0
-
 
 import wandb
 from functools import partial
 from jaxneurorl import loggers
-from jaxneurorl import utils
 from jaxneurorl import launcher
-from jaxneurorl.agents import value_based_pqn as vpq
 from jaxneurorl.agents import value_based_basics as vbb
 from typing import Any, Callable, Dict, Union, Optional
-from craftax.craftax_env import make_craftax_env_from_name
-from craftax.craftax.constants import Achievement
 
 import jax
 import chex
@@ -69,6 +61,10 @@ from craftax_web_env import (
   CraftaxMultiGoalSymbolicWebEnvNoAutoReset,
   active_task_vectors,
 )
+
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+
+MAX_SCORE = 226.0
 
 
 @struct.dataclass
@@ -241,35 +237,17 @@ def craftax_experience_logger(
   ############################################################
   # LogWrapper logging
   ############################################################
-  key_fn = lambda k: f"{k}-{num_seeds}" if num_seeds is not None else k
-  main_key = key_fn(key)
-  ach_key = key_fn(f"{key}-achievements")
-
   log_state = trajectory.timestep.state
-  # [T, B, A]
-  achievements = trajectory.timestep.state.env_state.achievements
-
-  # [T, B]
-  done = trajectory.timestep.last()
-
-  achievements = achievements * done[:, :, None] * 100.0
-
   infos = {}
   infos[f"{main_key}/0.episode_return"] = log_state.returned_episode_returns
-  # infos[f"{main_key}/0.score"] = (
-  # log_state.returned_episode_returns / MAX_SCORE
-  # ) * 100.0
   infos[f"{main_key}/0.episode_length"] = log_state.returned_episode_lengths
-  # for achievement in Achievement:
-  #  name = f"Achievements/{achievement.name.lower()}"
-  #  infos[f"{ach_key}/{name}"] = achievements[:, :, achievement.value]
 
   metrics = jax.tree.map(
     lambda x: (x * done).sum() / (1e-5 + done.sum()),
     infos,
   )
-  metrics[f"{main_key}/num_actor_steps"] = train_state.timesteps
-  metrics[f"{main_key}/num_learner_updates"] = train_state.n_updates
+  metrics[f"{k}/num_actor_steps"] = train_state.timesteps
+  metrics[f"{k}/num_learner_updates"] = train_state.n_updates
 
   ############################################################
   # Observer logging
@@ -483,12 +461,56 @@ def sweep(search: str = ""):
         "OPTIMISTIC_RESET_RATIO": {"values": [1]},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-dyna-multigoal", "user=wilka"],
-      "group": "preplay-testing-6",
+      "group": "preplay-testing-7",
     }
 
   ############################################################
   # More "final" experiments
   ############################################################
+  elif search == "ql-final":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["qlearning"]},
+        "SEED": {"values": list(range(1, 11))},
+      },
+      "overrides": ["alg=ql", "rlenv=craftax-multigoal", "user=wilka"],
+      "group": "ql-final-1",
+    }
+  elif search == "usfa-final":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["usfa"]},
+        "SEED": {"values": list(range(1, 11))},
+      },
+      "overrides": ["alg=usfa_craftax", "rlenv=craftax-multigoal", "user=wilka"],
+      "group": "usfa-final-1",
+    }
+  elif search == "dyna-final":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["dyna"]},
+        "SEED": {"values": list(range(1, 11))},
+      },
+      "overrides": ["alg=dyna", "rlenv=craftax-dyna-multigoal", "user=wilka"],
+      "group": "dyna-final-1",
+    }
+  elif search == "preplay-final":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["preplay"]},
+        "SEED": {"values": list(range(1, 11))},
+      },
+      "overrides": [
+        "alg=preplay",
+        "rlenv=craftax-dyna-multigoal",
+        "user=wilka"],
+      "group": "preplay-final-2",
+    }
+
   else:
     raise NotImplementedError(search)
 

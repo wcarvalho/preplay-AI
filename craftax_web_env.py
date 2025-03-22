@@ -655,9 +655,10 @@ def task_onehot(goal):
   return jax.lax.dynamic_index_in_dim(task_vectors, goal, keepdims=False)
 
 
+
 @struct.dataclass
 class MultigoalEnvParams(EnvParams):
-  task_configs: List[struct.PyTreeNode] = None
+  task_configs: struct.PyTreeNode = None
 
 
 @struct.dataclass

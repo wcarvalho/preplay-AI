@@ -4,7 +4,7 @@ PROJECT: "craftax-multigoal"
 #ENV: "craftax-gen"
 TOTAL_TIMESTEPS: 1_000_000
 
-OPTIMISTIC_RESET_RATIO: 16  # reset every env?
+OPTIMISTIC_RESET_RATIO: 1  # reset every env?
 
 TEST_NUM_ENVS: 1_000
 EVAL_STEPS: 100
@@ -28,6 +28,7 @@ USE_BIAS: True
 ACTIVATION: 'relu'
 NUM_MLP_LAYERS: 1
 MLP_HIDDEN_DIM: 512
+
 
 NUM_SIMULATIONS: 4
 NUM_OFFTASK_GOALS: 3 # + 1 more for dyna
