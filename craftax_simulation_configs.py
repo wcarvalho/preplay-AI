@@ -1,3 +1,4 @@
+
 from typing import Tuple, List
 from craftax_web_env import (
   CraftaxSymbolicWebEnvNoAutoReset,
@@ -42,6 +43,7 @@ env = CraftaxSymbolicWebEnvNoAutoReset()
 env_params = EnvParams()
 
 TRAIN_CONFIGS = []
+TRAIN_EVAL_CONFIGS = []
 TEST_CONFIGS = []
 # Create cache path
 cache_dir = "craftax_cache/optimal_paths"
@@ -70,15 +72,8 @@ for config in PATHS_CONFIGS:
       path, _ = craftax_utils.astar(state, goal_object)
       path = np.array(path)
       np.save(cache_file, path)
+
     return params, path
-<<<<<<< HEAD
-
-  def get_path_waypoints(path, num_segments=10):
-    indices = np.linspace(0, len(path) - 1, num_segments + 1, dtype=int)
-    # Get waypoints at those indices
-    return path[indices]
-
-=======
 
   def get_path_waypoints(path, num_segments=10):
     indices = np.linspace(0, len(path) - 1, num_segments + 1, dtype=int)
@@ -88,15 +83,18 @@ for config in PATHS_CONFIGS:
     positions = path[indices]
     return positions
 
->>>>>>> 47ffe8fcc63ad1f51195b294cb2b29694a32b21e
-  def add_to_configs(world_seed, start_position, goal_object, configs):
+  def add_to_configs(world_seed, start_position, goal_object, configs, evaluation=False):
     params, path = get_params_and_path(
       world_seed=world_seed,
       start_position=start_position,
       goal_object=goal_object,
     )
+    if len(path) == 0:
+      raise RuntimeError("Empty path?")
 
     waypoints = get_path_waypoints(path)
+    if evaluation:
+      waypoints = waypoints[:1]
     for waypoint in waypoints:
       configs.append(
         TaskConfig(
@@ -111,16 +109,27 @@ for config in PATHS_CONFIGS:
         )
       )
 
-  for start_position in config.start_eval_positions + config.start_train_positions:
+  for start_position in config.start_eval_positions:
     # first test
     add_to_configs(
       world_seed=config.world_seed,
       start_position=start_position,
       goal_object=config.test_objects[0],
       configs=TEST_CONFIGS,
+      evaluation=True,
     )
 
-    # then train main
+    # then train main eval
+    add_to_configs(
+      world_seed=config.world_seed,
+      start_position=start_position,
+      goal_object=config.train_objects[0],
+      configs=TRAIN_EVAL_CONFIGS,
+      evaluation=True,
+    )
+
+  for start_position in config.start_eval_positions + config.start_train_positions:
+    # train main
     add_to_configs(
       world_seed=config.world_seed,
       start_position=start_position,
@@ -128,7 +137,7 @@ for config in PATHS_CONFIGS:
       configs=TRAIN_CONFIGS,
     )
 
-    # then train distractor
+    # train distractor
     add_to_configs(
       world_seed=config.world_seed,
       start_position=start_position,
@@ -137,8 +146,10 @@ for config in PATHS_CONFIGS:
     )
 
 TRAIN_CONFIGS = jtu.tree_map(lambda *x: jnp.stack(x), *TRAIN_CONFIGS)
+TRAIN_EVAL_CONFIGS = jtu.tree_map(lambda *x: jnp.stack(x), *TRAIN_EVAL_CONFIGS)
 TEST_CONFIGS = jtu.tree_map(lambda *x: jnp.stack(x), *TEST_CONFIGS)
-dummy_config = jax.tree.map(lambda x: x[0], TRAIN_CONFIGS)
+dummy_config = jax.tree_map(lambda x: x[0], TRAIN_CONFIGS)
+
 
 default_params = MultigoalEnvParams().replace(
   world_seeds=(dummy_config.world_seed,),
@@ -149,3 +160,8 @@ default_params = MultigoalEnvParams().replace(
   goal_locations=dummy_config.goal_locations.astype(jnp.int32),
   task_configs=TRAIN_CONFIGS,
 )
+
+def make_multigoal_env_params(configs):
+  return default_params.replace(
+    task_configs=configs,
+  )

@@ -658,7 +658,7 @@ def task_onehot(goal):
 
 @struct.dataclass
 class MultigoalEnvParams(EnvParams):
-  task_configs: List[struct.PyTreeNode] = None
+  task_configs: struct.PyTreeNode = None
 
 
 @struct.dataclass
