@@ -483,12 +483,56 @@ def sweep(search: str = ""):
         "OPTIMISTIC_RESET_RATIO": {"values": [1]},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-dyna-multigoal", "user=wilka"],
-      "group": "preplay-testing-6",
+      "group": "preplay-testing-7",
     }
 
   ############################################################
   # More "final" experiments
   ############################################################
+  elif search == "ql-final":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["qlearning"]},
+        "SEED": {"values": list(range(1, 11))},
+      },
+      "overrides": ["alg=ql", "rlenv=craftax-multigoal", "user=wilka"],
+      "group": "ql-final-1",
+    }
+  elif search == "usfa-final":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["usfa"]},
+        "SEED": {"values": list(range(1, 11))},
+      },
+      "overrides": ["alg=usfa_craftax", "rlenv=craftax-multigoal", "user=wilka"],
+      "group": "usfa-final-1",
+    }
+  elif search == "dyna-final":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["dyna"]},
+        "SEED": {"values": list(range(1, 11))},
+      },
+      "overrides": ["alg=dyna", "rlenv=craftax-dyna-multigoal", "user=wilka"],
+      "group": "dyna-final-1",
+    }
+  elif search == "preplay-final":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["preplay"]},
+        "SEED": {"values": list(range(1, 11))},
+      },
+      "overrides": [
+        "alg=preplay",
+        "rlenv=craftax-dyna-multigoal",
+        "user=wilka"],
+      "group": "preplay-final-2",
+    }
+
   else:
     raise NotImplementedError(search)
 

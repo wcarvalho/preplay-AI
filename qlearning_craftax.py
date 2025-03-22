@@ -98,9 +98,16 @@ class RnnAgent(nn.Module):
     q_vals = nn.BatchApply(self.q_fn)(rnn_out)
     if self.achieve_fn is not None:
       achieve_vals = nn.BatchApply(self.achieve_fn)(rnn_out)
-      return Predictions(q_vals, achieve_vals, rnn_out), new_rnn_state
+      return Predictions(
+        q_vals=q_vals,
+        achievements=achieve_vals,
+        rnn_states=rnn_out,
+      ), new_rnn_state
     else:
-      return Predictions(q_vals, rnn_out), new_rnn_state
+      return Predictions(
+        q_vals=q_vals,
+        rnn_states=rnn_out,
+      ), new_rnn_state
 
   def initialize_carry(self, *args, **kwargs):
     """Initializes the RNN state."""
@@ -315,6 +322,7 @@ def make_craftax_agent(
       use_bias=config.get("USE_BIAS", True),
     ),
   )
+
 
   rng, _rng = jax.random.split(rng)
   network_params = agent.init(_rng, example_timestep, method=agent.initialize)

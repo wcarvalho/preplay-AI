@@ -659,10 +659,9 @@ def sweep(search: str = ""):
       "parameters": {
         "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512, 1024]},
         "SEED": {"values": list(range(1, 6))},
-        "TEST_NUM_ENVS": {"values": [10_000]},
       },
       "overrides": ["alg=ql", "rlenv=craftax-10m", "user=wilka"],
-      "group": "ql-final-10,000-2",
+      "group": "ql-final-3",
     }
   elif search == "ql_sf-final":
     sweep_config = {
@@ -671,10 +670,9 @@ def sweep(search: str = ""):
         "ALG": {"values": ["qlearning_sf_aux"]},
         "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512, 1024]},
         "SEED": {"values": list(range(1, 6))},
-        "TEST_NUM_ENVS": {"values": [10_000]},
       },
       "overrides": ["alg=ql", "rlenv=craftax-10m", "user=wilka"],
-      "group": "ql-sf-final-10,000-2",
+      "group": "ql-sf-final-3",
     }
   elif search == "dyna-final":
     sweep_config = {
@@ -683,10 +681,9 @@ def sweep(search: str = ""):
         "ALG": {"values": ["dyna"]},
         "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512, 1024]},
         "SEED": {"values": list(range(1, 6))},
-        "TEST_NUM_ENVS": {"values": [10_000]},
       },
       "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "dyna-final-10,000-2",
+      "group": "dyna-final-3",
     }
   elif search == "preplay-final":
     sweep_config = {
@@ -695,10 +692,9 @@ def sweep(search: str = ""):
         "ALG": {"values": ["preplay"]},
         "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512, 1024]},
         "SEED": {"values": list(range(1, 6))},
-        "TEST_NUM_ENVS": {"values": [10_000]},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "preplay-final-10,000-2",
+      "group": "preplay-final-3",
     }
   # elif search == 'alphazero-eval':
   #  sweep_config = {
