@@ -354,8 +354,8 @@ def run_single(config: dict, save_path: str = None):
       test_env_params = env.default_params.replace(
         world_seeds=tuple(
           np.arange(
-            100_000,
-            100_000 + config["TEST_NUM_ENVS"],
+            10_000,
+            10_000 + config["TEST_NUM_ENVS"],
           )
         )
       )
@@ -657,44 +657,44 @@ def sweep(search: str = ""):
     sweep_config = {
       "metric": metric,
       "parameters": {
-        "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512, 1024]},
+        "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512]},
         "SEED": {"values": list(range(1, 6))},
       },
       "overrides": ["alg=ql", "rlenv=craftax-10m", "user=wilka"],
-      "group": "ql-final-3",
+      "group": "ql-final-5",
     }
   elif search == "ql_sf-final":
     sweep_config = {
       "metric": metric,
       "parameters": {
         "ALG": {"values": ["qlearning_sf_aux"]},
-        "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512, 1024]},
+        "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512]},
         "SEED": {"values": list(range(1, 6))},
       },
-      "overrides": ["alg=ql", "rlenv=craftax-10m", "user=wilka"],
-      "group": "ql-sf-final-3",
+      "overrides": ["alg=ql-sf", "rlenv=craftax-10m", "user=wilka"],
+      "group": "ql-sf-final-5",
     }
   elif search == "dyna-final":
     sweep_config = {
       "metric": metric,
       "parameters": {
         "ALG": {"values": ["dyna"]},
-        "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512, 1024]},
+        "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512]},
         "SEED": {"values": list(range(1, 6))},
       },
       "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "dyna-final-3",
+      "group": "dyna-final-5",
     }
   elif search == "preplay-final":
     sweep_config = {
       "metric": metric,
       "parameters": {
         "ALG": {"values": ["preplay"]},
-        "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512, 1024]},
+        "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512]},
         "SEED": {"values": list(range(1, 6))},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "preplay-final-3",
+      "group": "preplay-final-5",
     }
   # elif search == 'alphazero-eval':
   #  sweep_config = {
