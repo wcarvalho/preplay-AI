@@ -266,7 +266,7 @@ def plot_achievement_bars(df, n=64, fig=None, ax=None, figsize=(15, 5)):
     fig.tight_layout()
     return fig, ax
 
-def plot_training_envs_score(df, ntraining_envs, ax=None, figsize=(5, 5), include_actor=True):
+def plot_training_envs_score(df, ntraining_envs, ax=None, figsize=(5, 5), show_legend=True, include_actor=True):
     # Create figure and axis if not provided
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize)
@@ -371,8 +371,8 @@ def plot_training_envs_score(df, ntraining_envs, ax=None, figsize=(5, 5), includ
     ax.grid(True, alpha=0.3)
     
     # Add legend if both types of data are shown
-    #if include_actor:
-    #    ax.legend(fontsize=DEFAULT_LEGEND_SIZE)
+    if show_legend:
+        ax.legend(fontsize=DEFAULT_LEGEND_SIZE)
 
     if ax is None:
         plt.tight_layout()
