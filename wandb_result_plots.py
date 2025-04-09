@@ -41,8 +41,8 @@ model_colors = {
 }
 
 model_names = {
-    'ql': 'Q-learning + 1-step prediction (@10M)',
-    'ql_sf': 'Q-learning + successor features (@10M)',
+    'ql': 'QL + 1-step (@10M)',
+    'ql_sf': 'QL + sF (@10M)',
     'dyna': 'Dyna (@1M)',
     'preplay': 'Multi-task preplay (@1M)',
 }
@@ -125,7 +125,7 @@ def get_metric_data_by_group(
     os.makedirs('data', exist_ok=True)
 
     # Collect data for each model and achievement
-    for model, group in tqdm(model_to_group.items(), desc=f"Models", leave=True):
+    for model, group in tqdm(model_to_group.items(), desc="Models", leave=True):
         # Create cache filename
         if debug:
             cache_file = os.path.join(
@@ -182,7 +182,7 @@ def get_metric_data_by_group(
 
     return pd.DataFrame(data)
 
-def plot_achievement_bars(df, n=64, fig=None, ax=None, figsize=(15, 5)):
+def plot_achievement_bars(df, n=64, fig=None, ax=None, figsize=(15, 5), show_legend=True):
     # Create figure and axis if not provided
     if fig is None or ax is None:
         fig, ax = plt.subplots(figsize=figsize)
@@ -260,17 +260,19 @@ def plot_achievement_bars(df, n=64, fig=None, ax=None, figsize=(15, 5)):
     ax.set_ylim(ymin, ymax * 1.25)
 
     ax.grid(True, alpha=0.3)
-    ax.legend(bbox_to_anchor=(0.5, .9), loc='center', ncol=len(models), fontsize=DEFAULT_LEGEND_SIZE)
+    if show_legend:
+        ax.legend(bbox_to_anchor=(0.5, .9), loc='center', ncol=len(models), fontsize=DEFAULT_LEGEND_SIZE)
     ax.set_title(f'Per-Achievement Generalization Success Rates given {n} Unique Training Environments', fontsize=DEFAULT_TITLE_SIZE, pad=20)
     
     fig.tight_layout()
     return fig, ax
 
-def plot_training_envs_score(df, ntraining_envs, ax=None, figsize=(5, 5), show_legend=True, include_actor=True):
+def plot_training_envs_score(df, ntraining_envs, ax=None, figsize=(5, 5), show_legend=True, evaluation=True):
     # Create figure and axis if not provided
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize)
     
+    key = 'evaluator' if evaluation else 'actor'
     # Get unique models
     models = df['model'].unique()
 
@@ -282,10 +284,10 @@ def plot_training_envs_score(df, ntraining_envs, ax=None, figsize=(5, 5), show_l
         x_pos = []
         
         for n_env in ntraining_envs:
-            setting = f"evaluator_performance-{n_env}"
+            setting = f"{key}_performance-{n_env}"
             data = df[(df['model'] == model) &
                       (df['setting'] == setting) &
-                      (df['metric'] == f'0.score')]
+                      (df['metric'] == '0.score')]
 
             mean = data['value'].mean()
             sem = data['value'].sem()
@@ -300,7 +302,7 @@ def plot_training_envs_score(df, ntraining_envs, ax=None, figsize=(5, 5), show_l
             # Plot line connecting points
             ax.plot(x_pos, model_data, 
                     '-o',  # Line style with circles for points
-                    label=model_names[model.replace('-', '_')] + ' (evaluator)',
+                    label=model_names[model.replace('-', '_')],
                     color=model_colors[model.replace('-', '_')],
                     linewidth=2,
                     markersize=8)
@@ -311,52 +313,15 @@ def plot_training_envs_score(df, ntraining_envs, ax=None, figsize=(5, 5), show_l
                         fmt='none',  # No connecting line
                         color=model_colors[model.replace('-', '_')],
                         capsize=5)
-        
-        # Plot actor performance if requested
-        if include_actor:
-            actor_data = []
-            actor_sems = []
-            actor_x_pos = []
-            
-            for n_env in ntraining_envs:
-                setting = f"actor_performance-{n_env}"
-                data = df[(df['model'] == model) &
-                        (df['setting'] == setting) &
-                        (df['metric'] == f'0.score')]
-
-                mean = data['value'].mean()
-                sem = data['value'].sem()
-
-                if len(data) == 0:
-                    continue
-                actor_data.append(mean)
-                actor_sems.append(sem)
-                actor_x_pos.append(n_env)
-            
-            if len(actor_data) > 0:
-                # Plot line connecting points with box markers
-                ax.plot(actor_x_pos, actor_data, 
-                        '-s',  # Line style with squares for points
-                        #label=model_names[model.replace('-', '_')] + ' (actor)',
-                        color=model_colors[model.replace('-', '_')],
-                        linewidth=2,
-                        markersize=8,
-                        alpha=0.7,  # Slightly transparent to differentiate
-                        linestyle='--')  # Dashed line for actor performance
-                
-                # Add error bars
-                ax.errorbar(actor_x_pos, actor_data,
-                            yerr=actor_sems,
-                            fmt='none',  # No connecting line
-                            color=model_colors[model.replace('-', '_')],
-                            capsize=5,
-                            alpha=0.7)  # Match transparency
 
     # Customize plot
     ax.set_xlabel('Number of Unique Training Environments', fontsize=DEFAULT_XLABEL_SIZE)
     ax.set_ylabel('% Maximum Score', fontsize=DEFAULT_YLABEL_SIZE)
     
-    title = 'Generalization Performance to \n10,000 Unique Environments'
+    if key == 'evaluator':
+        title = 'Generalization Performance to \n10,000 Unique Environments'
+    else:
+        title = 'Training Performance'
     #if include_actor:
     #    title += '\n(Solid: Evaluator, Dashed: Actor)'
     ax.set_title(title, fontsize=DEFAULT_TITLE_SIZE)
