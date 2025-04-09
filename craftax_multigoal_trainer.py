@@ -239,15 +239,20 @@ def craftax_experience_logger(
   ############################################################
   log_state = trajectory.timestep.state
   infos = {}
+  key_fn = lambda k: f"{k}-{num_seeds}" if num_seeds is not None else k
+  main_key = key_fn(key)
   infos[f"{main_key}/0.episode_return"] = log_state.returned_episode_returns
   infos[f"{main_key}/0.episode_length"] = log_state.returned_episode_lengths
+
+  # [T, B]
+  done = trajectory.timestep.last()
 
   metrics = jax.tree.map(
     lambda x: (x * done).sum() / (1e-5 + done.sum()),
     infos,
   )
-  metrics[f"{k}/num_actor_steps"] = train_state.timesteps
-  metrics[f"{k}/num_learner_updates"] = train_state.n_updates
+  metrics[f"{main_key}/num_actor_steps"] = train_state.timesteps
+  metrics[f"{main_key}/num_learner_updates"] = train_state.n_updates
 
   ############################################################
   # Observer logging
@@ -508,7 +513,7 @@ def sweep(search: str = ""):
         "alg=preplay",
         "rlenv=craftax-dyna-multigoal",
         "user=wilka"],
-      "group": "preplay-final-2",
+      "group": "preplay-final-3",
     }
 
   else:
