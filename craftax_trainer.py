@@ -696,6 +696,58 @@ def sweep(search: str = ""):
       "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "preplay-final-5",
     }
+  ############################################################
+  # Ablations
+  ############################################################
+  elif search == "dyna-backtracking":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["dyna"]},
+        "NUM_ENV_SEEDS": {"values": [512]},
+        "SEED": {"values": list(range(1, 6))},
+        "BACKTRACKING": {"values": [False]},
+      },
+      "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "group": "dyna-backtracking-1",
+    }
+  elif search == "preplay-backtracking":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["preplay"]},
+        "NUM_ENV_SEEDS": {"values": [512]},
+        "SEED": {"values": list(range(1, 6))},
+        "BACKTRACKING": {"values": [False]},
+      },
+      "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "group": "preplay-backtracking-1",
+    }
+  elif search == "preplay-main-loss-coeff":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["preplay"]},
+        "NUM_ENV_SEEDS": {"values": [512]},
+        "SEED": {"values": list(range(1, 6))},
+        "MAIN_COEFF": {"values": [0.]},
+        "OFFTASK_COEFF": {"values": [1.]},
+      },
+      "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "group": "preplay-main-loss-coeff-1",
+    }
+  elif search == "preplay-main-q-coeff":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["preplay"]},
+        "NUM_ENV_SEEDS": {"values": [512]},
+        "SEED": {"values": list(range(1, 6))},
+        "MAINQ_COEFF": {"values": [0.]},
+      },
+      "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "group": "preplay-main-q-coeff-1",
+    }
   # elif search == 'alphazero-eval':
   #  sweep_config = {
   #      'metric': metric,

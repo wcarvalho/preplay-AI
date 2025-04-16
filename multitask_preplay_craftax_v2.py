@@ -180,6 +180,7 @@ def simulate_n_trajectories(
   num_simulations: int = 5,
   use_offtask_policy: jax.Array = None,
   terminate_offtask: bool = False,
+  mainq_coeff: float = 1.0,
   subtask_coeff: float = 1.0,
   make_init_goal_timestep = None,
 ):
@@ -228,7 +229,7 @@ def simulate_n_trajectories(
     if terminate_offtask:
       q_vals = (1 - beta) * subtask_q + beta * reg_q
     else:
-      q_vals = reg_q + subtask_coeff * subtask_q
+      q_vals = mainq_coeff * reg_q + subtask_coeff * subtask_q
     return q_vals
 
   def initial_predictions(x, prior_h, w, rng_):
@@ -405,8 +406,11 @@ class DynaLossFn(vbb.RecurrentLossFn):
   importance_sampling_exponent: float = 0.6
   num_offtask_goals: int = 5
   offtask_coeff: float = 1.0
+  main_coeff: float = 1.0
   terminate_offtask: bool = False
   subtask_coeff: float = 1.0
+  mainq_coeff: float = 1.0
+  backtracking: bool = True
 
   dyna_policy: SimPolicy = None
   offtask_dyna_policy: SimPolicy = None
@@ -601,6 +605,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
       params=params,
       num_steps=self.simulation_length,
       terminate_offtask=self.terminate_offtask,
+      mainq_coeff=self.mainq_coeff,
       subtask_coeff=self.subtask_coeff,
       make_init_goal_timestep=self.make_init_goal_timestep,
     )
@@ -663,17 +668,24 @@ class DynaLossFn(vbb.RecurrentLossFn):
       #########################################
       # run RNN + Off-task Q-network over simulation data
       #########################################
-      # we replace last, because last action from data
-      # is different than action from simulation
-      # [window_size + sim_length, num_sims, ...]
-      all_but_last = lambda y: jax.tree.map(lambda x: x[:-1], y)
-      all_t = concat_start_sims(all_but_last(t), next_t)
-      all_a = concat_start_sims(all_but_last(a), sim_outputs_t.actions)
-
+      if self.backtracking:
+        # we replace last, because last action from data
+        # is different than action from simulation
+        # [window_size + sim_length, num_sims, ...]
+        all_but_last = lambda y: jax.tree.map(lambda x: x[:-1], y)
+        all_t = concat_start_sims(all_but_last(t), next_t)
+        all_a = concat_start_sims(all_but_last(a), sim_outputs_t.actions)
+        # start at beginning of experience data
+        start_index = 0
+      else:
+        all_t = next_t
+        all_a = sim_outputs_t.actions
+        # start at last timestep before simulation
+        start_index = -1
       # NOTE: we're recomputing RNN but easier to read this way...
       # TODO: reuse RNN online param computations for speed (probably not worth it)
       key, key_ = jax.random.split(key)
-      h_tm1_online_repeated = jax.tree.map(lambda x: x[0], h_on)
+      h_tm1_online_repeated = jax.tree.map(lambda x: x[start_index], h_on)
       h_tm1_online_repeated = repeat(h_tm1_online_repeated, num_simulations)
       online_preds = apply_rnn_and_q(
         h_tm1=h_tm1_online_repeated,  # [num_sims, D]
@@ -686,7 +698,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
       )
 
       key, key_ = jax.random.split(key)
-      h_tm1_target_repeated = jax.tree.map(lambda x: x[0], h_tar)
+      h_tm1_target_repeated = jax.tree.map(lambda x: x[start_index], h_tar)
       h_tm1_target_repeated = repeat(h_tm1_target_repeated, num_simulations)
       target_preds = apply_rnn_and_q(
         h_tm1=h_tm1_target_repeated,
@@ -701,7 +713,8 @@ class DynaLossFn(vbb.RecurrentLossFn):
       # Get Off-task loss
       #########################################
       all_t_mask = simulation_finished_mask(l_mask, next_t)
-      offtask_reward = self.compute_rewards(all_t, g)
+      if not self.backtracking:
+        all_t_mask = all_t_mask[-self.simulation_length-1:]
       ## [T, K, D]
       #achievements = all_t.observation.achievements.astype(jnp.float32)
       ## [T, K, D]
@@ -717,6 +730,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
       #offtask_reward = (achievements * achievement_coefficients * coeff_mask[None]).sum(
       #  -1
       #)
+      offtask_reward = self.compute_rewards(all_t, g)
 
       (
         offtask_batch_td_error,
@@ -799,11 +813,11 @@ class DynaLossFn(vbb.RecurrentLossFn):
       offtask_log_info["main_q_values"] = main_log_info["q_values"]
       offtask_log_info["main_q_target"] = main_log_info["q_target"]
 
-      batch_td_error = self.offtask_coeff * jnp.abs(offtask_batch_td_error) + jnp.abs(
+      batch_td_error = self.offtask_coeff * jnp.abs(offtask_batch_td_error) + self.main_coeff * jnp.abs(
         main_batch_td_error
       )
       batch_loss_mean = (
-        self.offtask_coeff * offtask_batch_loss_mean + main_batch_loss_mean
+        self.offtask_coeff * offtask_batch_loss_mean + self.main_coeff * main_batch_loss_mean
       )
       metrics = {
         **{f"{k}/offtask-sub": v for k, v in offtask_metrics.items()},
@@ -836,17 +850,25 @@ class DynaLossFn(vbb.RecurrentLossFn):
         policy_fn=self.dyna_policy,
       )
 
-      # we replace last, because last action from data
-      # is different than action from simulation
-      # [window_size + sim_length, num_sims, ...]
-      all_but_last = lambda y: jax.tree.map(lambda x: x[:-1], y)
-      all_t = concat_start_sims(all_but_last(t), next_t)
-      all_a = concat_start_sims(all_but_last(a), sim_outputs_t.actions)
+      if self.backtracking:
+        # we replace last, because last action from data
+        # is different than action from simulation
+        # [window_size + sim_length, num_sims, ...]
+        all_but_last = lambda y: jax.tree.map(lambda x: x[:-1], y)
+        all_t = concat_start_sims(all_but_last(t), next_t)
+        all_a = concat_start_sims(all_but_last(a), sim_outputs_t.actions)
+        # start at beginning of experience data
+        start_index = 0
+      else:
+        all_t = next_t
+        all_a = sim_outputs_t.actions
+        # start at last timestep before simulation
+        start_index = -1
 
       # NOTE: we're recomputing RNN but easier to read this way...
       # TODO: reuse RNN online param computations for speed (probably not worth it)
       key, key_ = jax.random.split(key)
-      h_htm1 = jax.tree.map(lambda x: x[0], h_on)
+      h_htm1 = jax.tree.map(lambda x: x[start_index], h_on)
       h_htm1 = repeat(h_htm1, self.num_dyna_simulations)
       online_preds = apply_rnn_and_q(
         h_tm1=h_htm1,
@@ -859,7 +881,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
       )
 
       key, key_ = jax.random.split(key)
-      h_htm1 = jax.tree.map(lambda x: x[0], h_tar)
+      h_htm1 = jax.tree.map(lambda x: x[start_index], h_tar)
       h_htm1 = repeat(h_htm1, self.num_dyna_simulations)
       target_preds = apply_rnn_and_q(
         h_tm1=h_htm1,
@@ -872,6 +894,8 @@ class DynaLossFn(vbb.RecurrentLossFn):
       )
 
       all_t_mask = simulation_finished_mask(l_mask, next_t)
+      if not self.backtracking:
+        all_t_mask = all_t_mask[-self.simulation_length-1:]
 
       batch_td_error, batch_loss_mean, metrics, log_info = self.loss_fn(
         timestep=all_t,
@@ -952,7 +976,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
       # don't reshape and concatenate to avoid unnecessary copies
       denominator = (
         offtask_batch_loss_mean.size  # [num_offtask_goals*num_sim]
-        + dyna_batch_loss_mean.size  # [num_sim]
+        + self.main_coeff * dyna_batch_loss_mean.size  # [num_sim]
       )
 
       batch_td_error = (
@@ -960,7 +984,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
         offtask_batch_td_error.sum(axis=(0, 2))
         +
         # sum over [num_sim]
-        dyna_batch_td_error.sum(axis=1)
+        self.main_coeff * dyna_batch_td_error.sum(axis=1)
       ) / denominator
 
       batch_loss_mean = (
@@ -968,7 +992,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
         offtask_batch_loss_mean.sum(axis=(0, 1))
         +
         # sum over [num_sim]
-        dyna_batch_loss_mean.sum(axis=0)
+        self.main_coeff * dyna_batch_loss_mean.sum(axis=0)
       ) / denominator
 
       metrics = {
@@ -1016,10 +1040,13 @@ def make_loss_fn_class(config, **kwargs) -> DynaLossFn:
     max_priority_weight=config.get("MAX_PRIORITY_WEIGHT", 0.9),
     step_cost=config.get("STEP_COST", 0.001),
     window_size=config.get("WINDOW_SIZE", 1.0),
+    backtracking=config.get("BACKTRACKING", True),
     offtask_coeff=config.get("OFFTASK_COEFF", 1.0),
+    main_coeff=config.get("MAIN_COEFF", 1.0),
     num_offtask_goals=config.get("NUM_OFFTASK_GOALS", 5),
     terminate_offtask=config.get("TERMINATE_OFFTASK", False),
     subtask_coeff=config.get("SUBTASK_COEFF", 1.0),
+    mainq_coeff=config.get("MAINQ_COEFF", 1.0),
     **kwargs,
   )
 
