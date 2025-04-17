@@ -2,6 +2,7 @@
 Landmark-basedUniversal Successor Feature Approximator (USFA)
 """
 
+from pprint import pprint
 import functools
 from typing import NamedTuple, Optional, Tuple, Callable
 
@@ -43,7 +44,6 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
     # Prepare Data
     online_sf = online_preds.sf  # [T+1, B, N, A, C]
     target_sf = target_preds.sf  # [T+1, B, N, A, C]
-    online_z = online_preds.policy  # [T+1, B, N, A, C]
 
     cumulants = self.extract_cumulants(data=data)
     cumulants = cumulants.astype(online_sf.dtype)
@@ -51,7 +51,9 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
 
     # Get selector actions from online Q-values for double Q-learning
     dot = lambda x, y: (x * y).sum(axis=-1)
-    online_q = dot(online_sf, online_z)  # [T+1, B, N, A, C]
+
+    online_w = jnp.expand_dims(online_preds.gpi_tasks, axis=-2)  # [T+1, B, N, 1, C]
+    online_q = dot(online_sf, online_w)  # [T+1, B, N, A, C]
     selector_actions = jnp.argmax(online_q, axis=-1)  # [T+1, B, N]
 
     # Preprocess discounts & rewards
@@ -149,7 +151,7 @@ class USFAPreds(NamedTuple):
   sf: jnp.ndarray  # successor features
   policy: jnp.ndarray  # policy vector
   task: jnp.ndarray  # task vector (potentially embedded)
-
+  gpi_tasks: jnp.ndarray  # task vectors
 
 def extract_timestep_input(timestep: TimeStep):
   return vbb.RNNInput(obs=timestep.observation, reset=timestep.first())
@@ -165,7 +167,12 @@ def sample_gauss(mean, var, key, nsamples):
 
 
 def get_task_vector(task_vector, train_tasks):
-  return task_vector
+  # Compare the task_vector with each train_task
+  matches = jnp.all(jnp.abs(task_vector - train_tasks) < 1e-6, axis=1)
+  # Create a one-hot vector based on the match
+  one_hot = jnp.eye(len(train_tasks))[jnp.argmax(matches)]
+
+  return one_hot
 
 
 class MLP(nn.Module):
@@ -187,6 +194,7 @@ class SfGpiHead(nn.Module):
   num_actions: int
   state_features_dim: int
   train_tasks: jnp.ndarray
+  all_policy_tasks: jnp.ndarray
   num_layers: int = 2
   hidden_dim: int = 512
   nsamples: int = 10
@@ -205,30 +213,32 @@ class SfGpiHead(nn.Module):
   def __call__(
     self, usfa_input: jnp.ndarray, task: jnp.ndarray, rng: jax.random.PRNGKey
   ) -> USFAPreds:
-    policies = jnp.expand_dims(task, axis=-2)  # [1, D_w]
+    return self.evaluate(usfa_input=usfa_input, task=task, support="eval")
 
-    return self.sfgpi(usfa_input=usfa_input, policies=policies, task=task)
-
-  def evaluate(self, usfa_input: jnp.ndarray, task: jnp.ndarray) -> USFAPreds:
-    if self.eval_task_support == "train":
+  def evaluate(self, usfa_input: jnp.ndarray, task: jnp.ndarray, support: str = "") -> USFAPreds:
+    support = support or self.eval_task_support
+    if support == "train":
       policies = jnp.array(
-        [get_task_vector(task, self.train_tasks) for task in self.train_tasks]
+        [get_task_vector(task, self.all_policy_tasks) for task in self.train_tasks]
       )
-    elif self.eval_task_support == "eval":
-      policies = jnp.expand_dims(get_task_vector(task, self.train_tasks), axis=-2)
-    elif self.eval_task_support == "train_eval":
-      task_expand = jnp.expand_dims(get_task_vector(task, self.train_tasks), axis=-2)
+      gpi_tasks = self.train_tasks
+    elif support == "eval":
+      policies = jnp.expand_dims(get_task_vector(task, self.all_policy_tasks), axis=-2)
+      gpi_tasks = jnp.expand_dims(task, axis=-2)
+    elif support == "train_eval":
+      task_expand = jnp.expand_dims(get_task_vector(task, self.all_policy_tasks), axis=-2)
       train_policies = jnp.array(
-        [get_task_vector(task, self.train_tasks) for task in self.train_tasks]
+        [get_task_vector(task, self.all_policy_tasks) for task in self.train_tasks]
       )
       policies = jnp.concatenate((train_policies, task_expand), axis=-2)
+      gpi_tasks = jnp.concatenate((self.train_tasks, task), axis=-1)
     else:
       raise RuntimeError(self.eval_task_support)
 
-    return self.sfgpi(usfa_input=usfa_input, policies=policies, task=task)
+    return self.sfgpi(usfa_input=usfa_input, policies=policies, gpi_tasks=gpi_tasks, task=task)
 
   def sfgpi(
-    self, usfa_input: jnp.ndarray, policies: jnp.ndarray, task: jnp.ndarray
+    self, usfa_input: jnp.ndarray, policies: jnp.ndarray, gpi_tasks: jnp.ndarray, task: jnp.ndarray
   ) -> USFAPreds:
     def compute_sf_q(sf_input: jnp.ndarray, policy: jnp.ndarray, task: jnp.ndarray):
       sf_input = jnp.concatenate((sf_input, policy))  # 2D
@@ -247,14 +257,14 @@ class SfGpiHead(nn.Module):
     policies = jnp.expand_dims(policies, axis=-2)
     policies = jnp.tile(policies, (1, self.num_actions, 1))
 
-    return USFAPreds(sf=sfs, policy=policies, q_vals=q_values, task=task)
+    return USFAPreds(sf=sfs, policy=policies, q_vals=q_values, gpi_tasks=gpi_tasks, task=task)
 
 
 class UsfaAgent(nn.Module):
   observation_encoder: nn.Module
   rnn: vbb.ScannedRNN
   sf_head: SfGpiHead
-  train_tasks: jnp.ndarray
+  learn_tasks: jnp.ndarray
   learn_z_vectors: str
 
   def initialize(self, x: TimeStep):
@@ -293,20 +303,27 @@ class UsfaAgent(nn.Module):
     rng, _rng = jax.random.split(rng)
     new_rnn_state, rnn_out = self.rnn.unroll(rnn_state, rnn_in, _rng)
 
-    if self.learn_z_vectors == "train_vectors":
-      pred_fn = jax.vmap(self.sf_head.sfgpi, in_axes=(0, None, 0), out_axes=0)
-      pred_fn = jax.vmap(pred_fn, in_axes=(0, None, 0), out_axes=0)
-      learn_z_vectors = self.train_tasks
-    elif self.learn_z_vectors == "policy":
+    if self.learn_z_vectors == "ALL_TASKS":
+      pred_fn = jax.vmap(self.sf_head.sfgpi, in_axes=(0, None, None, 0), out_axes=0)
+      pred_fn = jax.vmap(pred_fn, in_axes=(0, None, None, 0), out_axes=0)
+      # [N, D]
+      learn_z_vectors = jnp.array(
+        [get_task_vector(task, self.learn_tasks) for task in self.learn_tasks]
+      )
+      learn_w_vectors = self.learn_tasks 
+    elif self.learn_z_vectors == "TRAIN":
       pred_fn = jax.vmap(jax.vmap(self.sf_head.sfgpi))
-      learn_z_vectors = jnp.expand_dims(xs.observation.task_w, axis=-1)
-      import ipdb; ipdb.set_trace()
+      # [T, B, 1, D]
+      v_map_get_task_vector = jax.vmap(get_task_vector, (0, None), 0)
+      v_map_get_task_vector = jax.vmap(v_map_get_task_vector, (0, None), 0)
+      learn_z_vectors = jnp.expand_dims(v_map_get_task_vector(xs.observation.task_w, self.learn_tasks), axis=-2)
+      learn_w_vectors = jnp.expand_dims(xs.observation.task_w, axis=-2)
     else:
       raise ValueError(self.learn_z_vectors)
     predictions = pred_fn(
-      # usfa_input (T, B, D), policies (N, D), task (C)
-      # NOTE: task doesn't really matter here
-      rnn_out, learn_z_vectors, xs.observation.task_w)
+      # usfa_input (T, B, D), learn_z_vectors (N, D), task (C)
+      # NOTE: task isn't used in lsos
+      rnn_out, learn_z_vectors, learn_w_vectors, xs.observation.task_w)
 
     return predictions, new_rnn_state
 
@@ -318,6 +335,7 @@ def make_agent(
   example_timestep: TimeStep,
   rng: jax.random.PRNGKey,
   train_tasks: jnp.ndarray,
+  all_tasks: jnp.ndarray,
   ObsEncoderCls: nn.Module,
 ) -> Tuple[nn.Module, Params, vbb.AgentResetFn]:
   sf_head = SfGpiHead(
@@ -326,6 +344,7 @@ def make_agent(
     nsamples=1,
     eval_task_support=config.get("EVAL_TASK_SUPPORT", "train"),
     train_tasks=train_tasks,
+    all_policy_tasks=all_tasks,
     num_layers=config.get("NUM_SF_LAYERS", 1),
     hidden_dim=config.get("SF_HIDDEN_DIM", 512),
   )
@@ -334,8 +353,8 @@ def make_agent(
     observation_encoder=ObsEncoderCls(),
     rnn=vbb.ScannedRNN(hidden_dim=config["AGENT_RNN_DIM"]),
     sf_head=sf_head,
-    train_tasks=train_tasks,
-    learn_z_vectors=config.get("LEARN_VECTORS", "ALL_TRAIN"),
+    learn_tasks=all_tasks,
+    learn_z_vectors=config.get("LEARN_VECTORS", "ALL_TASKS"),
   )
 
   rng, _rng = jax.random.split(rng)
@@ -374,6 +393,11 @@ class FixedEpsilonGreedy:
     rng = jax.random.split(rng, q_vals.shape[0])
     return jax.vmap(epsilon_greedy_act, in_axes=(0, 0, 0))(q_vals, self.epsilons, rng)
 
+def remove_gpi_dim_from_preds(preds: USFAPreds):
+  return preds._replace(
+    sf=preds.sf[:, 0],
+    gpi_tasks=preds.gpi_tasks[:, 0],
+    policy=preds.policy[:, 0])
 
 def make_actor(
   config: dict,
@@ -413,7 +437,7 @@ def make_actor(
     action = explorer.choose_actions(preds.q_vals, train_state.timesteps, rng)
 
     if remove_gpi_dim:
-      preds = preds._replace(sf=preds.sf[:, 0], policy=preds.policy[:, 0])
+      preds = remove_gpi_dim_from_preds(preds)
 
     return preds, action, agent_state
 
@@ -429,7 +453,7 @@ def make_actor(
     action = preds.q_vals.argmax(-1)
 
     if remove_gpi_dim:
-      preds = preds._replace(sf=preds.sf[:, 0], policy=preds.policy[:, 0])
+      preds = remove_gpi_dim_from_preds(preds)
 
     return preds, action, agent_state
 
