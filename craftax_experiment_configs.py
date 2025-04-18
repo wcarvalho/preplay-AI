@@ -16,6 +16,7 @@ from craftax.craftax.constants import (
   TEXTURES,
   BLOCK_PIXEL_SIZE_IMG,
   BLOCK_PIXEL_SIZE_HUMAN,
+
 )
 import jax
 import craftax_utils
@@ -286,10 +287,12 @@ def make_block_env_params(config: BlockConfig, default_params: struct.PyTreeNode
 
   assert len(goal_objects) == len(goal_locations)
 
+
   env_params = default_params.replace(
     world_seeds=(config.world_seed,),
     goal_locations=goal_locations,
     placed_goals=goal_objects,
+    placed_achievements=tuple(BLOCK_TO_GOAL[i] for i in goal_objects),
   )
   return env_params
 

@@ -108,7 +108,7 @@ for block_config in PATHS_CONFIGS:
           start_position=waypoint,
           goal_object=BLOCK_TO_GOAL[goal_object],
           placed_goals=jnp.asarray(params.placed_goals),
-          placed_achievements=blocks_to_goals(params.placed_achievements),
+          placed_achievements=jnp.asarray(params.placed_achievements),
           goal_locations=jnp.asarray(params.goal_locations),
           train_objects=blocks_to_goals(block_config.train_objects),
           test_objects=blocks_to_goals(block_config.test_objects),

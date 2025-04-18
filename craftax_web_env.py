@@ -721,6 +721,8 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
       placed_goals=task_config.placed_goals.astype(jnp.int32),  # Block type
       placed_achievements=task_config.placed_achievements.astype(jnp.int32),  # Achievement type
       goal_locations=task_config.goal_locations.astype(jnp.int32),
+      train_objects=task_config.train_objects.astype(jnp.int32),
+      test_objects=task_config.test_objects.astype(jnp.int32),
     )
 
     return super().reset(key, params)
@@ -758,10 +760,15 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
     state_features = jnp.concatenate([achievement_state_features, visibility_state_features], axis=0)
 
     # compute train tasks
-    train_tasks = jax.vmap(task_onehot)(params.train_objects)
+    def task_onehot_prime(w):
+      return jnp.concatenate([w, jnp.zeros_like(visibility_state_features)], axis=0)
 
     # add dummy dimensions for visibility
-    task_w = jnp.concatenate([task_w, jnp.zeros_like(visibility_state_features)], axis=0)
+    task_w = task_onehot_prime(task_w)
+
+    train_tasks = jax.vmap(task_onehot)(params.train_objects)
+    train_tasks = jax.vmap(task_onehot_prime)(train_tasks)
+
 
     return MultiGoalObservation(
       image=image,
