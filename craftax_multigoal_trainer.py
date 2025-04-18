@@ -360,7 +360,7 @@ def run_single(config: dict, save_path: str = None):
       vmap_env=vmap_env,
     )
   elif config["ALG"] in ["preplay"]:
-    train_fn = multitask_preplay_craftax_v2.make_train_multigoal(
+    train_fn = multitask_preplay_craftax_v2.make_train_craftax_multigoal(
       config=config,
       env=vec_env,
       model_env=env,
@@ -513,7 +513,7 @@ def sweep(search: str = ""):
         "alg=preplay",
         "rlenv=craftax-dyna-multigoal",
         "user=wilka"],
-      "group": "preplay-final-3",
+      "group": "preplay-final-4",
     }
 
   else:

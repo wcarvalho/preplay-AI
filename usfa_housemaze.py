@@ -17,7 +17,7 @@ matplotlib.use("Agg")
 from visualizer import plot_frames
 
 from jaxneurorl.agents.basics import TimeStep
-from usfa import *
+from usfa_landmark import *
 
 
 # only redoing this

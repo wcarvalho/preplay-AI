@@ -4,9 +4,9 @@ TESTING:
 JAX_DEBUG_NANS=True \
 JAX_DISABLE_JIT=1 \
 HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue housemaze_trainer.py \
-  app.debug=True \
+  app.debug=False \
   app.wandb=False \
-  app.search=ql
+  app.search=preplay
 
 RUNNING ON SLURM:
 python housemaze_trainer.py \
@@ -47,6 +47,7 @@ import alphazero
 import qlearning_housemaze
 import usfa_housemaze
 import multitask_preplay_housemaze
+import multitask_preplay_craftax_v2
 import networks
 import housemaze_observer as humansf_observers
 import housemaze_experiments
@@ -282,7 +283,9 @@ def run_single(config: dict, save_path: str = None):
     from housemaze.human_dyna import sf_task_runner
 
     task_runner = sf_task_runner.TaskRunner(
-      task_objects=task_objects, radius=config.get("VIS_RADIUS", 5)
+      task_objects=task_objects,
+      radius=config.get("VIS_RADIUS", 5),
+      vis_coeff=config.get("VIS_COEFF", 0.0),
     )
     # def success_fn(timestep):
     #  features = timestep.observation.state_features
@@ -299,8 +302,8 @@ def run_single(config: dict, save_path: str = None):
     task_runner=task_runner,
     num_categories=200,
   )
-  env = housemaze_utils.AutoResetWrapper(env)
 
+  env = housemaze_utils.AutoResetWrapper(env)
   HouzemazeObsEncoder = functools.partial(
     networks.CategoricalHouzemazeObsEncoder,
     num_categories=max(10_000, env.total_categories(env_params)),
@@ -333,6 +336,13 @@ def run_single(config: dict, save_path: str = None):
   # algorithms
   ##################
   alg_name = config["ALG"]
+
+  train_objects = env_params.reset_params.train_objects[0]
+  test_objects = env_params.reset_params.test_objects[0]
+  train_tasks = jnp.array([env.task_runner.task_vector(o) for o in train_objects])
+  test_tasks = jnp.array([env.task_runner.task_vector(o) for o in test_objects])
+  all_tasks = jnp.concatenate((train_tasks, test_tasks), axis=0)
+
   if alg_name == "qlearning":
     make_train = functools.partial(
       vbb.make_train,
@@ -360,14 +370,13 @@ def run_single(config: dict, save_path: str = None):
       ),
     )
   elif alg_name == "usfa":
-    train_objects = env_params.reset_params.train_objects[0]
-    train_tasks = jnp.array([env.task_runner.task_vector(o) for o in train_objects])
 
     make_train = functools.partial(
       usfa_housemaze.make_train,
       make_agent=functools.partial(
         usfa_housemaze.make_agent,
         train_tasks=train_tasks,
+        all_tasks=all_tasks,
         ObsEncoderCls=HouzemazeObsEncoder,
       ),
       make_logger=functools.partial(
@@ -559,6 +568,40 @@ def run_single(config: dict, save_path: str = None):
       ),
     )
 
+  elif alg_name in ("dyna", "preplay"):
+    if alg_name in ("dyna"):
+      config['SUBTASK_COEFF'] = 0.0   # Q-fn
+      config['OFFTASK_COEFF'] = 0.0   # loss
+      config['NUM_OFFTASK_GOALS'] = 0
+
+    make_train = functools.partial(
+      multitask_preplay_craftax_v2.make_train_jaxmaze_multigoal,
+      config=config,
+      env=env,
+      model_env=env,
+      make_logger=functools.partial(
+        make_logger,
+        render_fn=housemaze_render_fn,
+        extract_task_info=extract_task_info,
+        get_task_name=get_task_name,
+        action_names=action_names,
+        learner_log_extra=functools.partial(
+          multitask_preplay_housemaze.learner_log_extra,
+          config=config,
+          action_names=action_names,
+          extract_task_info=extract_task_info,
+          get_task_name=get_task_name,
+          render_fn=housemaze_render_fn,
+          sim_idx=0,
+        ),
+      ),
+      train_env_params=env_params,
+      test_env_params=test_env_params,
+      ObsEncoderCls=HouzemazeObsEncoder,
+      task_objects=task_objects,
+      all_tasks=all_tasks,
+    )
+
   else:
     raise NotImplementedError(alg_name)
 
@@ -631,10 +674,12 @@ def sweep(search: str = ""):
       "parameters": {
         "SEED": {"values": list(range(1, 2))},
         "env.exp": {"values": ["exp2"]},
-        "STEP_COST": {"values": [0.01, 0.005, 0.001]},
+        #"STEP_COST": {"values": [0.01, 0.005, 0.001]},
+        "LEARN_VECTORS": {"values": ['TRAIN', 'ALL_TASKS']},
+        #"VIS_COEFF": {"values": [0.0, 0.1]},
       },
       "overrides": ["alg=usfa", "rlenv=housemaze", "user=wilka"],
-      "group": "usfa-big-13",
+      "group": "usfa-landmark-3",
     }
   elif search == "dyna":
     sweep_config = {
@@ -643,34 +688,51 @@ def sweep(search: str = ""):
         "goal": "maximize",
       },
       "parameters": {
-        "ALG": {"values": ["dynaq_shared"]},
-        "SEED": {"values": list(range(1, 6))},
+        "ALG": {"values": ["dyna"]},
+        "SEED": {"values": list(range(1))},
         "env.exp": {"values": ["exp2"]},
-        "SIM_EPSILON_SETTING": {"values": [3]},
-        "OFFTASK_SIMULATION": {"values": [False]},
-        "TOTAL_TIMESTEPS": {"values": [100_000_000]},
+        "COMBINE_REAL_SIM": {"values": [True]},
+        #"SIM_EPSILON_SETTING": {"values": [3]},
+        #"OFFTASK_SIMULATION": {"values": [False]},
+        #"TOTAL_TIMESTEPS": {"values": [100_000_000]},
       },
-      "overrides": ["alg=dyna", "rlenv=housemaze", "user=wilka"],
-      "group": "dyna-big-1",
+      "overrides": ["alg=preplay_jaxmaze", "rlenv=housemaze", "user=wilka"],
+      "group": "dyna-new-4",
     }
-  elif search == "dynaq_shared":
+  elif search == "preplay":
     sweep_config = {
       "metric": {
         "name": "evaluator_performance/0.0 avg_episode_return",
         "goal": "maximize",
       },
       "parameters": {
-        "ALG": {"values": ["dynaq_shared"]},
-        "SEED": {"values": list(range(1, 2))},
+        "ALG": {"values": ["preplay"]},
+        "SEED": {"values": list(range(1))},
         "env.exp": {"values": ["exp2"]},
-        "GAMMA": {"values": [0.99, 0.992]},
-        "STEP_COST": {"values": [0.0001]},
-        "NUM_Q_LAYERS": {"values": [1, 2, 3]},
-        "Q_HIDDEN_DIM": {"values": [512, 1024]},
+        "OFFTASK_COEFF": {"values": [1., .5, .1]},
+        "COMBINE_REAL_SIM": {"values": [True]},
       },
-      "overrides": ["alg=preplay", "rlenv=housemaze", "user=wilka"],
-      "group": "dynaq-big-6",
+      "overrides": ["alg=preplay_jaxmaze", "rlenv=housemaze", "user=wilka"],
+      "group": "preplay-new-4",
     }
+  #elif search == "dynaq_shared":
+  #  sweep_config = {
+  #    "metric": {
+  #      "name": "evaluator_performance/0.0 avg_episode_return",
+  #      "goal": "maximize",
+  #    },
+  #    "parameters": {
+  #      "ALG": {"values": ["dynaq_shared"]},
+  #      "SEED": {"values": list(range(1, 2))},
+  #      "env.exp": {"values": ["exp2"]},
+  #      "GAMMA": {"values": [0.99, 0.992]},
+  #      "STEP_COST": {"values": [0.0001]},
+  #      "NUM_Q_LAYERS": {"values": [1, 2, 3]},
+  #      "Q_HIDDEN_DIM": {"values": [512, 1024]},
+  #    },
+  #    "overrides": ["alg=preplay", "rlenv=housemaze", "user=wilka"],
+  #    "group": "dynaq-big-6",
+  #  }
   # =================================================================
   # final
   # =================================================================
@@ -700,6 +762,21 @@ def sweep(search: str = ""):
       "overrides": ["alg=usfa", "rlenv=housemaze", "user=wilka"],
       "group": "usfa-final-1",
     }
+  elif search == "usfa-offtask-final":
+    sweep_config = {
+      "metric": {
+        "name": "evaluator_performance/0.0 avg_episode_return",
+        "goal": "maximize",
+      },
+      "parameters": {
+        "SEED": {"values": list(range(1, 11))},
+        "env.exp": {"values": ["exp2"]},
+        "LEARN_VECTORS": {"values": ['ALL_TRAIN', 'TRAIN']},
+      },
+      "overrides": ["alg=usfa", "rlenv=housemaze", "user=wilka"],
+      "group": "usfa-offtask-final-1",
+    }
+
   elif search == "dyna-final":
     sweep_config = {
       "metric": {
@@ -707,12 +784,12 @@ def sweep(search: str = ""):
         "goal": "maximize",
       },
       "parameters": {
-        "ALG": {"values": ["dynaq_shared"]},
+        "ALG": {"values": ["dyna"]},
         "SEED": {"values": list(range(1, 11))},
         "env.exp": {"values": ["exp2"]},
       },
-      "overrides": ["alg=dyna", "rlenv=housemaze", "user=wilka"],
-      "group": "dyna-final-1",
+      "overrides": ["alg=preplay_jaxmaze", "rlenv=housemaze", "user=wilka"],
+      "group": "dyna-final-2",
     }
   elif search == "preplay-final":
     sweep_config = {
@@ -721,12 +798,12 @@ def sweep(search: str = ""):
         "goal": "maximize",
       },
       "parameters": {
-        "ALG": {"values": ["dynaq_shared"]},
+        "ALG": {"values": ["preplay"]},
         "SEED": {"values": list(range(1, 11))},
-        "OFFTASK_COEFF": {"values": [1.0]},
+        "OFFTASK_COEFF": {"values": [.5]},
         "env.exp": {"values": ["exp2"]},
       },
-      "overrides": ["alg=preplay", "rlenv=housemaze", "user=wilka"],
+      "overrides": ["alg=preplay_jaxmaze", "rlenv=housemaze", "user=wilka"],
       "group": "preplay-final-2",
     }
 

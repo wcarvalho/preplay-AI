@@ -5,7 +5,7 @@ from craftax.craftax.renderer import render_craftax_pixels
 from craftax.craftax import constants
 from craftax.craftax.constants import Action
 
-from usfa import *
+from jaxneurorl.agents.usfa import *
 from networks import CraftaxObsEncoder, CraftaxMultiGoalObsEncoder
 
 

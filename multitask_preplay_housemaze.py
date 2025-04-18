@@ -564,6 +564,7 @@ def learner_log_extra(
     q_values: np.array,
     q_loss: np.array,
     q_target: np.array,
+    **kwargs,
   ):
     # Extract the relevant data
     # only use data from batch dim = 0
@@ -693,22 +694,37 @@ def learner_log_extra(
   def callback(d):
     n_updates = d.pop("n_updates")
     # [T, B] --> [T]
+    is_log_time = jnp.logical_or(
+      n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0, n_updates == 1
+    )
+    if not is_log_time: return
     if "online" in d:
       d["online"] = jax.tree_map(lambda x: x[:, 0], d["online"])
       log_data(**d["online"], key="online")
     if "dyna" in d:
-      # [T, B, K, N] --> [K]
-      # K = the simulation length
+      d['dyna'].pop("any_achievable", None)
+      # [T, B, K, W, N] --> [K]
+      # K = simulation #
+      # W = simulation length
+      # N = goal #
       # get entire simulation, starting at:
       #   T=0 (1st time-point)
       #   B=0 (1st batch sample)
       #   N=index(t_min) (simulation with lowest temperaturee)
-      d["dyna"] = jax.tree_map(lambda x: x[0, 0, :, sim_idx], d["dyna"])
+      try:
+        # PREPLAY
+        d["dyna"] = jax.tree_map(lambda x: x[0, 0, 0, :, sim_idx], d["dyna"])
+      except:
+        # DYNA
+        d["dyna"] = jax.tree_map(lambda x: x[0, 0, :, sim_idx], d["dyna"])
+
       log_data(**d["dyna"], key="dyna")
 
   # this will be the value after update is applied
   n_updates = data["n_updates"] + 1
-  is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
+  is_log_time = jnp.logical_or(
+    n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0, n_updates == 1
+  )
 
   jax.lax.cond(
     is_log_time, lambda d: jax.debug.callback(callback, d), lambda d: None, data

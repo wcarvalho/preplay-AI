@@ -344,6 +344,8 @@ class DynaLossFn(vbb.RecurrentLossFn):
   dyna_coeff: float = 1.0
   max_priority_weight: float = 0.9
   importance_sampling_exponent: float = 0.6
+  backtracking: bool = True
+  combine_real_sim: bool = False
 
   simulation_policy: SimPolicy = None
 
@@ -557,18 +559,25 @@ class DynaLossFn(vbb.RecurrentLossFn):
         x_t=jax.tree.map(lambda x: x[-1], t),
         rng=key_,
       )
-
-      # we replace last, because last action from data
-      # is different than action from simulation
-      # [window_size + sim_length, num_sims, ...]
-      all_but_last = lambda y: jax.tree.map(lambda x: x[:-1], y)
-      all_t = concat_start_sims(all_but_last(t), next_t)
-      all_a = concat_start_sims(all_but_last(a), sim_outputs_t.actions)
+      if self.backtracking:
+        # we replace last, because last action from data
+        # is different than action from simulation
+        # [window_size + sim_length, num_sims, ...]
+        all_but_last = lambda y: jax.tree.map(lambda x: x[:-1], y)
+        all_t = concat_start_sims(all_but_last(t), next_t)
+        all_a = concat_start_sims(all_but_last(a), sim_outputs_t.actions)
+        # start at beginning of experience data
+        start_index = 0
+      else:
+        all_t = next_t
+        all_a = sim_outputs_t.actions
+        # start at last timestep before simulation
+        start_index = -1
 
       # NOTE: we're recomputing RNN but easier to read this way...
       # TODO: reuse RNN online param computations for speed (probably not worth it)
       key, key_ = jax.random.split(key)
-      h_htm1 = jax.tree.map(lambda x: x[0], h_on)
+      h_htm1 = jax.tree.map(lambda x: x[start_index], h_on)
       h_htm1 = repeat(h_htm1, self.num_simulations)
       online_preds = apply_rnn_and_q(
         h_tm1=h_htm1,
@@ -581,7 +590,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
       )
 
       key, key_ = jax.random.split(key)
-      h_htm1 = jax.tree.map(lambda x: x[0], h_tar)
+      h_htm1 = jax.tree.map(lambda x: x[start_index], h_tar)
       h_htm1 = repeat(h_htm1, self.num_simulations)
       target_preds = apply_rnn_and_q(
         h_tm1=h_htm1,
@@ -594,6 +603,8 @@ class DynaLossFn(vbb.RecurrentLossFn):
       )
 
       all_t_mask = simulation_finished_mask(l_mask, next_t)
+      if not self.backtracking:
+        all_t_mask = all_t_mask[-self.simulation_length-1:]
 
       batch_td_error, batch_loss_mean, metrics, log_info = self.loss_fn(
         timestep=all_t,
@@ -610,16 +621,27 @@ class DynaLossFn(vbb.RecurrentLossFn):
     # vmap over individual windows
     # TD ERROR: [window_size, T + sim_length, num_sim]
     # Loss: [window_size, num_sim, ...]
-    batch_td_error, batch_loss_mean, metrics, log_info = jax.vmap(
-      dyna_loss_fn_, (1, 1, 1, 1, 1, 0), 0
-    )(
-      timesteps,  # [T, W, ...]
-      actions,  # [T, W]
-      h_online,  # [T, W, D]
-      h_target,  # [T, W, D]
-      loss_mask,  # [T, W]
-      jax.random.split(rng, window_size),  # [W, 2]
-    )
+    if self.combine_real_sim:
+      batch_td_error, batch_loss_mean, metrics, log_info = jax.vmap(dyna_loss_fn_)(
+        timesteps,  # [T, W, ...]
+        actions,  # [T, W]
+        h_online,  # [T, W, D]
+        h_target,  # [T, W, D]
+        loss_mask,  # [T, W]
+        jax.random.split(rng, len(actions)),  # [W, 2]
+      )
+    else:
+      batch_td_error, batch_loss_mean, metrics, log_info = jax.vmap(
+        dyna_loss_fn_, (1, 1, 1, 1, 1, 0), 0
+      )(
+        timesteps,  # [T, W, ...]
+        actions,  # [T, W]
+        h_online,  # [T, W, D]
+        h_target,  # [T, W, D]
+        loss_mask,  # [T, W]
+        jax.random.split(rng, window_size),  # [W, 2]
+      )
+
 
     # figuring out how to incorporate windows into TD error is annoying so punting
     # TODO: incorporate windowed overlappping TDs into TD error
@@ -642,6 +664,8 @@ def make_loss_fn_class(config, **kwargs) -> DynaLossFn:
     max_priority_weight=config.get("MAX_PRIORITY_WEIGHT", 0.9),
     step_cost=config.get("STEP_COST", 0.0),
     window_size=config.get("WINDOW_SIZE", 20),
+    backtracking=config.get("BACKTRACKING", True),
+    combine_real_sim=config.get("COMBINE_REAL_SIM", False),
     **kwargs,
   )
 
