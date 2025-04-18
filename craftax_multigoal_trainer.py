@@ -300,7 +300,8 @@ def run_single(config: dict, save_path: str = None):
   default_params = craftax_simulation_configs.default_params
   env_params = default_params.replace(task_configs=train_configs)
   test_env_params = default_params.replace(task_configs=test_configs)
-  train_tasks = active_task_vectors  # relevant for successor features
+  # TODO: filter out train tasks per env?
+  all_tasks = active_task_vectors  # relevant for successor features
 
   if config["OPTIMISTIC_RESET_RATIO"] == 1:
     vec_env = env = TimestepWrapper(LogWrapper(env), autoreset=True)
@@ -335,7 +336,7 @@ def run_single(config: dict, save_path: str = None):
       config=config,
       env=vec_env,
       make_agent=functools.partial(
-        usfa.make_multigoal_craftax_agent, train_tasks=train_tasks
+        usfa.make_multigoal_craftax_agent, all_tasks=all_tasks
       ),
       make_optimizer=usfa.make_optimizer,
       make_loss_fn_class=usfa.make_loss_fn_class,

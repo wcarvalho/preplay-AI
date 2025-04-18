@@ -110,6 +110,8 @@ class EnvParams:
   ## for env wrapper
   # active_goals: Tuple[int, ...] = tuple()
   # num_success: int = 5
+  train_objects: Tuple[int] = tuple()
+  test_objects: Tuple[int] = tuple()
 
 
 @struct.dataclass
@@ -688,6 +690,7 @@ class MultigoalEnvParams(EnvParams):
 class MultiGoalObservation(struct.PyTreeNode):
   image: chex.Array
   task_w: chex.Array
+  train_tasks: chex.Array
   # goals: chex.Array
   state_features: chex.Array
   previous_action: int = None
@@ -754,6 +757,9 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
 
     state_features = jnp.concatenate([achievement_state_features, visibility_state_features], axis=0)
 
+    # compute train tasks
+    train_tasks = jax.vmap(task_onehot)(params.train_objects)
+
     # add dummy dimensions for visibility
     task_w = jnp.concatenate([task_w, jnp.zeros_like(visibility_state_features)], axis=0)
 
@@ -761,6 +767,7 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
       image=image,
       task_w=task_w,
       previous_action=action,
+      train_tasks=train_tasks,
       # goals=active_task_vectors,
       state_features=state_features,
     )

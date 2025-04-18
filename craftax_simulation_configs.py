@@ -31,6 +31,8 @@ class TaskConfig(struct.PyTreeNode):
   placed_goals: List[Tuple[int, int]] = None
   placed_achievements: List[Tuple[int, int]] = None
   goal_locations: List[Tuple[int, int]] = None
+  train_objects: List[int] = None
+  test_objects: List[int] = None
 
 
 def make_start_position(start_positions):
@@ -48,8 +50,8 @@ TEST_CONFIGS = []
 # Create cache path
 cache_dir = "craftax_cache/optimal_paths"
 os.makedirs(cache_dir, exist_ok=True)
-for config in PATHS_CONFIGS:
-  block_env_params = make_block_env_params(config, env_params)
+for block_config in PATHS_CONFIGS:
+  block_env_params = make_block_env_params(block_config, env_params)
 
   def get_params_and_path(
     world_seed,
@@ -95,6 +97,10 @@ for config in PATHS_CONFIGS:
     waypoints = get_path_waypoints(path)
     if evaluation:
       waypoints = waypoints[:1]
+
+    def blocks_to_goals(blocks):
+      return jnp.asarray([BLOCK_TO_GOAL[i] for i in blocks])
+
     for waypoint in waypoints:
       configs.append(
         TaskConfig(
@@ -102,46 +108,46 @@ for config in PATHS_CONFIGS:
           start_position=waypoint,
           goal_object=BLOCK_TO_GOAL[goal_object],
           placed_goals=jnp.asarray(params.placed_goals),
-          placed_achievements=jnp.asarray(
-            [BLOCK_TO_GOAL[i] for i in params.placed_goals]
-          ),
+          placed_achievements=blocks_to_goals(params.placed_achievements),
           goal_locations=jnp.asarray(params.goal_locations),
+          train_objects=blocks_to_goals(block_config.train_objects),
+          test_objects=blocks_to_goals(block_config.test_objects),
         )
       )
 
-  for start_position in config.start_eval_positions:
+  for start_position in block_config.start_eval_positions:
     # first test
     add_to_configs(
-      world_seed=config.world_seed,
+      world_seed=block_config.world_seed,
       start_position=start_position,
-      goal_object=config.test_objects[0],
+      goal_object=block_config.test_objects[0],
       configs=TEST_CONFIGS,
       evaluation=True,
     )
 
     # then train main eval
     add_to_configs(
-      world_seed=config.world_seed,
+      world_seed=block_config.world_seed,
       start_position=start_position,
-      goal_object=config.train_objects[0],
+      goal_object=block_config.train_objects[0],
       configs=TRAIN_EVAL_CONFIGS,
       evaluation=True,
     )
 
-  for start_position in config.start_eval_positions + config.start_train_positions:
+  for start_position in block_config.start_eval_positions + block_config.start_train_positions:
     # train main
     add_to_configs(
-      world_seed=config.world_seed,
+      world_seed=block_config.world_seed,
       start_position=start_position,
-      goal_object=config.train_objects[0],
+      goal_object=block_config.train_objects[0],
       configs=TRAIN_CONFIGS,
     )
 
     # train distractor
     add_to_configs(
-      world_seed=config.world_seed,
+      world_seed=block_config.world_seed,
       start_position=start_position,
-      goal_object=config.train_objects[1],
+      goal_object=block_config.train_objects[1],
       configs=TRAIN_CONFIGS,
     )
 
@@ -158,6 +164,8 @@ default_params = MultigoalEnvParams().replace(
   placed_goals=dummy_config.placed_goals.astype(jnp.int32),
   placed_achievements=dummy_config.placed_achievements.astype(jnp.int32),
   goal_locations=dummy_config.goal_locations.astype(jnp.int32),
+  train_objects=dummy_config.train_objects.astype(jnp.int32),
+  test_objects=dummy_config.test_objects.astype(jnp.int32),
   task_configs=TRAIN_CONFIGS,
 )
 

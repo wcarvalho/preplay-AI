@@ -5,7 +5,8 @@ from craftax.craftax.renderer import render_craftax_pixels
 from craftax.craftax import constants
 from craftax.craftax.constants import Action
 
-from jaxneurorl.agents.usfa import *
+import usfa_landmark
+from usfa_landmark import *
 from networks import CraftaxObsEncoder, CraftaxMultiGoalObsEncoder
 
 
@@ -222,7 +223,7 @@ class DuellingDotMLP(nn.Module):
     return sf, q_values
 
 
-class SfGpiHead(nn.Module):
+class SfGpiHead(usfa_landmark.SfGpiHead):
   num_actions: int
   state_features_dim: int
   train_tasks: jnp.ndarray
@@ -244,39 +245,32 @@ class SfGpiHead(nn.Module):
   def __call__(
     self, usfa_input: jnp.ndarray, task: jnp.ndarray, rng: jax.random.PRNGKey
   ) -> USFAPreds:
-    policy = get_task_onehot(task, self.train_tasks)
-    if self.nsamples > 1:
-      rng, _rng = jax.random.split(rng)
-      policy_samples = sample_gauss(
-        mean=policy, var=self.variance, key=_rng, nsamples=self.nsamples
-      )
-      policy_base = jnp.expand_dims(policy, axis=-2)  # [1, D_w]
-      policies = jnp.concatenate((policy_base, policy_samples), axis=-2)  # [N+1, D_w]
-    else:
-      policies = jnp.expand_dims(policy, axis=-2)  # [1, D_w]
+    return self.evaluate(usfa_input=usfa_input, task=task, support="eval")
 
-    return self.sfgpi(usfa_input=usfa_input, policies=policies, task=task)
-
-  def evaluate(self, usfa_input: jnp.ndarray, task: jnp.ndarray) -> USFAPreds:
-    if self.eval_task_support == "train":
+  def evaluate(self, usfa_input: jnp.ndarray, task: jnp.ndarray, support: str = "") -> USFAPreds:
+    support = support or self.eval_task_support
+    if support == "train":
       policies = jnp.array(
-        [get_task_onehot(task, self.train_tasks) for task in self.train_tasks]
+        [get_task_vector(task, self.all_policy_tasks) for task in self.train_tasks]
       )
-    elif self.eval_task_support == "eval":
-      policies = jnp.expand_dims(get_task_onehot(task, self.train_tasks), axis=-2)
-    elif self.eval_task_support == "train_eval":
-      task_expand = jnp.expand_dims(get_task_onehot(task, self.train_tasks), axis=-2)
+      gpi_tasks = self.train_tasks
+    elif support == "eval":
+      policies = jnp.expand_dims(get_task_vector(task, self.all_policy_tasks), axis=-2)
+      gpi_tasks = jnp.expand_dims(task, axis=-2)
+    elif support == "train_eval":
+      task_expand = jnp.expand_dims(get_task_vector(task, self.all_policy_tasks), axis=-2)
       train_policies = jnp.array(
-        [get_task_onehot(task, self.train_tasks) for task in self.train_tasks]
+        [get_task_vector(task, self.all_policy_tasks) for task in self.train_tasks]
       )
       policies = jnp.concatenate((train_policies, task_expand), axis=-2)
+      gpi_tasks = jnp.concatenate((self.train_tasks, task), axis=-1)
     else:
       raise RuntimeError(self.eval_task_support)
 
-    return self.sfgpi(usfa_input=usfa_input, policies=policies, task=task)
+    return self.sfgpi(usfa_input=usfa_input, policies=policies, gpi_tasks=gpi_tasks, task=task)
 
   def sfgpi(
-    self, usfa_input: jnp.ndarray, policies: jnp.ndarray, task: jnp.ndarray
+    self, usfa_input: jnp.ndarray, policies: jnp.ndarray, gpi_tasks: jnp.ndarray, task: jnp.ndarray
   ) -> USFAPreds:
     def compute_sf_q(sf_input: jnp.ndarray, policy: jnp.ndarray, task: jnp.ndarray):
       sf_input = jnp.concatenate((sf_input, policy), axis=-1)  # 2D
@@ -345,7 +339,8 @@ def make_multigoal_craftax_agent(
   env_params: environment.EnvParams,
   example_timestep: TimeStep,
   rng: jax.random.PRNGKey,
-  train_tasks: Optional[jnp.ndarray],
+  train_tasks: jnp.ndarray,
+  all_tasks: jnp.ndarray,
 ) -> Tuple[nn.Module, Params, vbb.AgentResetFn]:
   sf_head = SfGpiHead(
     num_actions=env.action_space(env_params).n,
