@@ -437,7 +437,7 @@ def run_single(config: dict, save_path: str = None):
       vmap_env=vmap_env,
     )
   elif config["ALG"] in ["preplay"]:
-    train_fn = multitask_preplay_craftax_v2.make_train(
+    train_fn = multitask_preplay_craftax_v2.make_train_craftax_singlegoal(
       config=config,
       env=vec_env,
       model_env=env,
@@ -601,40 +601,24 @@ def sweep(search: str = ""):
       "metric": metric,
       "parameters": {
         "ALG": {"values": ["preplay"]},
-        "SEED": {"values": list(range(1, 4))},
-        "NUM_ENV_SEEDS": {"values": [128]},
-        # "NUM_AUX_LAYERS": {'values': [1,2]},
-        "SUBTASK_COEFF": {"values": [2]},
-        "OFFTASK_COEFF": {"values": [1e-1]},
-        # "LR": {'values': [0.0003, 0.00003]},
-        # "INCLUDE_ACHIEVABLE": {'values': [True, False]},
-        # "NUM_OFFTASK_GOALS": {'values': [1, 4]},
+        "SEED": {"values": list(range(1))},
+        "NUM_ENV_SEEDS": {"values": [128, 512]},
+        "COMBINE_REAL_SIM": {"values": [True, False]},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "preplay-19-subtask-coeff",
+      "group": "preplay-combine-1",
     }
   elif search == "dyna":
     sweep_config = {
       "metric": metric,
       "parameters": {
         "ALG": {"values": ["dyna"]},
-        "SEED": {"values": list(range(1, 2))},
-        "NUM_ENV_SEEDS": {"values": [0]},
-        "NUM_SIMULATIONS": {"values": [1]},
+        "SEED": {"values": list(range(1))},
+        "NUM_ENV_SEEDS": {"values": [128, 512]},
+        "COMBINE_REAL_SIM": {"values": [True, False]},
       },
       "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "dyna-17-duelling",
-    }
-  elif search == "preplay":
-    sweep_config = {
-      "metric": metric,
-      "parameters": {
-        "ALG": {"values": ["preplay"]},
-        "SEED": {"values": list(range(1, 2))},
-        "NUM_ENV_SEEDS": {"values": [0]},
-      },
-      "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "preplay-15-sim-policy",
+      "group": "dyna-combine-1",
     }
   elif search == "pqn":
     sweep_config = {
@@ -705,7 +689,7 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["dyna"]},
         "NUM_ENV_SEEDS": {"values": [512]},
-        "SEED": {"values": list(range(1, 6))},
+        "SEED": {"values": list(range(1, 5))},
         "BACKTRACKING": {"values": [False]},
       },
       "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
@@ -717,7 +701,7 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "NUM_ENV_SEEDS": {"values": [512]},
-        "SEED": {"values": list(range(1, 6))},
+        "SEED": {"values": list(range(1, 5))},
         "BACKTRACKING": {"values": [False]},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
@@ -729,9 +713,9 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "NUM_ENV_SEEDS": {"values": [512]},
-        "SEED": {"values": list(range(1, 6))},
+        "SEED": {"values": list(range(1, 5))},
         "MAIN_COEFF": {"values": [0.]},
-        "OFFTASK_COEFF": {"values": [1.]},
+        #"OFFTASK_COEFF": {"values": [1.]},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "preplay-main-loss-coeff-1",
@@ -742,7 +726,7 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "NUM_ENV_SEEDS": {"values": [512]},
-        "SEED": {"values": list(range(1, 6))},
+        "SEED": {"values": list(range(1, 5))},
         "MAINQ_COEFF": {"values": [0.]},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],

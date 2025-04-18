@@ -345,6 +345,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
   max_priority_weight: float = 0.9
   importance_sampling_exponent: float = 0.6
   backtracking: bool = True
+  combine_real_sim: bool = False
 
   simulation_policy: SimPolicy = None
 
@@ -620,16 +621,27 @@ class DynaLossFn(vbb.RecurrentLossFn):
     # vmap over individual windows
     # TD ERROR: [window_size, T + sim_length, num_sim]
     # Loss: [window_size, num_sim, ...]
-    batch_td_error, batch_loss_mean, metrics, log_info = jax.vmap(
-      dyna_loss_fn_, (1, 1, 1, 1, 1, 0), 0
-    )(
-      timesteps,  # [T, W, ...]
-      actions,  # [T, W]
-      h_online,  # [T, W, D]
-      h_target,  # [T, W, D]
-      loss_mask,  # [T, W]
-      jax.random.split(rng, window_size),  # [W, 2]
-    )
+    if self.combine_real_sim:
+      batch_td_error, batch_loss_mean, metrics, log_info = jax.vmap(dyna_loss_fn_)(
+        timesteps,  # [T, W, ...]
+        actions,  # [T, W]
+        h_online,  # [T, W, D]
+        h_target,  # [T, W, D]
+        loss_mask,  # [T, W]
+        jax.random.split(rng, len(actions)),  # [W, 2]
+      )
+    else:
+      batch_td_error, batch_loss_mean, metrics, log_info = jax.vmap(
+        dyna_loss_fn_, (1, 1, 1, 1, 1, 0), 0
+      )(
+        timesteps,  # [T, W, ...]
+        actions,  # [T, W]
+        h_online,  # [T, W, D]
+        h_target,  # [T, W, D]
+        loss_mask,  # [T, W]
+        jax.random.split(rng, window_size),  # [W, 2]
+      )
+
 
     # figuring out how to incorporate windows into TD error is annoying so punting
     # TODO: incorporate windowed overlappping TDs into TD error
@@ -653,6 +665,7 @@ def make_loss_fn_class(config, **kwargs) -> DynaLossFn:
     step_cost=config.get("STEP_COST", 0.0),
     window_size=config.get("WINDOW_SIZE", 20),
     backtracking=config.get("BACKTRACKING", True),
+    combine_real_sim=config.get("COMBINE_REAL_SIM", False),
     **kwargs,
   )
 
