@@ -2,7 +2,6 @@ import math
 from typing import List, Tuple
 from flax import struct
 import numpy as np
-import jax.numpy as jnp
 import os.path
 import matplotlib.pyplot as plt
 from craftax.craftax.renderer import render_craftax_pixels as render_partial
@@ -418,7 +417,7 @@ def visualize_block_config(config: BlockConfig, jax_env, **kwargs):
     # Reset environment
     key = jax.random.PRNGKey(0)
     obs, state = jax_env.reset(key, render_env_params)
-
+    import ipdb; ipdb.set_trace()
     # Get partial observation using partial renderer
     obs = render_partial(state, block_pixel_size=BLOCK_PIXEL_SIZE_IMG).astype(np.uint8)
 
