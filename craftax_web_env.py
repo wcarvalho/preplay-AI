@@ -65,6 +65,22 @@ class Action(Enum):
   DO = 5
 
 
+# Helper function to get the map view
+def _get_map_view(state: EnvState) -> jnp.ndarray:
+    """Extracts the agent's current map view."""
+    map_level = state.map[state.player_level]
+    obs_dim_array = jnp.array([OBS_DIM[0], OBS_DIM[1]], dtype=jnp.int32)
+    padding = MAX_OBS_DIM + 2 # Padding added in rendering
+    tl_corner = state.player_position - obs_dim_array // 2 + padding
+
+    padded_map = jnp.pad(
+        map_level,
+        (padding, padding),
+        constant_values=BlockType.OUT_OF_BOUNDS.value,
+    )
+    map_view = jax.lax.dynamic_slice(padded_map, tl_corner, OBS_DIM)
+    return map_view
+
 def is_game_over(state, params, static_env_params):
   done_steps = state.timestep >= params.max_timesteps
   is_dead = state.player_health <= 0
@@ -654,6 +670,13 @@ active_task_vectors = jnp.stack(active_task_vectors)
 def task_onehot(goal):
   return jax.lax.dynamic_index_in_dim(task_vectors, goal, keepdims=False)
 
+Block_to_idx = jnp.zeros((len(BlockType),), dtype=jnp.int32)
+for idx, block_type in enumerate((
+  BlockType.DIAMOND.value,
+  BlockType.SAPPHIRE.value,
+  BlockType.RUBY.value,
+)):
+  Block_to_idx = Block_to_idx.at[block_type].set(idx)
 
 
 @struct.dataclass
@@ -692,8 +715,8 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
       world_seeds=(task_config.world_seed,),
       current_goal=task_config.goal_object.astype(jnp.int32),
       start_positions=task_config.start_position.astype(jnp.int32),
-      placed_goals=task_config.placed_goals.astype(jnp.int32),
-      placed_achievements=task_config.placed_achievements.astype(jnp.int32),
+      placed_goals=task_config.placed_goals.astype(jnp.int32),  # Block type
+      placed_achievements=task_config.placed_achievements.astype(jnp.int32),  # Achievement type
       goal_locations=task_config.goal_locations.astype(jnp.int32),
     )
 
@@ -714,11 +737,25 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
       ).astype(jnp.float32)
 
       return task_onehot(achievement) * complete
+    # N 1-hots
+    achievement_state_features = jax.vmap(achieved)(params.placed_achievements)
+    # place them all in same vector of length [N]
+    achievement_state_features = achievement_state_features.sum(axis=0)
 
-    state_features = jax.vmap(achieved)(params.placed_achievements)
+    map_view = _get_map_view(state)
+    def visibility_feature(b):
+      visible = jnp.any(map_view == b)
+      idx = jax.lax.dynamic_index_in_dim(
+        Block_to_idx, b, keepdims=False).astype(jnp.int32)
+      return jnp.zeros((len(achievement_state_features))).at[idx].set(visible)
 
-    # place them all in same vector
-    state_features = state_features.sum(axis=0)
+    visibility_state_features = jax.vmap(visibility_feature)(params.placed_goals)
+    visibility_state_features = visibility_state_features.sum(axis=0)
+
+    state_features = jnp.concatenate([achievement_state_features, visibility_state_features], axis=0)
+
+    # add dummy dimensions for visibility
+    task_w = jnp.concatenate([task_w, jnp.zeros_like(visibility_state_features)], axis=0)
 
     return MultiGoalObservation(
       image=image,
