@@ -598,6 +598,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
       # float (i.e. percent)
       window_size = int(self.window_size * len(actions))
     window_size = min(window_size, len(actions))
+    window_size = max(window_size, 1)
 
     roll = partial(rolling_window, size=window_size)
     simulate = partial(
@@ -1172,7 +1173,7 @@ def learner_log_extra(
 
     # state_images = []
     obs_images = []
-    max_len = min(config.get("MAX_EPISODE_LOG_LEN", 40), len(rewards))
+    max_len = min(config.get("MAX_EPISODE_LOG_LEN", 60), len(rewards))
     for idx in range(max_len):
       index = lambda y: jax.tree.map(lambda x: x[idx], y)
       obs_image = render_fn(index(timesteps.state.env_state))
@@ -1219,11 +1220,14 @@ def learner_log_extra(
         idx_to_achievement = {v: k for k, v in craftax_web_env.Achiement_to_idx.items()}
         env_goal = timesteps.state.env_state.current_goal[i]
         env_goal_name = Achievement(int(env_goal)).name
-
+        ngoals = len(Achiement_to_idx)
         obs_goal = timesteps.observation.task_w[i]
+        obs_goal = obs_goal[:ngoals]
+        goal = goal[:ngoals]
+
         obs_goal_idx = int(obs_goal.argmax(-1))
         obs_goal_name = Achievement(idx_to_achievement[obs_goal_idx]).name
-        
+
         sim_goal_idx = int(goal.argmax(-1))
         sim_goal_name = Achievement(idx_to_achievement[sim_goal_idx]).name
 
@@ -2249,7 +2253,8 @@ def make_train_jaxmaze_multigoal(**kwargs):
 
   epsilon_setting = config["SIM_EPSILON_SETTING"]
   all_tasks = jnp.array(kwargs.pop("all_tasks"))  # [G, D]
-  num_offtask_goals = all_tasks.shape[0]
+  known_offtask_goal = config.get("KNOWN_OFFTASK_GOAL", True)
+  num_offtask_goals = 1 if known_offtask_goal else all_tasks.shape[0]
   config["NUM_OFFTASK_GOALS"] = num_offtask_goals
 
   num_dyna_simulations = 1
@@ -2286,12 +2291,19 @@ def make_train_jaxmaze_multigoal(**kwargs):
       q_values, eps, sim_rng
     )
 
+  
   def sample_goals(timestep, key, num_offtask_goals):
     # [T, G] --> [G]
     #goal_probs = jnp.ones(len(all_tasks)) / len(all_tasks)
     achievable = jnp.ones(len(all_tasks))
     any_achievable = achievable.sum() > 0.1
-    goals = all_tasks
+
+    # assume you know offtask goal
+    if known_offtask_goal:
+      # first time-step, 1 goal
+      goals = timestep.state.offtask_w[0][None]
+    else:
+      goals = all_tasks
 
     #key, key_ = jax.random.split(key)
 

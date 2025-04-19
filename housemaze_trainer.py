@@ -573,6 +573,7 @@ def run_single(config: dict, save_path: str = None):
       config['SUBTASK_COEFF'] = 0.0   # Q-fn
       config['OFFTASK_COEFF'] = 0.0   # loss
       config['NUM_OFFTASK_GOALS'] = 0
+      config['Q_COEFF'] = 1.0
 
     make_train = functools.partial(
       multitask_preplay_craftax_v2.make_train_jaxmaze_multigoal,
@@ -707,13 +708,12 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["preplay"]},
-        "SEED": {"values": list(range(1))},
+        "SEED": {"values": list(range(2))},
         "env.exp": {"values": ["exp2"]},
-        "OFFTASK_COEFF": {"values": [1., .5, .1]},
-        "COMBINE_REAL_SIM": {"values": [True]},
+        "Q_COEFF": {"values": [.1, 0.0]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=housemaze", "user=wilka"],
-      "group": "preplay-new-4",
+      "group": "preplay-new-8-window-size-know-goal",
     }
   #elif search == "dynaq_shared":
   #  sweep_config = {
@@ -760,23 +760,8 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["exp2"]},
       },
       "overrides": ["alg=usfa", "rlenv=housemaze", "user=wilka"],
-      "group": "usfa-final-1",
+      "group": "usfa-final-4",
     }
-  elif search == "usfa-offtask-final":
-    sweep_config = {
-      "metric": {
-        "name": "evaluator_performance/0.0 avg_episode_return",
-        "goal": "maximize",
-      },
-      "parameters": {
-        "SEED": {"values": list(range(1, 11))},
-        "env.exp": {"values": ["exp2"]},
-        "LEARN_VECTORS": {"values": ['ALL_TRAIN', 'TRAIN']},
-      },
-      "overrides": ["alg=usfa", "rlenv=housemaze", "user=wilka"],
-      "group": "usfa-offtask-final-1",
-    }
-
   elif search == "dyna-final":
     sweep_config = {
       "metric": {
@@ -789,7 +774,7 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["exp2"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=housemaze", "user=wilka"],
-      "group": "dyna-final-2",
+      "group": "dyna-final-4",
     }
   elif search == "preplay-final":
     sweep_config = {
@@ -800,11 +785,10 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": list(range(1, 11))},
-        "OFFTASK_COEFF": {"values": [.5]},
         "env.exp": {"values": ["exp2"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=housemaze", "user=wilka"],
-      "group": "preplay-final-2",
+      "group": "preplay-final-4",
     }
 
   else:

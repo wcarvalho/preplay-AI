@@ -520,6 +520,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
       else int(self.window_size * len(actions))
     )
     window_size = min(window_size, len(actions))
+    window_size = max(window_size, 1)
     roll = partial(rolling_window, size=window_size)
     simulate = partial(
       simulate_n_trajectories,
