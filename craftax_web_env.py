@@ -2,15 +2,14 @@
 Based off of: craftax.craftax.envs.craftax_symbolic_env.CraftaxSymbolicEnvNoAutoReset
 
 Changes:
-1. Added a goal-conditioned reward
-2. Environment starts with 2 crafting tables (to make it easier for people to have multiple tasks)
-3. Humans start with 20 strength to more easily kill enemies
-4. structured obs with {image, task-vector}
-5. sample world set from pre-defined set of seeds
-6. goal-conditioned reward
-7. Current goal is a part of the state to effect the reward function.
-8. Player starts with pickaxe to mine stone easily
-9. made stones passable (i.e. can walk over them)
+- Added a goal-conditioned reward
+- Humans start with 20 strength to more easily kill enemies
+- structured obs with {image, task-vector}
+- sample world set from pre-defined set of seeds
+- goal-conditioned reward
+- Current goal is a part of the state to effect the reward function.
+- Player starts with pickaxe to mine stone easily
+- made stones passable (i.e. can walk over them)
 """
 
 import jax
@@ -546,8 +545,7 @@ class CraftaxSymbolicWebEnvNoAutoReset(EnvironmentNoAutoReset):
 
     Changes:
      1. have single achievement complete task.
-     2. collapse multiple actions to "do" action. this makes it easier for people.
-     3. Stopped having params be a static parameter. It will change as a function of the goal.
+     2. Stopped having params be a static parameter. It will change as a function of the goal.
     """
 
     def step(state: EnvState, action: int, params: EnvParams):
