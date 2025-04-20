@@ -683,30 +683,30 @@ def sweep(search: str = ""):
   ############################################################
   # Ablations
   ############################################################
-  elif search == "dyna-backtracking":
-    sweep_config = {
-      "metric": metric,
-      "parameters": {
-        "ALG": {"values": ["dyna"]},
-        "NUM_ENV_SEEDS": {"values": [512]},
-        "SEED": {"values": list(range(1, 5))},
-        "BACKTRACKING": {"values": [False]},
-      },
-      "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "dyna-backtracking-1",
-    }
-  elif search == "preplay-backtracking":
-    sweep_config = {
-      "metric": metric,
-      "parameters": {
-        "ALG": {"values": ["preplay"]},
-        "NUM_ENV_SEEDS": {"values": [512]},
-        "SEED": {"values": list(range(1, 5))},
-        "BACKTRACKING": {"values": [False]},
-      },
-      "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "preplay-backtracking-1",
-    }
+  #elif search == "dyna-backtracking":
+  #  sweep_config = {
+  #    "metric": metric,
+  #    "parameters": {
+  #      "ALG": {"values": ["dyna"]},
+  #      "NUM_ENV_SEEDS": {"values": [512]},
+  #      "SEED": {"values": list(range(1, 5))},
+  #      "BACKTRACKING": {"values": [False]},
+  #    },
+  #    "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
+  #    "group": "dyna-backtracking-1",
+  #  }
+  #elif search == "preplay-backtracking":
+  #  sweep_config = {
+  #    "metric": metric,
+  #    "parameters": {
+  #      "ALG": {"values": ["preplay"]},
+  #      "NUM_ENV_SEEDS": {"values": [512]},
+  #      "SEED": {"values": list(range(1, 5))},
+  #      "BACKTRACKING": {"values": [False]},
+  #    },
+  #    "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
+  #    "group": "preplay-backtracking-1",
+  #  }
   elif search == "preplay-main-loss-coeff":
     sweep_config = {
       "metric": metric,
@@ -732,16 +732,58 @@ def sweep(search: str = ""):
       "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "preplay-main-q-coeff-1",
     }
-  # elif search == 'alphazero-eval':
-  #  sweep_config = {
-  #      'metric': metric,
-  #      'parameters': {
-  #          "NUM_ENV_SEEDS": {'values': [32]},
-  #          "SEED": {'values': list(range(1,11))},
-  #      },
-  #      'overrides': ['alg=alphazero', 'rlenv=craftax-1m-dyna', 'user=wilka'],
-  #      'group': 'alphazero-eval-3',
-  #  }
+
+  ############################################################
+  # Preconditions
+  ############################################################
+
+  elif search == "ql-precondition":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "NUM_ENV_SEEDS": {"values": [512]},
+        "SEED": {"values": list(range(1, 5))},
+        "USE_PRECONDITION": {"values": [False]},
+      },
+      "overrides": ["alg=ql", "rlenv=craftax-10m", "user=wilka"],
+      "group": "ql-precondition-1",
+    }
+  elif search == "ql_sf-precondition":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["qlearning_sf_aux"]},
+        "NUM_ENV_SEEDS": {"values": [512]},
+        "SEED": {"values": list(range(1, 5))},
+        "USE_PRECONDITION": {"values": [False]},
+      },
+      "overrides": ["alg=ql-sf", "rlenv=craftax-10m", "user=wilka"],
+      "group": "ql-sf-precondition-1",
+    }
+  elif search == "dyna-precondition":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["dyna"]},
+        "NUM_ENV_SEEDS": {"values": [512]},
+        "SEED": {"values": list(range(1, 5))},
+        "USE_PRECONDITION": {"values": [False]},
+      },
+      "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "group": "dyna-precondition-1",
+    }
+  elif search == "preplay-precondition":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["preplay"]},
+        "NUM_ENV_SEEDS": {"values": [512]},
+        "SEED": {"values": list(range(1, 5))},
+        "USE_PRECONDITION": {"values": [False]},
+      },
+      "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "group": "preplay-precondition-1",
+    }
   else:
     raise NotImplementedError(search)
 

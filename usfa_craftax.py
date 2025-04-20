@@ -5,6 +5,7 @@ from craftax.craftax.renderer import render_craftax_pixels
 from craftax.craftax import constants
 from craftax.craftax.constants import Action
 
+import rlax
 import usfa_landmark
 from usfa_landmark import *
 from networks import CraftaxObsEncoder, CraftaxMultiGoalObsEncoder
@@ -23,7 +24,7 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
   extract_cumulants: Callable = lambda data: data.timestep.observation.state_features
   extract_task: Callable = lambda data: data.timestep.observation.task_w
   aux_coeff: float = 1.0
-
+  q_coeff: float = 1.0
   def error(
     self,
     data,
@@ -50,8 +51,9 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
 
     # Get selector actions from online Q-values for double Q-learning
     dot = lambda x, y: (x * y).sum(axis=-1)
-    vdot = jax.vmap(jax.vmap(dot, (2, None), 2), (2, None), 2)
-    online_q = vdot(online_sf, online_w)  # [T+1, B, N, A]
+    #vdot = jax.vmap(jax.vmap(dot, (2, None), 2), (2, None), 2)
+    online_w = jnp.expand_dims(online_preds.gpi_tasks, axis=-2)  # [T+1, B, N, 1, C]
+    online_q = dot(online_sf, online_w)  # [T+1, B, N, A]
     selector_actions = jnp.argmax(online_q, axis=-1)  # [T+1, B, N]
 
     # Preprocess discounts & rewards
@@ -129,10 +131,10 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
     # [T, B, N] --> [B]
     batch_q_loss_mean = batch_q_loss.mean(axis=(0, 2))
 
-    batch_loss_mean = batch_q_loss_mean + self.aux_coeff * batch_sf_loss_mean
+    batch_loss_mean = self.q_coeff * batch_q_loss_mean + self.aux_coeff * batch_sf_loss_mean
 
     # mean over policy dimension
-    batch_td_error = jnp.abs(q_td_error).mean(2) + self.aux_coeff * jnp.abs(sf_td_error)
+    batch_td_error = self.q_coeff * jnp.abs(q_td_error).mean(2) + self.aux_coeff * jnp.abs(sf_td_error)
 
     metrics = {
       "0.sf_loss": batch_sf_loss_mean.mean(),
@@ -169,6 +171,7 @@ def make_loss_fn_class(config) -> vbb.RecurrentLossFn:
     discount=config["GAMMA"],
     step_cost=config.get("STEP_COST", 0.0),
     aux_coeff=config.get("AUX_COEFF", 1.0),
+    q_coeff=config.get("Q_COEFF", 1.0),
     tx_pair=(
       rlax.SIGNED_HYPERBOLIC_PAIR
       if config.get("TX_PAIR", "none") == "hyperbolic"
@@ -223,10 +226,10 @@ class DuellingDotMLP(nn.Module):
     return sf, q_values
 
 
-class SfGpiHead(usfa_landmark.SfGpiHead):
+class SfGpiHead(nn.Module):
   num_actions: int
   state_features_dim: int
-  train_tasks: jnp.ndarray
+  all_policy_tasks: jnp.ndarray
   num_layers: int = 2
   hidden_dim: int = 512
   nsamples: int = 10
@@ -243,27 +246,28 @@ class SfGpiHead(usfa_landmark.SfGpiHead):
 
   @nn.compact
   def __call__(
-    self, usfa_input: jnp.ndarray, task: jnp.ndarray, rng: jax.random.PRNGKey
+    self, usfa_input: jnp.ndarray, task: jnp.ndarray, train_tasks: jnp.ndarray, rng: jax.random.PRNGKey
   ) -> USFAPreds:
-    return self.evaluate(usfa_input=usfa_input, task=task, support="eval")
+    return self.evaluate(usfa_input=usfa_input, task=task, train_tasks=train_tasks, support="eval")
 
-  def evaluate(self, usfa_input: jnp.ndarray, task: jnp.ndarray, support: str = "") -> USFAPreds:
+  def evaluate(self, usfa_input: jnp.ndarray, task: jnp.ndarray, train_tasks: jnp.ndarray, support: str = "") -> USFAPreds:
     support = support or self.eval_task_support
+
     if support == "train":
       policies = jnp.array(
-        [get_task_vector(task, self.all_policy_tasks) for task in self.train_tasks]
+        [get_task_vector(task, self.all_policy_tasks) for task in train_tasks]
       )
-      gpi_tasks = self.train_tasks
+      gpi_tasks = train_tasks
     elif support == "eval":
       policies = jnp.expand_dims(get_task_vector(task, self.all_policy_tasks), axis=-2)
       gpi_tasks = jnp.expand_dims(task, axis=-2)
     elif support == "train_eval":
       task_expand = jnp.expand_dims(get_task_vector(task, self.all_policy_tasks), axis=-2)
       train_policies = jnp.array(
-        [get_task_vector(task, self.all_policy_tasks) for task in self.train_tasks]
+        [get_task_vector(task, self.all_policy_tasks) for task in train_tasks]
       )
       policies = jnp.concatenate((train_policies, task_expand), axis=-2)
-      gpi_tasks = jnp.concatenate((self.train_tasks, task), axis=-1)
+      gpi_tasks = jnp.concatenate((train_tasks, task), axis=-1)
     else:
       raise RuntimeError(self.eval_task_support)
 
@@ -286,7 +290,7 @@ class SfGpiHead(usfa_landmark.SfGpiHead):
     policies = jnp.expand_dims(policies, axis=-2)
     policies = jnp.tile(policies, (1, self.num_actions, 1))
 
-    return USFAPreds(sf=sfs, policy=policies, q_vals=q_values, task=task)
+    return USFAPreds(sf=sfs, policy=policies, gpi_tasks=gpi_tasks, q_vals=q_values, task=task)
 
 
 def make_craftax_agent(
@@ -333,21 +337,93 @@ def make_craftax_agent(
   return agent, network_params, reset_fn
 
 
+class UsfaAgent(nn.Module):
+  """Note: only change is that this assumes train tasks come from observation"""
+  observation_encoder: nn.Module
+  rnn: vbb.ScannedRNN
+  sf_head: SfGpiHead
+  learn_tasks: jnp.ndarray
+  learn_z_vectors: str
+
+  def initialize(self, x: TimeStep):
+    rng = jax.random.PRNGKey(0)
+    batch_dims = (x.reward.shape[0],)
+    rnn_state = self.initialize_carry(rng, batch_dims)
+    return self.__call__(rnn_state, x, rng)
+
+  def initialize_carry(self, *args, **kwargs):
+    return self.rnn.initialize_carry(*args, **kwargs)
+
+  def __call__(
+    self, rnn_state, x: TimeStep, rng: jax.random.PRNGKey, evaluate: bool = False
+  ):
+    embedding = self.observation_encoder(x.observation)
+    rnn_in = vbb.RNNInput(obs=embedding, reset=x.first())
+    rng, _rng = jax.random.split(rng)
+    new_rnn_state, rnn_out = self.rnn(rnn_state, rnn_in, _rng)
+
+    if evaluate:
+      predictions = jax.vmap(self.sf_head.evaluate)(
+        rnn_out,
+        x.observation.task_w,
+        x.observation.train_tasks,
+      )
+    else:
+      B = rnn_out.shape[0]
+      predictions = jax.vmap(self.sf_head)(
+        # [B, D], [B, D]
+        rnn_out,
+        x.observation.task_w,
+        x.observation.train_tasks,
+        jax.random.split(rng, B),
+      )
+
+    return predictions, new_rnn_state
+
+  def unroll(self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey):
+    embedding = nn.BatchApply(self.observation_encoder)(xs.observation)
+    rnn_in = vbb.RNNInput(obs=embedding, reset=xs.first())
+    rng, _rng = jax.random.split(rng)
+    new_rnn_state, rnn_out = self.rnn.unroll(rnn_state, rnn_in, _rng)
+
+    if self.learn_z_vectors == "ALL_TASKS":
+      pred_fn = jax.vmap(self.sf_head.sfgpi, in_axes=(0, None, None, 0), out_axes=0)
+      pred_fn = jax.vmap(pred_fn, in_axes=(0, None, None, 0), out_axes=0)
+      # [N, D]
+      learn_z_vectors = jnp.array(
+        [get_task_vector(task, self.learn_tasks) for task in self.learn_tasks]
+      )
+      learn_w_vectors = self.learn_tasks 
+    elif self.learn_z_vectors == "TRAIN":
+      pred_fn = jax.vmap(jax.vmap(self.sf_head.sfgpi))
+      # [T, B, 1, D]
+      v_map_get_task_vector = jax.vmap(get_task_vector, (0, None), 0)
+      v_map_get_task_vector = jax.vmap(v_map_get_task_vector, (0, None), 0)
+      learn_z_vectors = jnp.expand_dims(v_map_get_task_vector(xs.observation.task_w, self.learn_tasks), axis=-2)
+      learn_w_vectors = jnp.expand_dims(xs.observation.task_w, axis=-2)
+    else:
+      raise ValueError(self.learn_z_vectors)
+    predictions = pred_fn(
+      # usfa_input (T, B, D), learn_z_vectors (N, D), task (C)
+      # NOTE: task isn't used in lsos
+      rnn_out, learn_z_vectors, learn_w_vectors, xs.observation.task_w)
+
+    return predictions, new_rnn_state
+
 def make_multigoal_craftax_agent(
   config: dict,
   env: environment.Environment,
   env_params: environment.EnvParams,
   example_timestep: TimeStep,
   rng: jax.random.PRNGKey,
-  train_tasks: jnp.ndarray,
   all_tasks: jnp.ndarray,
 ) -> Tuple[nn.Module, Params, vbb.AgentResetFn]:
   sf_head = SfGpiHead(
     num_actions=env.action_space(env_params).n,
     state_features_dim=example_timestep.observation.task_w.shape[-1],
     nsamples=config.get("NSAMPLES", 1),
-    eval_task_support=config.get("EVAL_TASK_SUPPORT", "eval"),
-    train_tasks=train_tasks,
+    all_policy_tasks=all_tasks,
+    eval_task_support=config.get("EVAL_TASK_SUPPORT", "train"),
     num_layers=config.get("NUM_SF_LAYERS", 2),
     hidden_dim=config.get("SF_HIDDEN_DIM", 512),
   )
@@ -361,6 +437,8 @@ def make_multigoal_craftax_agent(
     ),
     rnn=vbb.ScannedRNN(hidden_dim=config["AGENT_RNN_DIM"]),
     sf_head=sf_head,
+    learn_tasks=all_tasks,
+    learn_z_vectors=config.get("LEARN_VECTORS", "ALL_TASKS"),
   )
 
   rng, _rng = jax.random.split(rng)

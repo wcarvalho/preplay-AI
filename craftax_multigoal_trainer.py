@@ -302,6 +302,8 @@ def run_single(config: dict, save_path: str = None):
   test_env_params = default_params.replace(task_configs=test_configs)
   # TODO: filter out train tasks per env?
   all_tasks = active_task_vectors  # relevant for successor features
+  # this is for the "visibility" features
+  all_tasks = jnp.concatenate((all_tasks, jnp.zeros_like(all_tasks)), axis=-1)
 
   if config["OPTIMISTIC_RESET_RATIO"] == 1:
     vec_env = env = TimestepWrapper(LogWrapper(env), autoreset=True)
@@ -437,8 +439,9 @@ def sweep(search: str = ""):
       "metric": metric,
       "parameters": {
         "ALG": {"values": ["usfa"]},
-        "SEED": {"values": list(range(1, 3))},
-        "FIXED_EPSILON": {"values": [0]},
+        "SEED": {"values": list(range(1))},
+        "Q_COEFF": {"values": [0, 1.0]},
+        "LEARN_VECTORS": {"values": ['TRAIN', 'ALL_TASKS']},
       },
       "overrides": ["alg=usfa_craftax", "rlenv=craftax-multigoal", "user=wilka"],
       "group": "usfa-testing-4",
@@ -491,7 +494,7 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 11))},
       },
       "overrides": ["alg=usfa_craftax", "rlenv=craftax-multigoal", "user=wilka"],
-      "group": "usfa-final-1",
+      "group": "usfa-final-3",
     }
   elif search == "dyna-final":
     sweep_config = {
@@ -514,7 +517,7 @@ def sweep(search: str = ""):
         "alg=preplay",
         "rlenv=craftax-dyna-multigoal",
         "user=wilka"],
-      "group": "preplay-final-4",
+      "group": "preplay-final-5",
     }
 
   else:
