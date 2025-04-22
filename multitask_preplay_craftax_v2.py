@@ -23,7 +23,7 @@ import jax.tree_util as jtu
 import matplotlib.pyplot as plt
 import matplotlib
 
-matplotlib.use("Agg")
+#matplotlib.use("Agg")
 
 import wandb
 

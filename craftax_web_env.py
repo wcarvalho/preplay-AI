@@ -130,6 +130,7 @@ class StaticEnvParams:
   # Custom addiitons for human experiments
   initial_crafting_tables: bool = True
   initial_strength: int = 20
+  landmark_features: bool = False
 
 
 @struct.dataclass
@@ -755,11 +756,17 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
     visibility_state_features = jax.vmap(visibility_feature)(params.placed_goals)
     visibility_state_features = visibility_state_features.sum(axis=0)
 
-    state_features = jnp.concatenate([achievement_state_features, visibility_state_features], axis=0)
+    if self.static_env_params.landmark_features:
+      state_features = jnp.concatenate([achievement_state_features, visibility_state_features], axis=0)
+    else:
+      state_features = achievement_state_features
 
     # compute train tasks
     def task_onehot_prime(w):
-      return jnp.concatenate([w, jnp.zeros_like(visibility_state_features)], axis=0)
+      if self.static_env_params.landmark_features:
+        return jnp.concatenate([w, jnp.zeros_like(visibility_state_features)], axis=0)
+      else:
+        return w
 
     # add dummy dimensions for visibility
     task_w = task_onehot_prime(task_w)
