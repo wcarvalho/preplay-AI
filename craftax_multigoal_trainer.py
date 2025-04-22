@@ -296,7 +296,8 @@ def run_single(config: dict, save_path: str = None):
   train_configs = craftax_simulation_configs.TRAIN_CONFIGS
   test_configs = craftax_simulation_configs.TEST_CONFIGS
 
-  env = CraftaxMultiGoalSymbolicWebEnvNoAutoReset()
+  static_env_params = CraftaxMultiGoalSymbolicWebEnvNoAutoReset.default_static_params().replace(landmark_features=config["ALG"] == "usfa" or config['LANDMARK_FEATURES'])
+  env = CraftaxMultiGoalSymbolicWebEnvNoAutoReset(static_env_params=static_env_params)
   default_params = craftax_simulation_configs.default_params
   env_params = default_params.replace(task_configs=train_configs)
   test_env_params = default_params.replace(task_configs=test_configs)
@@ -431,7 +432,7 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 3))},
         "FIXED_EPSILON": {"values": [0]},
       },
-      "overrides": ["alg=ql", "rlenv=craftax-multigoal", "user=wilka"],
+      "overrides": ["alg=ql-craftax", "rlenv=craftax-multigoal", "user=wilka"],
       "group": "ql-testing-4",
     }
   elif search == "usfa":
