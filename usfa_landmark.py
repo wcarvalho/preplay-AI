@@ -231,7 +231,7 @@ class SfGpiHead(nn.Module):
         [get_task_vector(task, self.all_policy_tasks) for task in self.train_tasks]
       )
       policies = jnp.concatenate((train_policies, task_expand), axis=-2)
-      gpi_tasks = jnp.concatenate((self.train_tasks, task), axis=-1)
+      gpi_tasks = jnp.concatenate((self.train_tasks, jnp.expand_dims(task, axis=-2)), axis=-2)
     else:
       raise RuntimeError(self.eval_task_support)
 
