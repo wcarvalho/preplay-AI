@@ -517,7 +517,7 @@ def sweep(search: str = ""):
         "alg=preplay",
         "rlenv=craftax-dyna-multigoal",
         "user=wilka"],
-      "group": "preplay-final-5",
+      "group": "preplay-final-6",
     }
 
   else:
