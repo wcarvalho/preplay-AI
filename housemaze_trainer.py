@@ -747,7 +747,7 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["exp2"]},
       },
       "overrides": ["alg=ql", "rlenv=housemaze", "user=wilka"],
-      "group": "ql-final-1",
+      "group": "ql-final-run-6",
     }
   elif search == "usfa-final":
     sweep_config = {
@@ -760,7 +760,7 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["exp2"]},
       },
       "overrides": ["alg=usfa", "rlenv=housemaze", "user=wilka"],
-      "group": "usfa-final-4",
+      "group": "usfa-final-run-6",
     }
   elif search == "dyna-final":
     sweep_config = {
@@ -774,7 +774,21 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["exp2"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=housemaze", "user=wilka"],
-      "group": "dyna-final-4",
+      "group": "dyna-final-run-6",
+    }
+  elif search == "preplay-old-final":
+    sweep_config = {
+      "metric": {
+        "name": "evaluator_performance/0.0 avg_episode_return",
+        "goal": "maximize",
+      },
+      "parameters": {
+        "ALG": {"values": ["dynaq_shared"]},
+        "SEED": {"values": list(range(1, 11))},
+        "env.exp": {"values": ["exp2"]},
+      },
+      "overrides": ["alg=preplay", "rlenv=housemaze", "user=wilka"],
+      "group": "preplay-old-final-run-6",
     }
   elif search == "preplay-final":
     sweep_config = {
@@ -788,7 +802,7 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["exp2"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=housemaze", "user=wilka"],
-      "group": "preplay-final-4",
+      "group": "preplay-final-run-6",
     }
 
   else:
