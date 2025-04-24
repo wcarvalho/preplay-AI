@@ -296,7 +296,7 @@ def run_single(config: dict, save_path: str = None):
   train_configs = craftax_simulation_configs.TRAIN_CONFIGS
   test_configs = craftax_simulation_configs.TEST_CONFIGS
 
-  static_env_params = CraftaxMultiGoalSymbolicWebEnvNoAutoReset.default_static_params().replace(landmark_features=config["ALG"] == "usfa" or config['LANDMARK_FEATURES'])
+  static_env_params = CraftaxMultiGoalSymbolicWebEnvNoAutoReset.default_static_params().replace(landmark_features=config["ALG"] == "usfa" or config.get("LANDMARK_FEATURES", False))
   env = CraftaxMultiGoalSymbolicWebEnvNoAutoReset(static_env_params=static_env_params)
   default_params = craftax_simulation_configs.default_params
   env_params = default_params.replace(task_configs=train_configs)
@@ -495,7 +495,7 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 11))},
       },
       "overrides": ["alg=usfa_craftax", "rlenv=craftax-multigoal", "user=wilka"],
-      "group": "usfa-final-3",
+      "group": "usfa-final-5",
     }
   elif search == "dyna-final":
     sweep_config = {
@@ -505,7 +505,7 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 11))},
       },
       "overrides": ["alg=dyna", "rlenv=craftax-dyna-multigoal", "user=wilka"],
-      "group": "dyna-final-1",
+      "group": "dyna-final-2",
     }
   elif search == "preplay-final":
     sweep_config = {

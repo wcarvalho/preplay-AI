@@ -2220,7 +2220,7 @@ def make_jaxmaze_multigoal_agent(
       out_dim=env.num_actions(env_params),
       activation=config["ACTIVATION"],
       activate_final=False,
-      use_bias=config.get("USE_BIAS", True),
+      use_bias=config.get("USE_BIAS", False),
     ),
     q_fn_subtask=QFnCls(
       hidden_dim=config.get("Q_HIDDEN_DIM", 512),
@@ -2228,7 +2228,7 @@ def make_jaxmaze_multigoal_agent(
       out_dim=env.num_actions(env_params),
       activation=config["ACTIVATION"],
       activate_final=False,
-      use_bias=config.get("USE_BIAS", True),
+      use_bias=config.get("USE_BIAS", False),
     ),
     env=model_env,
     env_params=model_env_params,
