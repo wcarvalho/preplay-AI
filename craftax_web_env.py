@@ -774,7 +774,6 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
     train_tasks = jax.vmap(task_onehot)(params.train_objects)
     train_tasks = jax.vmap(task_onehot_prime)(train_tasks)
 
-
     return MultiGoalObservation(
       image=image,
       task_w=task_w,

@@ -296,15 +296,18 @@ def run_single(config: dict, save_path: str = None):
   train_configs = craftax_simulation_configs.TRAIN_CONFIGS
   test_configs = craftax_simulation_configs.TEST_CONFIGS
 
-  static_env_params = CraftaxMultiGoalSymbolicWebEnvNoAutoReset.default_static_params().replace(landmark_features=config["ALG"] == "usfa" or config.get("LANDMARK_FEATURES", False))
+  use_landmark_features = config["ALG"] == "usfa" or config.get("LANDMARK_FEATURES", False)
+  static_env_params = CraftaxMultiGoalSymbolicWebEnvNoAutoReset.default_static_params().replace(landmark_features=use_landmark_features)
   env = CraftaxMultiGoalSymbolicWebEnvNoAutoReset(static_env_params=static_env_params)
   default_params = craftax_simulation_configs.default_params
   env_params = default_params.replace(task_configs=train_configs)
   test_env_params = default_params.replace(task_configs=test_configs)
-  # TODO: filter out train tasks per env?
+
   all_tasks = active_task_vectors  # relevant for successor features
+
   # this is for the "visibility" features
-  all_tasks = jnp.concatenate((all_tasks, jnp.zeros_like(all_tasks)), axis=-1)
+  if use_landmark_features:
+    all_tasks = jnp.concatenate((all_tasks, jnp.zeros_like(all_tasks)), axis=-1)
 
   if config["OPTIMISTIC_RESET_RATIO"] == 1:
     vec_env = env = TimestepWrapper(LogWrapper(env), autoreset=True)
