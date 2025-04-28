@@ -29,6 +29,7 @@ import wandb
 
 import craftax_env
 import craftax_web_env
+from craftax_web_env import Achiement_to_idx
 
 from jaxneurorl import losses
 from jaxneurorl.agents.basics import TimeStep
@@ -1217,7 +1218,7 @@ def learner_log_extra(
             title += f"\n- {name}"
       elif hasattr(timesteps.state.env_state, "current_goal"):
         start_location = timesteps.state.env_state.start_position[i]
-        idx_to_achievement = {v: k for k, v in craftax_web_env.Achiement_to_idx.items()}
+        idx_to_achievement = {v: k for k, v in Achiement_to_idx.items()}
         env_goal = timesteps.state.env_state.current_goal[i]
         env_goal_name = Achievement(int(env_goal)).name
         ngoals = len(Achiement_to_idx)

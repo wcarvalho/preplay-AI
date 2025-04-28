@@ -7,7 +7,7 @@ HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue crafta
   app.parallel=none \
   app.debug=True \
   app.wandb=False \
-  app.search=ql
+  app.search=preplay-final
 
 RUNNING ON SLURM:
 python craftax_multigoal_trainer.py \
@@ -518,7 +518,7 @@ def sweep(search: str = ""):
         "alg=preplay",
         "rlenv=craftax-dyna-multigoal",
         "user=wilka"],
-      "group": "preplay-final-6",
+      "group": "preplay-final-7",
     }
 
   else:

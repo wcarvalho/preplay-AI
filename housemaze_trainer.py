@@ -788,7 +788,7 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["exp2"]},
       },
       "overrides": ["alg=preplay", "rlenv=housemaze", "user=wilka"],
-      "group": "preplay-old-final-run-6",
+      "group": "preplay-old-final-run-8",
     }
   elif search == "preplay-final":
     sweep_config = {
@@ -802,7 +802,7 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["exp2"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=housemaze", "user=wilka"],
-      "group": "preplay-final-run-6",
+      "group": "preplay-final-run-7",
     }
 
   else:
