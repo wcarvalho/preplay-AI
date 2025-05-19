@@ -736,7 +736,7 @@ def train_test_paths(
 
   if extra_positions is not None:
     for pos in extra_positions:
-      place_start_marker(ax, pos, state, image, start_color="green")
+      place_start_marker(ax, pos, state, image, start_color="orange")
 
   # Sample and place extra start positions if requested
   if num_extra_start_positions > 0:

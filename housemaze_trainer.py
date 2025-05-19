@@ -657,7 +657,7 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "SEED": {"values": list(range(1, 2))},
-        "env.exp": {"values": ["exp2"]},
+        "env.exp": {"values": ["exp3"]},
         "GAMMA": {"values": [0.99, 0.992]},
         "STEP_COST": {"values": [0.0001]},
         "NUM_Q_LAYERS": {"values": [1, 2, 3]},
@@ -674,7 +674,7 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "SEED": {"values": list(range(1, 2))},
-        "env.exp": {"values": ["exp2"]},
+        "env.exp": {"values": ["exp3"]},
         #"STEP_COST": {"values": [0.01, 0.005, 0.001]},
         "LEARN_VECTORS": {"values": ['TRAIN', 'ALL_TASKS']},
         #"VIS_COEFF": {"values": [0.0, 0.1]},
@@ -691,7 +691,7 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["dyna"]},
         "SEED": {"values": list(range(1))},
-        "env.exp": {"values": ["exp2"]},
+        "env.exp": {"values": ["exp3"]},
         "COMBINE_REAL_SIM": {"values": [True]},
         #"SIM_EPSILON_SETTING": {"values": [3]},
         #"OFFTASK_SIMULATION": {"values": [False]},
@@ -709,7 +709,7 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": list(range(2))},
-        "env.exp": {"values": ["exp2"]},
+        "env.exp": {"values": ["exp3"]},
         "Q_COEFF": {"values": [.1, 0.0]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=housemaze", "user=wilka"],
@@ -724,7 +724,7 @@ def sweep(search: str = ""):
   #    "parameters": {
   #      "ALG": {"values": ["dynaq_shared"]},
   #      "SEED": {"values": list(range(1, 2))},
-  #      "env.exp": {"values": ["exp2"]},
+  #      "env.exp": {"values": ["exp3"]},
   #      "GAMMA": {"values": [0.99, 0.992]},
   #      "STEP_COST": {"values": [0.0001]},
   #      "NUM_Q_LAYERS": {"values": [1, 2, 3]},
@@ -744,7 +744,7 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "SEED": {"values": list(range(1, 11))},
-        "env.exp": {"values": ["exp2"]},
+        "env.exp": {"values": ["exp3"]},
       },
       "overrides": ["alg=ql", "rlenv=housemaze", "user=wilka"],
       "group": "ql-final-run-6",
@@ -757,7 +757,7 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "SEED": {"values": list(range(1, 11))},
-        "env.exp": {"values": ["exp2"]},
+        "env.exp": {"values": ["exp3"]},
       },
       "overrides": ["alg=usfa", "rlenv=housemaze", "user=wilka"],
       "group": "usfa-final-run-6",
@@ -771,7 +771,7 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["dyna"]},
         "SEED": {"values": list(range(1, 11))},
-        "env.exp": {"values": ["exp2"]},
+        "env.exp": {"values": ["exp3"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=housemaze", "user=wilka"],
       "group": "dyna-final-run-6",
@@ -785,7 +785,7 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["dynaq_shared"]},
         "SEED": {"values": list(range(1, 11))},
-        "env.exp": {"values": ["exp2"]},
+        "env.exp": {"values": ["exp3"]},
       },
       "overrides": ["alg=preplay", "rlenv=housemaze", "user=wilka"],
       "group": "preplay-old-final-run-8",
@@ -799,7 +799,7 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": list(range(1, 11))},
-        "env.exp": {"values": ["exp2"]},
+        "env.exp": {"values": ["exp3"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=housemaze", "user=wilka"],
       "group": "preplay-final-run-7",
