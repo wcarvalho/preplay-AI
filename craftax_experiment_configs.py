@@ -16,7 +16,6 @@ from craftax.craftax.constants import (
   TEXTURES,
   BLOCK_PIXEL_SIZE_IMG,
   BLOCK_PIXEL_SIZE_HUMAN,
-
 )
 import jax
 import craftax_utils
@@ -287,7 +286,6 @@ def make_block_env_params(config: BlockConfig, default_params: struct.PyTreeNode
 
   assert len(goal_objects) == len(goal_locations)
 
-
   env_params = default_params.replace(
     world_seeds=(config.world_seed,),
     goal_locations=goal_locations,
@@ -420,7 +418,9 @@ def visualize_block_config(config: BlockConfig, jax_env, **kwargs):
     # Reset environment
     key = jax.random.PRNGKey(0)
     obs, state = jax_env.reset(key, render_env_params)
-    import ipdb; ipdb.set_trace()
+    import ipdb
+
+    ipdb.set_trace()
     # Get partial observation using partial renderer
     obs = render_partial(state, block_pixel_size=BLOCK_PIXEL_SIZE_IMG).astype(np.uint8)
 

@@ -17,7 +17,7 @@ from gymnax.environments import environment
 import matplotlib.pyplot as plt
 import matplotlib
 
-#matplotlib.use("Agg")
+# matplotlib.use("Agg")
 
 
 from visualizer import plot_frames
@@ -25,6 +25,7 @@ from visualizer import plot_frames
 from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
 from jaxneurorl.agents import qlearning as base_agent
+import networks
 from networks import CraftaxObsEncoder, CategoricalHouzemazeObsEncoder
 
 
@@ -111,15 +112,28 @@ def make_housemaze_agent(
       cell_type=cell_type,
     )
 
-  agent = RnnAgent(
-    observation_encoder=CategoricalHouzemazeObsEncoder(
+  float_obs = config.get("FLOAT_OBS", False)
+  if float_obs:
+    observation_encoder = networks.FloatHouzemazeObsEncoder(
+      mlp_hidden_dim=config["MLP_HIDDEN_DIM"],
+      num_mlp_layers=config["NUM_MLP_LAYERS"],
+      activation=config["ACTIVATION"],
+      norm_type=config.get("NORM_TYPE", "none"),
+      word_embed_init=config.get("WORD_EMBED_INIT", True),
+      use_bias=config.get("USE_BIAS", True),
+    )
+  else:
+    observation_encoder = networks.CategoricalHouzemazeObsEncoder(
+      num_categories=max(10_000, env.total_categories(env_params)),
       embed_hidden_dim=config["EMBED_HIDDEN_DIM"],
       mlp_hidden_dim=config["MLP_HIDDEN_DIM"],
       num_embed_layers=config["NUM_EMBED_LAYERS"],
       num_mlp_layers=config["NUM_MLP_LAYERS"],
       activation=config["ACTIVATION"],
       norm_type=config.get("NORM_TYPE", "none"),
-    ),
+    )
+  agent = RnnAgent(
+    observation_encoder=observation_encoder,
     rnn=rnn,
     q_fn=base_agent.MLP(
       hidden_dim=config.get("Q_HIDDEN_DIM", 512),

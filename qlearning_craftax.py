@@ -16,7 +16,7 @@ from gymnax.environments import environment
 import matplotlib.pyplot as plt
 import matplotlib
 
-#matplotlib.use("Agg")
+# matplotlib.use("Agg")
 
 
 from jaxneurorl.agents.basics import TimeStep
@@ -322,7 +322,6 @@ def make_craftax_agent(
       use_bias=config.get("USE_BIAS", True),
     ),
   )
-
 
   rng, _rng = jax.random.split(rng)
   network_params = agent.init(_rng, example_timestep, method=agent.initialize)

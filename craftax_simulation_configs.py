@@ -1,4 +1,3 @@
-
 from typing import Tuple, List
 from craftax_web_env import (
   CraftaxSymbolicWebEnvNoAutoReset,
@@ -47,8 +46,32 @@ env_params = EnvParams()
 TRAIN_CONFIGS = []
 TRAIN_EVAL_CONFIGS = []
 TEST_CONFIGS = []
-# Create cache path
-cache_dir = "craftax_cache/optimal_paths"
+
+
+def get_path_waypoints(path, num: int = 20):
+  path = path[:-1]  # remove last point.
+  if num <= 2:
+    return np.array([path[0], path[-1]])
+
+  npoints = len(path)
+  if npoints <= 2:
+    return np.array(path)
+
+  if num >= npoints:
+    return path
+
+  # Get first and last points, then num-2 evenly spaced points between them
+  indices = [0, npoints - 1]  # first and last points
+  idx = float(npoints - 1)
+  step = (npoints - 2) / (num - 2)  # spacing between points excluding first point
+  while len(indices) < num:
+    idx = idx - step
+    indices.append(int(idx))
+  indices.sort()
+  return np.array([path[i] for i in indices])
+
+# Create cache path in the directory of this file
+cache_dir = os.path.join(os.path.dirname(__file__), "craftax_cache", "training_paths")
 os.makedirs(cache_dir, exist_ok=True)
 for block_config in PATHS_CONFIGS:
   block_env_params = make_block_env_params(block_config, env_params)
@@ -77,15 +100,9 @@ for block_config in PATHS_CONFIGS:
 
     return params, path
 
-  def get_path_waypoints(path, num_segments=10):
-    indices = np.linspace(0, len(path) - 1, num_segments + 1, dtype=int)
-
-    indices = indices[:-1]
-    # Get waypoints at those indices
-    positions = path[indices]
-    return positions
-
-  def add_to_configs(world_seed, start_position, goal_object, configs, evaluation=False):
+  def add_to_configs(
+    world_seed, start_position, goal_object, configs, evaluation=False
+  ):
     params, path = get_params_and_path(
       world_seed=world_seed,
       start_position=start_position,
@@ -134,7 +151,9 @@ for block_config in PATHS_CONFIGS:
       evaluation=True,
     )
 
-  for start_position in block_config.start_eval_positions + block_config.start_train_positions:
+  for start_position in (
+    block_config.start_eval_positions + block_config.start_train_positions
+  ):
     # train main
     add_to_configs(
       world_seed=block_config.world_seed,
@@ -168,6 +187,7 @@ default_params = MultigoalEnvParams().replace(
   test_objects=dummy_config.test_objects.astype(jnp.int32),
   task_configs=TRAIN_CONFIGS,
 )
+
 
 def make_multigoal_env_params(configs):
   return default_params.replace(

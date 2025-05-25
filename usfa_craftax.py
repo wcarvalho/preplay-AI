@@ -25,6 +25,7 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
   extract_task: Callable = lambda data: data.timestep.observation.task_w
   aux_coeff: float = 1.0
   q_coeff: float = 1.0
+
   def error(
     self,
     data,
@@ -51,7 +52,7 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
 
     # Get selector actions from online Q-values for double Q-learning
     dot = lambda x, y: (x * y).sum(axis=-1)
-    #vdot = jax.vmap(jax.vmap(dot, (2, None), 2), (2, None), 2)
+    # vdot = jax.vmap(jax.vmap(dot, (2, None), 2), (2, None), 2)
     online_w = jnp.expand_dims(online_preds.gpi_tasks, axis=-2)  # [T+1, B, N, 1, C]
     online_q = dot(online_sf, online_w)  # [T+1, B, N, A]
     selector_actions = jnp.argmax(online_q, axis=-1)  # [T+1, B, N]
@@ -131,10 +132,14 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
     # [T, B, N] --> [B]
     batch_q_loss_mean = batch_q_loss.mean(axis=(0, 2))
 
-    batch_loss_mean = self.q_coeff * batch_q_loss_mean + self.aux_coeff * batch_sf_loss_mean
+    batch_loss_mean = (
+      self.q_coeff * batch_q_loss_mean + self.aux_coeff * batch_sf_loss_mean
+    )
 
     # mean over policy dimension
-    batch_td_error = self.q_coeff * jnp.abs(q_td_error).mean(2) + self.aux_coeff * jnp.abs(sf_td_error)
+    batch_td_error = self.q_coeff * jnp.abs(q_td_error).mean(
+      2
+    ) + self.aux_coeff * jnp.abs(sf_td_error)
 
     metrics = {
       "0.sf_loss": batch_sf_loss_mean.mean(),
@@ -246,11 +251,23 @@ class SfGpiHead(nn.Module):
 
   @nn.compact
   def __call__(
-    self, usfa_input: jnp.ndarray, task: jnp.ndarray, train_tasks: jnp.ndarray, rng: jax.random.PRNGKey
+    self,
+    usfa_input: jnp.ndarray,
+    task: jnp.ndarray,
+    train_tasks: jnp.ndarray,
+    rng: jax.random.PRNGKey,
   ) -> USFAPreds:
-    return self.evaluate(usfa_input=usfa_input, task=task, train_tasks=train_tasks, support="eval")
+    return self.evaluate(
+      usfa_input=usfa_input, task=task, train_tasks=train_tasks, support="eval"
+    )
 
-  def evaluate(self, usfa_input: jnp.ndarray, task: jnp.ndarray, train_tasks: jnp.ndarray, support: str = "") -> USFAPreds:
+  def evaluate(
+    self,
+    usfa_input: jnp.ndarray,
+    task: jnp.ndarray,
+    train_tasks: jnp.ndarray,
+    support: str = "",
+  ) -> USFAPreds:
     support = support or self.eval_task_support
 
     if support == "train":
@@ -262,7 +279,9 @@ class SfGpiHead(nn.Module):
       policies = jnp.expand_dims(get_task_vector(task, self.all_policy_tasks), axis=-2)
       gpi_tasks = jnp.expand_dims(task, axis=-2)
     elif support == "train_eval":
-      task_expand = jnp.expand_dims(get_task_vector(task, self.all_policy_tasks), axis=-2)
+      task_expand = jnp.expand_dims(
+        get_task_vector(task, self.all_policy_tasks), axis=-2
+      )
       train_policies = jnp.array(
         [get_task_vector(task, self.all_policy_tasks) for task in train_tasks]
       )
@@ -271,10 +290,16 @@ class SfGpiHead(nn.Module):
     else:
       raise RuntimeError(self.eval_task_support)
 
-    return self.sfgpi(usfa_input=usfa_input, policies=policies, gpi_tasks=gpi_tasks, task=task)
+    return self.sfgpi(
+      usfa_input=usfa_input, policies=policies, gpi_tasks=gpi_tasks, task=task
+    )
 
   def sfgpi(
-    self, usfa_input: jnp.ndarray, policies: jnp.ndarray, gpi_tasks: jnp.ndarray, task: jnp.ndarray
+    self,
+    usfa_input: jnp.ndarray,
+    policies: jnp.ndarray,
+    gpi_tasks: jnp.ndarray,
+    task: jnp.ndarray,
   ) -> USFAPreds:
     def compute_sf_q(sf_input: jnp.ndarray, policy: jnp.ndarray, task: jnp.ndarray):
       sf_input = jnp.concatenate((sf_input, policy), axis=-1)  # 2D
@@ -290,7 +315,9 @@ class SfGpiHead(nn.Module):
     policies = jnp.expand_dims(policies, axis=-2)
     policies = jnp.tile(policies, (1, self.num_actions, 1))
 
-    return USFAPreds(sf=sfs, policy=policies, gpi_tasks=gpi_tasks, q_vals=q_values, task=task)
+    return USFAPreds(
+      sf=sfs, policy=policies, gpi_tasks=gpi_tasks, q_vals=q_values, task=task
+    )
 
 
 def make_craftax_agent(
@@ -339,6 +366,7 @@ def make_craftax_agent(
 
 class UsfaAgent(nn.Module):
   """Note: only change is that this assumes train tasks come from observation"""
+
   observation_encoder: nn.Module
   rnn: vbb.ScannedRNN
   sf_head: SfGpiHead
@@ -393,22 +421,29 @@ class UsfaAgent(nn.Module):
       learn_z_vectors = jnp.array(
         [get_task_vector(task, self.learn_tasks) for task in self.learn_tasks]
       )
-      learn_w_vectors = self.learn_tasks 
+      learn_w_vectors = self.learn_tasks
     elif self.learn_z_vectors == "TRAIN":
       pred_fn = jax.vmap(jax.vmap(self.sf_head.sfgpi))
       # [T, B, 1, D]
       v_map_get_task_vector = jax.vmap(get_task_vector, (0, None), 0)
       v_map_get_task_vector = jax.vmap(v_map_get_task_vector, (0, None), 0)
-      learn_z_vectors = jnp.expand_dims(v_map_get_task_vector(xs.observation.task_w, self.learn_tasks), axis=-2)
+      learn_z_vectors = jnp.expand_dims(
+        v_map_get_task_vector(xs.observation.task_w, self.learn_tasks), axis=-2
+      )
       learn_w_vectors = jnp.expand_dims(xs.observation.task_w, axis=-2)
     else:
       raise ValueError(self.learn_z_vectors)
     predictions = pred_fn(
       # usfa_input (T, B, D), learn_z_vectors (N, D), task (C)
       # NOTE: task isn't used in lsos
-      rnn_out, learn_z_vectors, learn_w_vectors, xs.observation.task_w)
+      rnn_out,
+      learn_z_vectors,
+      learn_w_vectors,
+      xs.observation.task_w,
+    )
 
     return predictions, new_rnn_state
+
 
 def make_multigoal_craftax_agent(
   config: dict,

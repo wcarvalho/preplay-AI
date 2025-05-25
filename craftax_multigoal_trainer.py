@@ -296,8 +296,14 @@ def run_single(config: dict, save_path: str = None):
   train_configs = craftax_simulation_configs.TRAIN_CONFIGS
   test_configs = craftax_simulation_configs.TEST_CONFIGS
 
-  use_landmark_features = config["ALG"] == "usfa" or config.get("LANDMARK_FEATURES", False)
-  static_env_params = CraftaxMultiGoalSymbolicWebEnvNoAutoReset.default_static_params().replace(landmark_features=use_landmark_features)
+  use_landmark_features = config["ALG"] == "usfa" or config.get(
+    "LANDMARK_FEATURES", False
+  )
+  static_env_params = (
+    CraftaxMultiGoalSymbolicWebEnvNoAutoReset.default_static_params().replace(
+      landmark_features=use_landmark_features
+    )
+  )
   env = CraftaxMultiGoalSymbolicWebEnvNoAutoReset(static_env_params=static_env_params)
   default_params = craftax_simulation_configs.default_params
   env_params = default_params.replace(task_configs=train_configs)
@@ -444,8 +450,8 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["usfa"]},
         "SEED": {"values": list(range(1))},
-        "Q_COEFF": {"values": [0, 1.0]},
-        "LEARN_VECTORS": {"values": ['TRAIN', 'ALL_TASKS']},
+        "MAINQ_COEFF": {"values": [0, 1.0]},
+        "LEARN_VECTORS": {"values": ["TRAIN", "ALL_TASKS"]},
       },
       "overrides": ["alg=usfa_craftax", "rlenv=craftax-multigoal", "user=wilka"],
       "group": "usfa-testing-4",
@@ -468,7 +474,7 @@ def sweep(search: str = ""):
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": list(range(1, 2))},
         "SHARE_Q_FN": {"values": [True, False]},
-        #"WINDOW_SIZE": {"values": [.5, 1.0]},
+        # "WINDOW_SIZE": {"values": [.5, 1.0]},
         "NUM_PRED_LAYERS": {"values": [2, 3]},
         "OBS_INCLUDE_GOAL": {"values": [True, False]},
         "OPTIMISTIC_RESET_RATIO": {"values": [1]},
@@ -517,10 +523,7 @@ def sweep(search: str = ""):
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": list(range(1, 11))},
       },
-      "overrides": [
-        "alg=preplay",
-        "rlenv=craftax-dyna-multigoal",
-        "user=wilka"],
+      "overrides": ["alg=preplay", "rlenv=craftax-dyna-multigoal", "user=wilka"],
       "group": "preplay-final-7",
     }
 

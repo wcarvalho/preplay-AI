@@ -11,7 +11,7 @@ import numpy as np
 import wandb
 import matplotlib.pyplot as plt
 
-
+from housemaze import renderer
 from visualizer import plot_frames
 from jaxneurorl.agents.basics import TimeStep
 
@@ -269,52 +269,40 @@ def experience_logger(
       actions = jax.tree_map(lambda x: x[0], os.action_buffer.experience)
       # predictions = jax.tree_map(lambda x: x[0], os.prediction_buffer.experience)
 
-      #################
-      # frames
-      #################
-      obs_images = []
-      for idx in range(max_len):
-        index = lambda y: jax.tree_map(lambda x: x[idx], y)
-        obs_image = render_fn(index(timesteps.state))
-        obs_images.append(obs_image)
+      # Get maze dimensions and create figure
+      maze_height, maze_width, _ = timesteps.state.grid[0].shape
+      fig, ax = plt.subplots(1, figsize=(8, 8))
 
-      #################
-      # actions
-      #################
-      def action_name(a):
-        if action_names is not None:
-          name = action_names.get(int(a), "ERROR?")
-          return f"action {int(a)}: {name}"
-        else:
-          return f"action: {int(a)}"
+      # Get mask for states within episode (non-terminal)
+      non_terminal = timesteps.discount
+      is_last = timesteps.last()
+      term_cumsum = jnp.cumsum(is_last, -1)
+      in_episode = (term_cumsum + non_terminal) < 2
 
-      actions_taken = [action_name(a) for a in actions]
+      # Get actions and positions for trajectory
+      episode_actions = actions[in_episode][:-1]  # Actions that led to each state
+      episode_positions = jax.tree_map(lambda x: x[in_episode][:-1], timesteps.state.agent_pos)
 
-      #################
-      # plot
-      #################
-      index = lambda t, idx: jax.tree_map(lambda x: x[idx], t)
+      # Render initial state as background
+      initial_state = jax.tree_map(lambda x: x[0], timesteps.state)
+      img = render_fn(initial_state)
 
-      def panel_title_fn(timesteps, i):
-        task_name = get_task_name(extract_task_info(index(timesteps, i)))
-        title = f"{task_name}"
-
-        step_type = int(timesteps.step_type[i])
-        step_type = ["first", "mid", "|last|"][step_type]
-        title += f"\nt={i}, type={step_type}"
-
-        if i < len(actions_taken):
-          title += f"\n{actions_taken[i]}"
-        title += f"\nr={timesteps.reward[i]}, $\\gamma={timesteps.discount[i]}$"
-
-        return title
-
-      fig = plot_frames(
-        timesteps=timesteps,
-        frames=obs_images,
-        panel_title_fn=panel_title_fn,
-        ncols=6,
+      # Place arrows showing trajectory
+      renderer.place_arrows_on_image(
+        img, episode_positions, episode_actions, 
+        maze_height, maze_width, arrow_scale=5, ax=ax
       )
+      
+      # Add title with task and reward information
+      index = lambda t, idx: jax.tree_map(lambda x: x[idx], t)
+      first_timestep = index(timesteps, 0)
+      task_name = get_task_name(extract_task_info(first_timestep))
+
+      total_reward = timesteps.reward[in_episode].sum()
+
+      title = f"{task_name}\nReward: {total_reward:.2f}"
+      ax.set_title(title, fontsize=10)
+      ax.axis('off')  # Remove axes for cleaner look
 
       if wandb.run is not None:
         wandb.log({f"{key}_example/trajectory": wandb.Image(fig)})

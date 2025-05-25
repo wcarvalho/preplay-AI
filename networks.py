@@ -26,6 +26,7 @@ class CategoricalHouzemazeObsEncoder(nn.Module):
   num_embed_layers: int = 0
   norm_type: str = "none"
   activation: str = "relu"
+  include_rotation: bool = False
 
   @nn.compact
   def __call__(self, obs: Observation, train: bool = False):
@@ -48,12 +49,14 @@ class CategoricalHouzemazeObsEncoder(nn.Module):
     else:
       raise NotImplementedError(self.norm_type)
 
+    rotation_input = (expand(obs.rotation),) if self.include_rotation else ()
     all_flattened = jnp.concatenate(
       (
         flatten(obs.image),
         obs.position,
         expand(obs.direction),
         expand(obs.prev_action),
+        *rotation_input,
       ),
       axis=-1,
     ).astype(jnp.int32)
@@ -63,12 +66,15 @@ class CategoricalHouzemazeObsEncoder(nn.Module):
     )(all_flattened)
     embedding = flatten(embedding)
     embedding = norm(embedding)
-    embedding = MLP(
-      self.mlp_hidden_dim,
-      self.num_embed_layers,
-      norm_type=self.norm_type,
-      activation=self.activation,
-    )(embedding)
+    if self.num_embed_layers == 1:
+      embedding = nn.Dense(self.mlp_hidden_dim)(embedding)
+    else:
+      embedding = MLP(
+        hidden_dim=self.mlp_hidden_dim,
+        num_layers=self.num_embed_layers,
+        norm_type=self.norm_type,
+        activation=self.activation,
+      )(embedding)
 
     if self.include_task:
       kernel_init = nn.initializers.variance_scaling(
@@ -85,13 +91,54 @@ class CategoricalHouzemazeObsEncoder(nn.Module):
       outputs = embedding
 
     outputs = MLP(
-      self.mlp_hidden_dim,
-      self.num_mlp_layers,
+      hidden_dim=self.mlp_hidden_dim,
+      num_layers=self.num_mlp_layers,
       norm_type=self.norm_type,
       activation=self.activation,
     )(outputs)
 
     return outputs
+
+
+class FloatHouzemazeObsEncoder(nn.Module):
+  """_summary_
+
+  - observation encoder: CNN over binary inputs
+  - MLP with truncated-normal-initialized Linear layer as initial layer for other inputs
+  """
+
+  include_task: bool = True
+  mlp_hidden_dim: int = 256
+  num_mlp_layers: int = 0
+  norm_type: str = "none"
+  activation: str = "relu"
+  word_embed_init: bool = False
+  use_bias: bool = True
+
+  @nn.compact
+  def __call__(self, obs: Observation, train: bool = False):
+    if self.word_embed_init:
+      kernel_init = nn.initializers.variance_scaling(
+        1.0, "fan_in", "normal", out_axis=0
+      )
+      linear = lambda x: nn.Dense(
+        self.mlp_hidden_dim, kernel_init=kernel_init, use_bias=self.use_bias
+      )(x)
+    else:
+      linear = lambda x: nn.Dense(self.mlp_hidden_dim, use_bias=self.use_bias)(x)
+
+    out = obs.image
+    for _ in range(self.num_mlp_layers):
+      out = linear(out)
+
+    if self.include_task:
+      kernel_init = nn.initializers.variance_scaling(
+        1.0, "fan_in", "normal", out_axis=0
+      )
+      task_w = nn.Dense(128, kernel_init=kernel_init)(obs.task_w.astype(jnp.float32))
+      out = jnp.concatenate((out, task_w), axis=-1)
+
+    return out
 
 
 class CraftaxObsEncoder(nn.Module):

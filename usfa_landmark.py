@@ -22,12 +22,15 @@ from jaxneurorl import losses
 from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
 
+from networks import CategoricalHouzemazeObsEncoder
+
 Params = flax.core.FrozenDict
 
 
 @struct.dataclass
 class UsfaR2D2LossFn(vbb.RecurrentLossFn):
   """NOTE: Main change is to have offtask_vectors as a parameter"""
+
   extract_cumulants: Callable = lambda data: data.timestep.observation.state_features
   extract_task: Callable = lambda data: data.timestep.observation.task_w
 
@@ -144,14 +147,13 @@ def make_optimizer(config: dict) -> optax.GradientTransformation:
   )
 
 
-
-
 class USFAPreds(NamedTuple):
   q_vals: jnp.ndarray  # q-value
   sf: jnp.ndarray  # successor features
   policy: jnp.ndarray  # policy vector
   task: jnp.ndarray  # task vector (potentially embedded)
   gpi_tasks: jnp.ndarray  # task vectors
+
 
 def extract_timestep_input(timestep: TimeStep):
   return vbb.RNNInput(obs=timestep.observation, reset=timestep.first())
@@ -193,7 +195,7 @@ class MLP(nn.Module):
 class SfGpiHead(nn.Module):
   num_actions: int
   state_features_dim: int
-  train_tasks: jnp.ndarray
+  # train_tasks: jnp.ndarray
   all_policy_tasks: jnp.ndarray
   num_layers: int = 2
   hidden_dim: int = 512
@@ -215,30 +217,46 @@ class SfGpiHead(nn.Module):
   ) -> USFAPreds:
     return self.evaluate(usfa_input=usfa_input, task=task, support="eval")
 
-  def evaluate(self, usfa_input: jnp.ndarray, task: jnp.ndarray, support: str = "") -> USFAPreds:
+  def evaluate(
+    self,
+    usfa_input: jnp.ndarray,
+    task: jnp.ndarray,
+    train_tasks: jnp.ndarray = None,
+    support: str = "",
+  ) -> USFAPreds:
     support = support or self.eval_task_support
     if support == "train":
       policies = jnp.array(
-        [get_task_vector(task, self.all_policy_tasks) for task in self.train_tasks]
+        [get_task_vector(task, self.all_policy_tasks) for task in train_tasks]
       )
-      gpi_tasks = self.train_tasks
+      gpi_tasks = train_tasks
     elif support == "eval":
       policies = jnp.expand_dims(get_task_vector(task, self.all_policy_tasks), axis=-2)
       gpi_tasks = jnp.expand_dims(task, axis=-2)
     elif support == "train_eval":
-      task_expand = jnp.expand_dims(get_task_vector(task, self.all_policy_tasks), axis=-2)
+      task_expand = jnp.expand_dims(
+        get_task_vector(task, self.all_policy_tasks), axis=-2
+      )
       train_policies = jnp.array(
-        [get_task_vector(task, self.all_policy_tasks) for task in self.train_tasks]
+        [get_task_vector(task, self.all_policy_tasks) for task in train_tasks]
       )
       policies = jnp.concatenate((train_policies, task_expand), axis=-2)
-      gpi_tasks = jnp.concatenate((self.train_tasks, jnp.expand_dims(task, axis=-2)), axis=-2)
+      gpi_tasks = jnp.concatenate(
+        (train_tasks, jnp.expand_dims(task, axis=-2)), axis=-2
+      )
     else:
       raise RuntimeError(self.eval_task_support)
 
-    return self.sfgpi(usfa_input=usfa_input, policies=policies, gpi_tasks=gpi_tasks, task=task)
+    return self.sfgpi(
+      usfa_input=usfa_input, policies=policies, gpi_tasks=gpi_tasks, task=task
+    )
 
   def sfgpi(
-    self, usfa_input: jnp.ndarray, policies: jnp.ndarray, gpi_tasks: jnp.ndarray, task: jnp.ndarray
+    self,
+    usfa_input: jnp.ndarray,
+    policies: jnp.ndarray,
+    gpi_tasks: jnp.ndarray,
+    task: jnp.ndarray,
   ) -> USFAPreds:
     def compute_sf_q(sf_input: jnp.ndarray, policy: jnp.ndarray, task: jnp.ndarray):
       sf_input = jnp.concatenate((sf_input, policy))  # 2D
@@ -257,7 +275,9 @@ class SfGpiHead(nn.Module):
     policies = jnp.expand_dims(policies, axis=-2)
     policies = jnp.tile(policies, (1, self.num_actions, 1))
 
-    return USFAPreds(sf=sfs, policy=policies, q_vals=q_values, gpi_tasks=gpi_tasks, task=task)
+    return USFAPreds(
+      sf=sfs, policy=policies, q_vals=q_values, gpi_tasks=gpi_tasks, task=task
+    )
 
 
 class UsfaAgent(nn.Module):
@@ -285,7 +305,9 @@ class UsfaAgent(nn.Module):
     new_rnn_state, rnn_out = self.rnn(rnn_state, rnn_in, _rng)
 
     if evaluate:
-      predictions = jax.vmap(self.sf_head.evaluate)(rnn_out, x.observation.task_w)
+      predictions = jax.vmap(self.sf_head.evaluate)(
+        rnn_out, x.observation.task_w, x.observation.train_tasks
+      )
     else:
       B = rnn_out.shape[0]
       predictions = jax.vmap(self.sf_head)(
@@ -310,20 +332,26 @@ class UsfaAgent(nn.Module):
       learn_z_vectors = jnp.array(
         [get_task_vector(task, self.learn_tasks) for task in self.learn_tasks]
       )
-      learn_w_vectors = self.learn_tasks 
+      learn_w_vectors = self.learn_tasks
     elif self.learn_z_vectors == "TRAIN":
       pred_fn = jax.vmap(jax.vmap(self.sf_head.sfgpi))
       # [T, B, 1, D]
       v_map_get_task_vector = jax.vmap(get_task_vector, (0, None), 0)
       v_map_get_task_vector = jax.vmap(v_map_get_task_vector, (0, None), 0)
-      learn_z_vectors = jnp.expand_dims(v_map_get_task_vector(xs.observation.task_w, self.learn_tasks), axis=-2)
+      learn_z_vectors = jnp.expand_dims(
+        v_map_get_task_vector(xs.observation.task_w, self.learn_tasks), axis=-2
+      )
       learn_w_vectors = jnp.expand_dims(xs.observation.task_w, axis=-2)
     else:
       raise ValueError(self.learn_z_vectors)
     predictions = pred_fn(
       # usfa_input (T, B, D), learn_z_vectors (N, D), task (C)
       # NOTE: task isn't used in lsos
-      rnn_out, learn_z_vectors, learn_w_vectors, xs.observation.task_w)
+      rnn_out,
+      learn_z_vectors,
+      learn_w_vectors,
+      xs.observation.task_w,
+    )
 
     return predictions, new_rnn_state
 
@@ -336,21 +364,29 @@ def make_agent(
   rng: jax.random.PRNGKey,
   train_tasks: jnp.ndarray,
   all_tasks: jnp.ndarray,
-  ObsEncoderCls: nn.Module,
 ) -> Tuple[nn.Module, Params, vbb.AgentResetFn]:
+  observation_encoder = CategoricalHouzemazeObsEncoder(
+    num_categories=max(10_000, env.total_categories(env_params)),
+    embed_hidden_dim=config["EMBED_HIDDEN_DIM"],
+    mlp_hidden_dim=config["MLP_HIDDEN_DIM"],
+    num_embed_layers=config["NUM_EMBED_LAYERS"],
+    num_mlp_layers=config["NUM_MLP_LAYERS"],
+    activation=config["ACTIVATION"],
+    norm_type=config.get("NORM_TYPE", "none"),
+  )
   sf_head = SfGpiHead(
     num_actions=env.num_actions(env_params),
     state_features_dim=example_timestep.observation.task_w.shape[-1],
     nsamples=1,
     eval_task_support=config.get("EVAL_TASK_SUPPORT", "train"),
-    train_tasks=train_tasks,
+    # train_tasks=train_tasks,
     all_policy_tasks=all_tasks,
     num_layers=config.get("NUM_SF_LAYERS", 1),
     hidden_dim=config.get("SF_HIDDEN_DIM", 512),
   )
 
   agent = UsfaAgent(
-    observation_encoder=ObsEncoderCls(),
+    observation_encoder=observation_encoder,
     rnn=vbb.ScannedRNN(hidden_dim=config["AGENT_RNN_DIM"]),
     sf_head=sf_head,
     learn_tasks=all_tasks,
@@ -393,11 +429,12 @@ class FixedEpsilonGreedy:
     rng = jax.random.split(rng, q_vals.shape[0])
     return jax.vmap(epsilon_greedy_act, in_axes=(0, 0, 0))(q_vals, self.epsilons, rng)
 
+
 def remove_gpi_dim_from_preds(preds: USFAPreds):
   return preds._replace(
-    sf=preds.sf[:, 0],
-    gpi_tasks=preds.gpi_tasks[:, 0],
-    policy=preds.policy[:, 0])
+    sf=preds.sf[:, 0], gpi_tasks=preds.gpi_tasks[:, 0], policy=preds.policy[:, 0]
+  )
+
 
 def make_actor(
   config: dict,
@@ -422,7 +459,8 @@ def make_actor(
       stop=config.get("EPSILON_MAX", 0.9),
       base=config.get("EPSILON_BASE", 0.1),
     )
-  epsilons = jax.random.choice(rng, vals, shape=(config["NUM_ENVS"],))
+  epsilons = jax.random.choice(rng, vals, shape=(config["NUM_ENVS"] - 1,))
+  epsilons = jnp.concatenate((jnp.array((0,)), epsilons))
 
   explorer = FixedEpsilonGreedy(epsilons)
 
@@ -466,7 +504,6 @@ def make_train(
   make_actor=make_actor,
   **kwargs,
 ):
-
   def make_loss_fn_class(config) -> vbb.RecurrentLossFn:
     return functools.partial(
       UsfaR2D2LossFn,

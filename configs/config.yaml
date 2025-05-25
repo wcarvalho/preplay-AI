@@ -26,7 +26,7 @@ app:
   config_idx: 1  # which config to load, only used by vanilla slurm
   memory: 120000  # in MB
   time: "0-48:00:00"  # duration format for SLURM
-  max_concurrent: 12
+  max_concurrent: 16
   account: "kempner_wcarvalho_lab"  # specify if there's a default account
   partition: "kempner"  # default SLURM partition
   settings_config: ""  # to be set by launcher.py

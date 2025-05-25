@@ -683,7 +683,7 @@ def sweep(search: str = ""):
   ############################################################
   # Ablations
   ############################################################
-  #elif search == "dyna-backtracking":
+  # elif search == "dyna-backtracking":
   #  sweep_config = {
   #    "metric": metric,
   #    "parameters": {
@@ -695,7 +695,7 @@ def sweep(search: str = ""):
   #    "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
   #    "group": "dyna-backtracking-1",
   #  }
-  #elif search == "preplay-backtracking":
+  # elif search == "preplay-backtracking":
   #  sweep_config = {
   #    "metric": metric,
   #    "parameters": {
@@ -714,8 +714,8 @@ def sweep(search: str = ""):
         "ALG": {"values": ["preplay"]},
         "NUM_ENV_SEEDS": {"values": [512]},
         "SEED": {"values": list(range(1, 5))},
-        "MAIN_COEFF": {"values": [0.]},
-        #"OFFTASK_COEFF": {"values": [1.]},
+        "MAIN_COEFF": {"values": [0.0]},
+        # "OFFTASK_COEFF": {"values": [1.]},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "preplay-main-loss-coeff-1",
@@ -727,7 +727,7 @@ def sweep(search: str = ""):
         "ALG": {"values": ["preplay"]},
         "NUM_ENV_SEEDS": {"values": [512]},
         "SEED": {"values": list(range(1, 5))},
-        "MAINQ_COEFF": {"values": [0.]},
+        "MAINQ_COEFF": {"values": [0.0]},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "preplay-main-q-coeff-1",
@@ -783,6 +783,17 @@ def sweep(search: str = ""):
       },
       "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "preplay-precondition-1",
+    }
+  elif search == "preplay-benchmark":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["preplay"]},
+        "NUM_ENV_SEEDS": {"values": [0]},
+        "SEED": {"values": list(range(1, 5))},
+      },
+      "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "group": "preplay-benchmark-2",
     }
   else:
     raise NotImplementedError(search)

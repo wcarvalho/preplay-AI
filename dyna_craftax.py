@@ -23,7 +23,7 @@ import jax.tree_util as jtu
 import matplotlib.pyplot as plt
 import matplotlib
 
-#matplotlib.use("Agg")
+# matplotlib.use("Agg")
 
 import wandb
 
@@ -605,7 +605,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
 
       all_t_mask = simulation_finished_mask(l_mask, next_t)
       if not self.backtracking:
-        all_t_mask = all_t_mask[-self.simulation_length-1:]
+        all_t_mask = all_t_mask[-self.simulation_length - 1 :]
 
       batch_td_error, batch_loss_mean, metrics, log_info = self.loss_fn(
         timestep=all_t,
@@ -642,7 +642,6 @@ class DynaLossFn(vbb.RecurrentLossFn):
         loss_mask,  # [T, W]
         jax.random.split(rng, window_size),  # [W, 2]
       )
-
 
     # figuring out how to incorporate windows into TD error is annoying so punting
     # TODO: incorporate windowed overlappping TDs into TD error

@@ -13,7 +13,7 @@ import rlax
 import matplotlib.pyplot as plt
 import matplotlib
 
-#matplotlib.use("Agg")
+# matplotlib.use("Agg")
 from visualizer import plot_frames
 
 from jaxneurorl.agents.basics import TimeStep

@@ -694,15 +694,15 @@ def learner_log_extra(
   def callback(d):
     n_updates = d.pop("n_updates")
     # [T, B] --> [T]
-    #is_log_time = jnp.logical_or(
+    # is_log_time = jnp.logical_or(
     #  n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0, n_updates == 1
-    #)
-    #if not is_log_time: return
+    # )
+    # if not is_log_time: return
     if "online" in d:
       d["online"] = jax.tree_map(lambda x: x[:, 0], d["online"])
       log_data(**d["online"], key="online")
     if "dyna" in d:
-      d['dyna'].pop("any_achievable", None)
+      d["dyna"].pop("any_achievable", None)
       # [T, B, K, W, N] --> [K]
       # K = simulation #
       # W = simulation length
@@ -722,11 +722,12 @@ def learner_log_extra(
 
   # this will be the value after update is applied
   n_updates = data["n_updates"] + 1
-  is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
+  if config["LEARNER_EXTRA_LOG_PERIOD"] > 0:
+    is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
 
-  jax.lax.cond(
-    is_log_time, lambda d: jax.debug.callback(callback, d), lambda d: None, data
-  )
+    jax.lax.cond(
+      is_log_time, lambda d: jax.debug.callback(callback, d), lambda d: None, data
+    )
 
 
 class DynaAgentEnvModel(nn.Module):
@@ -854,7 +855,6 @@ def make_agent(
   example_timestep: TimeStep,
   rng: jax.random.PRNGKey,
   model_env_params: Optional[environment.EnvParams] = None,
-  ObsEncoderCls: nn.Module = CategoricalHouzemazeObsEncoder,
 ) -> Tuple[nn.Module, Params, vbb.AgentResetFn]:
   model_env_params = model_env_params or env_params
   cell_type = config.get("RNN_CELL_TYPE", "OptimizedLSTMCell")
@@ -866,8 +866,17 @@ def make_agent(
       cell_type=cell_type,
       unroll_output_state=True,
     )
+  observation_encoder = CategoricalHouzemazeObsEncoder(
+    num_categories=max(10_000, env.total_categories(env_params)),
+    embed_hidden_dim=config["EMBED_HIDDEN_DIM"],
+    mlp_hidden_dim=config["MLP_HIDDEN_DIM"],
+    num_embed_layers=config["NUM_EMBED_LAYERS"],
+    num_mlp_layers=config["NUM_MLP_LAYERS"],
+    activation=config["ACTIVATION"],
+    norm_type=config.get("NORM_TYPE", "none"),
+  )
   agent = DynaAgentEnvModel(
-    observation_encoder=ObsEncoderCls(),
+    observation_encoder=observation_encoder,
     rnn=rnn,
     q_fn=MLP(
       hidden_dim=config.get("Q_HIDDEN_DIM", 512),
