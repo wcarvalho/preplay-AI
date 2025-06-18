@@ -31,7 +31,8 @@ from jaxneurorl import losses
 from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
 from jaxneurorl.agents import qlearning as base_agent
-from networks import MLP, CraftaxObsEncoder, CraftaxMultiGoalObsEncoder
+from networks import MLP, CraftaxObsEncoder, CraftaxMultiGoalObsEncoder, CategoricalHouzemazeObsEncoder
+
 
 from visualizer import plot_frames
 
@@ -965,8 +966,10 @@ class DynaAgentEnvModel(nn.Module):
   def compute_reward(self, timestep, task):
     return self.env.compute_reward(timestep, task, self.env_params)
 
-
-def make_agent(
+########################
+# Craftax Agent
+########################
+def make_craftax_agent(
   config: dict,
   env: environment.Environment,
   env_params: environment.EnvParams,
@@ -1029,7 +1032,10 @@ def make_agent(
   return agent, network_params, reset_fn
 
 
-def make_multigoal_agent(
+########################
+# JaxMaze Agent
+########################
+def make_jaxmaze_agent(
   config: dict,
   env: environment.Environment,
   env_params: environment.EnvParams,
@@ -1038,30 +1044,31 @@ def make_multigoal_agent(
   model_env: Optional[environment.Environment] = None,
   model_env_params: Optional[environment.EnvParams] = None,
 ) -> Tuple[nn.Module, Params, vbb.AgentResetFn]:
+  model_env = model_env or env
   model_env_params = model_env_params or env_params
   cell_type = config.get("RNN_CELL_TYPE", "OptimizedLSTMCell")
-  if cell_type.lower() == "none":
-    rnn = vbb.DummyRNN()
-  else:
-    rnn = vbb.ScannedRNN(
-      hidden_dim=config.get("AGENT_RNN_DIM", 256),
-      cell_type=cell_type,
-      unroll_output_state=True,
-    )
+
+  rnn = vbb.ScannedRNN(
+    hidden_dim=config.get("AGENT_RNN_DIM", 256),
+    cell_type=cell_type,
+    unroll_output_state=True,
+  )
+  observation_encoder = CategoricalHouzemazeObsEncoder(
+    num_categories=max(10_000, env.total_categories(env_params)),
+    embed_hidden_dim=config["EMBED_HIDDEN_DIM"],
+    mlp_hidden_dim=config["MLP_HIDDEN_DIM"],
+    num_embed_layers=config["NUM_EMBED_LAYERS"],
+    num_mlp_layers=config["NUM_MLP_LAYERS"],
+    activation=config["ACTIVATION"],
+    norm_type=config.get("NORM_TYPE", "none"),
+  )
   agent = DynaAgentEnvModel(
-    observation_encoder=CraftaxMultiGoalObsEncoder(
-      hidden_dim=config["MLP_HIDDEN_DIM"],
-      num_layers=config["NUM_MLP_LAYERS"],
-      activation=config["ACTIVATION"],
-      norm_type=config.get("NORM_TYPE", "none"),
-      use_bias=config.get("USE_BIAS", True),
-      action_dim=env.action_space(env_params).n,
-    ),
+    observation_encoder=observation_encoder,
     rnn=rnn,
     q_fn=DuellingMLP(
       hidden_dim=config.get("Q_HIDDEN_DIM", 512),
       num_layers=config.get("NUM_Q_LAYERS", 1),
-      out_dim=env.action_space(env_params).n,
+      out_dim=env.num_actions(env_params),
       activation=config["ACTIVATION"],
       activate_final=False,
       use_bias=config.get("USE_BIAS", True),
@@ -1082,6 +1089,9 @@ def make_multigoal_agent(
   return agent, network_params, reset_fn
 
 
+########################
+# Make Train fn
+########################
 def make_train(**kwargs):
   config = kwargs["config"]
   rng = jax.random.PRNGKey(config["SEED"])
@@ -1112,8 +1122,12 @@ def make_train(**kwargs):
       q_values, epsilons, sim_rng
     )
 
+  make_agent = kwargs.pop("make_agent")
+  if make_agent is None:
+    make_agent = partial(make_craftax_agent, model_env=kwargs.pop("model_env", None))
+
   return vbb.make_train(
-    make_agent=partial(make_agent, model_env=kwargs.pop("model_env")),
+    make_agent=make_agent,
     make_loss_fn_class=functools.partial(
       make_loss_fn_class,
       simulation_policy=simulation_policy,

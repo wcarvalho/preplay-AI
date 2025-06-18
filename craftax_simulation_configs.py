@@ -70,6 +70,7 @@ def get_path_waypoints(path, num: int = 20):
   indices.sort()
   return np.array([path[i] for i in indices])
 
+
 # Create cache path in the directory of this file
 cache_dir = os.path.join(os.path.dirname(__file__), "craftax_cache", "training_paths")
 os.makedirs(cache_dir, exist_ok=True)

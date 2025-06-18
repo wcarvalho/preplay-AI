@@ -281,7 +281,9 @@ def experience_logger(
 
       # Get actions and positions for trajectory
       episode_actions = actions[in_episode][:-1]  # Actions that led to each state
-      episode_positions = jax.tree_map(lambda x: x[in_episode][:-1], timesteps.state.agent_pos)
+      episode_positions = jax.tree_map(
+        lambda x: x[in_episode][:-1], timesteps.state.agent_pos
+      )
 
       # Render initial state as background
       initial_state = jax.tree_map(lambda x: x[0], timesteps.state)
@@ -289,10 +291,15 @@ def experience_logger(
 
       # Place arrows showing trajectory
       renderer.place_arrows_on_image(
-        img, episode_positions, episode_actions, 
-        maze_height, maze_width, arrow_scale=5, ax=ax
+        img,
+        episode_positions,
+        episode_actions,
+        maze_height,
+        maze_width,
+        arrow_scale=5,
+        ax=ax,
       )
-      
+
       # Add title with task and reward information
       index = lambda t, idx: jax.tree_map(lambda x: x[idx], t)
       first_timestep = index(timesteps, 0)
@@ -302,7 +309,7 @@ def experience_logger(
 
       title = f"{task_name}\nReward: {total_reward:.2f}"
       ax.set_title(title, fontsize=10)
-      ax.axis('off')  # Remove axes for cleaner look
+      ax.axis("off")  # Remove axes for cleaner look
 
       if wandb.run is not None:
         wandb.log({f"{key}_example/trajectory": wandb.Image(fig)})
