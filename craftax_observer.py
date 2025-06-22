@@ -27,7 +27,7 @@ class BasicObserverState:
 
 
 def get_first(b):
-  return jax.tree_map(lambda x: x[0], b)
+  return jax.tree_util.tree_map(lambda x: x[0], b)
 
 
 def add_first_to_buffer(
@@ -39,7 +39,7 @@ def add_first_to_buffer(
   x: [num_envs, ...]
   get first env data and dummy dummy time dim.
   """
-  x = jax.tree_map(lambda y: y[:1, np.newaxis], x)
+  x = jax.tree_util.tree_map(lambda y: y[:1, np.newaxis], x)
   return buffer.add(buffer_state, x)
 
 

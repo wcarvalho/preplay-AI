@@ -393,7 +393,7 @@ def learner_log_extra(data: dict, config: dict):
     # Extract the relevant data
     # only use data from batch dim = 0
     # [T, B, ...] --> # [T, ...]
-    d_ = jax.tree_map(lambda x: x[:, 0], d)
+    d_ = jax.tree_util.tree_map(lambda x: x[:, 0], d)
 
     mask = d_["mask"]
     discounts = d_["data"].timestep.discount
@@ -451,7 +451,7 @@ def learner_log_extra(data: dict, config: dict):
     ##############################
     # plot images of env
     ##############################
-    # timestep = jax.tree_map(lambda x: jnp.array(x), d_['data'].timestep)
+    # timestep = jax.tree_util.tree_map(lambda x: jnp.array(x), d_['data'].timestep)
     timesteps: TimeStep = d_["data"].timestep
 
     # ------------
@@ -461,7 +461,7 @@ def learner_log_extra(data: dict, config: dict):
     obs_images = []
     max_len = min(config.get("MAX_EPISODE_LOG_LEN", 40), len(rewards))
     for idx in range(max_len):
-      index = lambda y: jax.tree_map(lambda x: x[idx], y)
+      index = lambda y: jax.tree_util.tree_map(lambda x: x[idx], y)
       obs_image = render_fn(index(d_["data"].timestep.state.env_state))
       obs_images.append(obs_image)
     # ------------

@@ -70,6 +70,7 @@ def get_path_waypoints(path, num: int = 20):
   indices.sort()
   return np.array([path[i] for i in indices])
 
+
 # Create cache path in the directory of this file
 cache_dir = os.path.join(os.path.dirname(__file__), "craftax_cache", "training_paths")
 os.makedirs(cache_dir, exist_ok=True)
@@ -173,7 +174,7 @@ for block_config in PATHS_CONFIGS:
 TRAIN_CONFIGS = jtu.tree_map(lambda *x: jnp.stack(x), *TRAIN_CONFIGS)
 TRAIN_EVAL_CONFIGS = jtu.tree_map(lambda *x: jnp.stack(x), *TRAIN_EVAL_CONFIGS)
 TEST_CONFIGS = jtu.tree_map(lambda *x: jnp.stack(x), *TEST_CONFIGS)
-dummy_config = jax.tree_map(lambda x: x[0], TRAIN_CONFIGS)
+dummy_config = jax.tree_util.tree_map(lambda x: x[0], TRAIN_CONFIGS)
 
 
 default_params = MultigoalEnvParams().replace(

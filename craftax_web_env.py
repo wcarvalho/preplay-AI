@@ -718,7 +718,7 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
     n_tasks = len(params.task_configs.world_seed)
     task_idx = jax.random.randint(key, (), 0, n_tasks)
     index = lambda x: jax.lax.dynamic_index_in_dim(x, task_idx, keepdims=False)
-    task_config = jax.tree_map(index, params.task_configs)
+    task_config = jax.tree_util.tree_map(index, params.task_configs)
 
     params = params.replace(
       world_seeds=(task_config.world_seed,),

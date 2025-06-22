@@ -969,7 +969,12 @@ class DynaLossFn(vbb.RecurrentLossFn):
       )
 
       if np.abs(self.ontask_loss_coeff - 1e-8) < 1e-5:
-        return offtask_batch_td_error, offtask_batch_loss_mean, offtask_metrics, offtask_log_info
+        return (
+          offtask_batch_td_error,
+          offtask_batch_loss_mean,
+          offtask_metrics,
+          offtask_log_info,
+        )
       #########################################
       # Afterward compute regular dyna loss
       #########################################
@@ -2274,7 +2279,6 @@ def make_train_jaxmaze_multigoal(**kwargs):
   num_offtask_goals = 1 if known_offtask_goal else all_tasks.shape[0]
   config["NUM_OFFTASK_GOALS"] = num_offtask_goals
 
-
   if epsilon_setting == 1:
     # ACME default
     # range of ~(0.001, .1)
@@ -2288,7 +2292,6 @@ def make_train_jaxmaze_multigoal(**kwargs):
 
   num_offtask_simulations = config["NUM_OFFTASK_SIMULATIONS"]
   num_ontask_simulations = config["NUM_ONTASK_SIMULATIONS"] = 1
-
 
   def dyna_policy(preds: Predictions, sim_rng: jax.Array):
     del sim_rng
@@ -2317,7 +2320,6 @@ def make_train_jaxmaze_multigoal(**kwargs):
       goals = all_tasks
     achievable = jnp.ones(len(goals))
     any_achievable = achievable.sum() > 0.1
-
 
     return goals, achievable, any_achievable
 
