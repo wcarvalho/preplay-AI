@@ -168,7 +168,7 @@ def learner_log_extra(
     # Extract the relevant data
     # only use data from batch dim = 0
     # [T, B, ...] --> # [T, ...]
-    d_ = jax.tree_map(lambda x: x[:, 0], d)
+    d_ = jax.tree_util.tree_map(lambda x: x[:, 0], d)
 
     mask = d_["mask"]
     discounts = d_["data"].timestep.discount
@@ -226,7 +226,7 @@ def learner_log_extra(
     ##############################
     # plot images of env
     ##############################
-    # timestep = jax.tree_map(lambda x: jnp.array(x), d_['data'].timestep)
+    # timestep = jax.tree_util.tree_map(lambda x: jnp.array(x), d_['data'].timestep)
     timesteps: TimeStep = d_["data"].timestep
 
     # ------------
@@ -237,7 +237,7 @@ def learner_log_extra(
     obs_images = []
     max_len = min(config.get("MAX_EPISODE_LOG_LEN", 40), len(rewards))
     for idx in range(max_len):
-      index = lambda y: jax.tree_map(lambda x: x[idx], y)
+      index = lambda y: jax.tree_util.tree_map(lambda x: x[idx], y)
       # state_image = rgb_render(
       #    timesteps.state.grid[idx],
       #    index(timesteps.state.agent),
@@ -260,7 +260,7 @@ def learner_log_extra(
     actions_taken = [action_name(a) for a in actions]
 
     def index(t, idx):
-      return jax.tree_map(lambda x: x[idx], t)
+      return jax.tree_util.tree_map(lambda x: x[idx], t)
 
     def panel_title_fn(timesteps, i):
       # room_setting = int(timesteps.state.room_setting[i])

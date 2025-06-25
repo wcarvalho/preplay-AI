@@ -174,7 +174,7 @@ for block_config in PATHS_CONFIGS:
 TRAIN_CONFIGS = jtu.tree_map(lambda *x: jnp.stack(x), *TRAIN_CONFIGS)
 TRAIN_EVAL_CONFIGS = jtu.tree_map(lambda *x: jnp.stack(x), *TRAIN_EVAL_CONFIGS)
 TEST_CONFIGS = jtu.tree_map(lambda *x: jnp.stack(x), *TEST_CONFIGS)
-dummy_config = jax.tree_map(lambda x: x[0], TRAIN_CONFIGS)
+dummy_config = jax.tree_util.tree_map(lambda x: x[0], TRAIN_CONFIGS)
 
 
 default_params = MultigoalEnvParams().replace(

@@ -26,8 +26,8 @@ class CraftaxAlphaZeroAgent(nn.Module):
     predictions, rnn_state = self.__call__(rnn_state, x, rng)
     dummy_action = jnp.zeros(batch_dims, dtype=jnp.int32)
 
-    state = jax.tree_map(lambda x: x[:, None], predictions.state)
-    dummy_action = jax.tree_map(lambda x: x[:, None], dummy_action)
+    state = jax.tree_util.tree_map(lambda x: x[:, None], predictions.state)
+    dummy_action = jax.tree_util.tree_map(lambda x: x[:, None], dummy_action)
     jax.vmap(self.apply_model, (0, 0, None), 0)(state, dummy_action, rng)
 
   def initialize_carry(self, *args, **kwargs):
@@ -97,9 +97,9 @@ class CraftaxAlphaZeroAgent(nn.Module):
     )
     rng, rng_ = jax.random.split(rng)
     env_params = self.test_env_params if evaluation else self.env_params
-    timestep = jax.tree_map(lambda x: x[0], state.timestep)
+    timestep = jax.tree_util.tree_map(lambda x: x[0], state.timestep)
     next_timestep = self.env.step(rng_, timestep, action[0], env_params)
-    next_timestep = jax.tree_map(lambda x: x[None], next_timestep)
+    next_timestep = jax.tree_util.tree_map(lambda x: x[None], next_timestep)
 
     rng, rng_ = jax.random.split(rng)
     return self.__call__(state.rnn_state, next_timestep, rng_)

@@ -3,15 +3,8 @@ import jax
 import jax.numpy as jnp
 from collections import deque
 from craftax.craftax.constants import Action, BlockType, ItemType, BLOCK_PIXEL_SIZE_IMG
+from craftax.craftax import constants
 
-try:
-  from craftax_fullmap_renderer import TEXTURES
-  from craftax_fullmap_renderer import (
-    render_craftax_pixels as render_craftax_pixels_full,
-  )
-  # import craftax_fullmap_constants as constants
-except ModuleNotFoundError:
-  pass
 from craftax.craftax.renderer import (
   render_craftax_pixels as render_craftax_pixels_partial,
 )
@@ -22,11 +15,23 @@ from collections import namedtuple
 from matplotlib.animation import FuncAnimation
 
 try:
-  from tqdm.auto import tqdm
+  # only needed for web app, not simulations
+  from experiments.craftax.craftax_fullmap_renderer import TEXTURES
+  from experiments.craftax.craftax_fullmap_renderer import (
+    render_craftax_pixels as render_craftax_pixels_full,
+  )
+  import experiments.craftax.craftax_fullmap_constants as constants
+  # import craftax_fullmap_constants as constants
+except ModuleNotFoundError:
+  print("No craftax_fullmap_renderer found")
+  pass
+
+try:
+  from tqdm.notebook import tqdm
 except ImportError:
   from tqdm import tqdm
 
-CACHE_DIR = "craftax_cache"
+CACHE_DIR = os.path.join(os.path.dirname(__file__), "craftax_cache")
 
 TRAIN_COLOR = "red"
 TEST_COLOR = "#679FE5"  # pretty blue
@@ -342,6 +347,7 @@ def place_arrows_on_image(
   ax=None,
   display_image=True,
   show_path_length=True,
+  line_thickness=1.0,
 ):
   # Get the dimensions of the image and the maze
   image_height, image_width, _ = image.shape
@@ -406,7 +412,7 @@ def place_arrows_on_image(
       dy,
       head_width=scale_x / (arrow_scale * 0.7),  # Increased head width by ~40%
       head_length=scale_y / (arrow_scale * 0.7),  # Increased head length by ~40%
-      width=scale_x / (arrow_scale * 2),
+      width=scale_x / (arrow_scale * 2) * line_thickness,
       fc=arrow_color,
       ec=arrow_color,
     )
@@ -437,7 +443,7 @@ def get_object_positions(state, block_type):
   return positions
 
 
-def render_fn(state, show_agent=True, block_pixel_size=BLOCK_PIXEL_SIZE_IMG):
+def render_fn(state, show_agent=True, block_pixel_size=constants.BLOCK_PIXEL_SIZE_IMG):
   image = render_craftax_pixels_full(
     state, block_pixel_size=block_pixel_size, show_agent=show_agent
   )
@@ -474,7 +480,7 @@ def save_path_to_cache(path, world, start_pos, goal_pos):
 def display_map(
   state,
   params,
-  block_pixel_size: int = BLOCK_PIXEL_SIZE_IMG,
+  block_pixel_size: int = constants.BLOCK_PIXEL_SIZE_IMG,
   goals: Optional[Union[BlockType, List[BlockType]]] = None,
   refresh_cache: bool = False,
   show_agent: bool = True,
@@ -482,6 +488,7 @@ def display_map(
   paths_nearby: Optional[Union[int, Tuple[int, int]]] = None,
   nearby_radius: int = 15,
   goal_idx: int = None,
+  line_thickness: float = 1.0,
 ):
   world = int(params.world_seeds[0])
   fig, ax = plt.subplots(1, figsize=(12, 12))
@@ -565,12 +572,13 @@ def display_map(
         display_image=False,
         arrow_color=colors[color_idx % len(colors)],
         show_path_length=True,
+        line_thickness=line_thickness,
       )
   ax.set_title(f"World {world}\nPath lengths: {path_lengths}")
   return image, fig, ax
 
 
-def place_start_marker(ax, position, state, image, start_color="w"):
+def place_start_marker(ax, position, state, image, start_color="w", marker_size=45):
   """Place a star marker at the starting position.
 
   Args:
@@ -578,6 +586,7 @@ def place_start_marker(ax, position, state, image, start_color="w"):
       position: tuple of (y, x) coordinates in maze space
       image: rendered image array of shape (height, width, channels)
       start_color: color of the star marker
+      marker_size: size of the star marker (default 45, which is 3x the original 15)
   """
   # Get image dimensions
   image_height, image_width, _ = image.shape
@@ -595,7 +604,49 @@ def place_start_marker(ax, position, state, image, start_color="w"):
   start_x = offset_x + (position[1] + 0.5) * scale_x
 
   ax.plot(
-    start_x, start_y, "*", color=start_color, markersize=15, markeredgecolor="black"
+    start_x,
+    start_y,
+    "*",
+    color=start_color,
+    markersize=marker_size,
+    markeredgecolor="black",
+  )
+
+
+def place_goal_marker(ax, position, state, image, goal_color, marker_size=30):
+  """Place a circle marker at the goal position.
+
+  Args:
+      ax: matplotlib axis
+      position: tuple of (y, x) coordinates in maze space
+      state: game state object
+      image: rendered image array of shape (height, width, channels)
+      goal_color: color of the circle marker
+      marker_size: size of the circle marker (default 30)
+  """
+  # Get image dimensions
+  image_height, image_width, _ = image.shape
+
+  # No need for wall offsets
+  offset_y = 0
+  offset_x = 0
+
+  # Calculate the scaling factors for mapping maze coordinates to image coordinates
+  scale_y = image_height / state.map.shape[1]
+  scale_x = image_width / state.map.shape[2]
+
+  # Calculate marker position
+  goal_y = offset_y + (position[0] + 0.5) * scale_y
+  goal_x = offset_x + (position[1] + 0.5) * scale_x
+
+  ax.plot(
+    goal_x,
+    goal_y,
+    "o",
+    color=goal_color,
+    markersize=marker_size,
+    markeredgecolor="black",
+    markeredgewidth=2,
   )
 
 
@@ -610,6 +661,8 @@ def draw_object_path(
   goal_idx: Optional[int] = None,
   nearby_goal: bool = False,
   show_path_length: bool = True,
+  arrow_scale: int = 5,
+  line_thickness: float = 1.0,
 ):
   """Draw path to a specific object type from start position."""
   # Get goal position for the object
@@ -635,7 +688,9 @@ def draw_object_path(
     display_image=False,
     arrow_color=color,
     show_path_length=show_path_length,
+    arrow_scale=arrow_scale,
     start_color=color,
+    line_thickness=line_thickness,
   )
   return path
 
@@ -662,6 +717,12 @@ def train_test_paths(
   goal_idx: Optional[int] = None,
   ax=None,
   show_path_length: bool = True,
+  arrow_scale: int = 5,
+  train_color="",
+  eval_color="",
+  line_thickness: float = 1.0,
+  start_marker_size: int = 45,
+  goal_marker_size: int = 15,
 ):
   #########################################
   # Create params
@@ -691,8 +752,13 @@ def train_test_paths(
 
   if ax is None:
     fig, ax = plt.subplots(1, figsize=(8, 8))
+  else:
+    fig = ax.figure
+
   with jax.disable_jit():
-    image = render_fn(state, show_agent=False, block_pixel_size=BLOCK_PIXEL_SIZE_IMG)
+    image = render_fn(
+      state, show_agent=False, block_pixel_size=constants.BLOCK_PIXEL_SIZE_IMG
+    )
     ax.imshow(image)
     ax.axis("off")  # This removes the axes and grid
 
@@ -702,41 +768,93 @@ def train_test_paths(
       state,
       train_distractor_object,
       start_position,
-      TRAIN_COLOR,
+      train_color or TRAIN_COLOR,
       ax,
       image,
       world_seed,
       show_path_length=show_path_length,
+      arrow_scale=arrow_scale,
+      line_thickness=line_thickness,
     )
   draw_object_path(
     state,
     test_object,
     start_position,
-    TEST_COLOR,
+    eval_color or TEST_COLOR,
     ax,
     image,
     world_seed,
     goal_idx=goal_idx,
     show_path_length=show_path_length,
+    arrow_scale=arrow_scale,
+    line_thickness=line_thickness,
   )
   draw_object_path(
     state,
     train_object,
     start_position,
-    TRAIN_COLOR,
+    train_color or TRAIN_COLOR,
     ax,
     image,
     world_seed,
     nearby_goal=nearby_goal,
     show_path_length=show_path_length,
+    arrow_scale=arrow_scale,
+    line_thickness=line_thickness,
   )
 
+  # Place goal markers for each object type with matching path colors
+  # Train object goal marker
+  train_goal_positions = get_object_positions(state, train_object)
+  train_goal_position = (
+    train_goal_positions[0] if len(train_goal_positions) > 0 else None
+  )
+  if train_goal_position is not None:
+    place_goal_marker(
+      ax,
+      train_goal_position,
+      state,
+      image,
+      train_color or TRAIN_COLOR,
+      goal_marker_size,
+    )
+
+  # Test object goal marker
+  test_goal_positions = get_object_positions(state, test_object)
+  test_goal_position = (
+    test_goal_positions[goal_idx if goal_idx is not None else 0]
+    if len(test_goal_positions) > 0
+    else None
+  )
+  if test_goal_position is not None:
+    place_goal_marker(
+      ax, test_goal_position, state, image, eval_color or TEST_COLOR, goal_marker_size
+    )
+
+  # Train distractor object goal marker (if exists)
+  if train_distractor_object is not None:
+    distractor_goal_positions = get_object_positions(state, train_distractor_object)
+    distractor_goal_position = (
+      distractor_goal_positions[0] if len(distractor_goal_positions) > 0 else None
+    )
+    if distractor_goal_position is not None:
+      place_goal_marker(
+        ax,
+        distractor_goal_position,
+        state,
+        image,
+        train_color or TRAIN_COLOR,
+        goal_marker_size,
+      )
+
   # Place start marker for the first position
-  place_start_marker(ax, start_position, state, image)
+  place_start_marker(ax, start_position, state, image, marker_size=start_marker_size)
 
   if extra_positions is not None:
     for pos in extra_positions:
-      place_start_marker(ax, pos, state, image, start_color="orange")
+      place_start_marker(
+        ax, pos, state, image, start_color="orange", marker_size=start_marker_size
+      )
 
   # Sample and place extra start positions if requested
   if num_extra_start_positions > 0:
@@ -757,7 +875,9 @@ def train_test_paths(
     print("=" * 30)
     print(f"{[(int(pos[0]), int(pos[1])) for pos in extra_positions]}")
     for pos in extra_positions:
-      place_start_marker(ax, pos, state, image, start_color="green")
+      place_start_marker(
+        ax, pos, state, image, start_color="orange", marker_size=start_marker_size
+      )
 
   if second_start_position is not None:
     draw_object_path(
@@ -769,6 +889,7 @@ def train_test_paths(
       image,
       world_seed,
       goal_idx=goal_idx,
+      line_thickness=line_thickness,
     )
 
   cache_dir = os.path.join(CACHE_DIR)
@@ -778,8 +899,7 @@ def train_test_paths(
   output_path = os.path.join(cache_dir, f"world_{world_seed}_paths.png")
   plt.savefig(output_path, bbox_inches="tight", pad_inches=0)
   print(f"Saved to {output_path}")
-  plt.show()
-  plt.close()
+  return fig, ax
 
 
 def render_goal_object(goal_object_idx: int, block_pixel_size: int):
@@ -804,7 +924,15 @@ def render_goal_object(goal_object_idx: int, block_pixel_size: int):
 
 
 def create_reaction_times_video(
-  initial_map, first_state, images, path, actions, reaction_times, output_file, fps=1
+  initial_map,
+  first_state,
+  images,
+  path,
+  actions,
+  reaction_times,
+  output_file,
+  fps=3,
+  line_thickness=1.0,
 ):
   # Ensure the directory exists
   output_dir = os.path.dirname(output_file)
@@ -813,7 +941,7 @@ def create_reaction_times_video(
 
   n = len(images)
   width = 4
-  fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(3 * width, width))
+  fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(3 * width, width), dpi=150)
   ax1.imshow(initial_map)
   place_arrows_on_image(
     image=initial_map,
@@ -826,6 +954,7 @@ def create_reaction_times_video(
     arrow_color="red",
     show_path_length=False,
     start_color="red",
+    line_thickness=line_thickness,
   )
 
   def update(frame):
@@ -864,7 +993,7 @@ def create_reaction_times_video(
 def create_episode_reaction_times_video(
   episode_data,
   output_file="/tmp/housemaze_anlaysis_craftax/rt_video.mp4",
-  fps=1,
+  fps=3,
   html: bool = True,
 ):
   def partial_render_fn(state):
@@ -878,7 +1007,7 @@ def create_episode_reaction_times_video(
     ).astype(jnp.uint8)
 
   initial_map = full_render_fn(
-    jax.tree_map(lambda x: x[0], episode_data.timesteps.state)
+    jax.tree_util.tree_map(lambda x: x[0], episode_data.timesteps.state)
   )
   images = jax.vmap(partial_render_fn)(episode_data.timesteps.state)
   reaction_times = episode_data.reaction_times
@@ -887,7 +1016,7 @@ def create_episode_reaction_times_video(
   assert len(path) == len(actions) == len(reaction_times), (
     f"lengths: {len(path)}, {len(actions)}, {len(reaction_times)}"
   )
-  first_state = jax.tree_map(lambda s: s[0], episode_data.timesteps.state)
+  first_state = jax.tree_util.tree_map(lambda s: s[0], episode_data.timesteps.state)
   video = create_reaction_times_video(
     initial_map=initial_map,
     first_state=first_state,
@@ -897,7 +1026,96 @@ def create_episode_reaction_times_video(
     reaction_times=reaction_times,
     output_file=output_file,
     fps=fps,
+    line_thickness=1.0,
   )
+  if html:
+    from IPython.display import HTML, display
+
+    return display(HTML(video))
+  return video
+
+
+def create_episode_video(
+  episode_data,
+  output_file="/tmp/housemaze_anlaysis_craftax/episode_video.mp4",
+  fps=3,
+  html: bool = True,
+):
+  """Creates a video of an episode without reaction time visualizations.
+
+  Args:
+    episode_data: Data from an episode containing states and paths
+    output_file: Path to save the video file
+    fps: Frames per second for the video
+    html: Whether to return an HTML display object (for notebooks)
+
+  Returns:
+    Video as HTML if html=True, otherwise returns the video data
+  """
+
+  def partial_render_fn(state):
+    return render_craftax_pixels_partial(
+      state, block_pixel_size=BLOCK_PIXEL_SIZE_IMG
+    ).astype(jnp.uint8)
+
+  def full_render_fn(state):
+    return render_craftax_pixels_full(
+      state, show_agent=False, block_pixel_size=BLOCK_PIXEL_SIZE_IMG
+    ).astype(jnp.uint8)
+
+  initial_map = full_render_fn(
+    jax.tree_util.tree_map(lambda x: x[0], episode_data.timesteps.state)
+  )
+  images = jax.vmap(partial_render_fn)(episode_data.timesteps.state)
+  path = episode_data.timesteps.state.player_position
+  actions = actions_from_path(path)
+  first_state = jax.tree_util.tree_map(lambda s: s[0], episode_data.timesteps.state)
+
+  # Ensure the directory exists
+  output_dir = os.path.dirname(output_file)
+  if output_dir and not os.path.exists(output_dir):
+    os.makedirs(output_dir)
+
+  n = len(images)
+  width = 4
+  fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(2 * width, width), dpi=150)
+  ax1.imshow(initial_map)
+  place_arrows_on_image(
+    image=initial_map,
+    positions=path,
+    actions=actions,
+    maze_height=first_state.map.shape[1],
+    maze_width=first_state.map.shape[2],
+    ax=ax1,
+    display_image=True,
+    arrow_color="red",
+    show_path_length=False,
+    start_color="red",
+    line_thickness=1.0,
+  )
+
+  def update(frame):
+    # Clear previous content
+    ax2.clear()
+
+    # Display current frame
+    if images.size > 0:
+      img = images[frame]
+      ax2.imshow(img, cmap="viridis")
+    else:
+      ax2.text(0.5, 0.5, "No image data", ha="center", va="center")
+
+    ax1.set_title(f"Step: {frame}")
+    ax1.axis("off")
+    ax2.axis("off")
+
+    return (ax2,)
+
+  # Create the animation
+  anim = FuncAnimation(fig, update, frames=n, interval=1000 / fps, blit=False)
+  video = anim.to_html5_video()
+  plt.close(fig)  # Close the figure after creating the video
+
   if html:
     from IPython.display import HTML, display
 

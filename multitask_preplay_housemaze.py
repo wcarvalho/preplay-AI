@@ -61,11 +61,13 @@ def make_float(x):
 
 
 def concat_pytrees(tree1, tree2, **kwargs):
-  return jax.tree_map(lambda x, y: jnp.concatenate((x, y), **kwargs), tree1, tree2)
+  return jax.tree_util.tree_map(
+    lambda x, y: jnp.concatenate((x, y), **kwargs), tree1, tree2
+  )
 
 
 def add_time(v):
-  return jax.tree_map(lambda x: x[None], v)
+  return jax.tree_util.tree_map(lambda x: x[None], v)
 
 
 def concat_first_rest(first, rest):
@@ -335,12 +337,16 @@ class OfftaskDyna(vbb.RecurrentLossFn):
       # get states at t=1, ....
       # tm1 = t-1
       # [T-1, B, ...]
-      h_tm1_online = jax.tree_map(lambda x: sg(x[:-1]), online_preds.state.rnn_state)
-      h_tm1_target = jax.tree_map(lambda x: sg(x[:-1]), target_preds.state.rnn_state)
+      h_tm1_online = jax.tree_util.tree_map(
+        lambda x: sg(x[:-1]), online_preds.state.rnn_state
+      )
+      h_tm1_target = jax.tree_util.tree_map(
+        lambda x: sg(x[:-1]), target_preds.state.rnn_state
+      )
 
       # get time-steps at t=2, ...
       # [T-1, B, ...]
-      x_t = jax.tree_map(lambda x: sg(x[1:]), online_preds.state.timestep)
+      x_t = jax.tree_util.tree_map(lambda x: sg(x[1:]), online_preds.state.timestep)
       if self.offtask_simulation:
         assert self.make_init_offtask_timestep is not None
         # --------------
@@ -624,9 +630,11 @@ def learner_log_extra(
     fig, ax = plt.subplots(1, figsize=(5, 5))
     in_episode = get_in_episode(timesteps)
     actions = actions[in_episode][:-1]
-    positions = jax.tree_map(lambda x: x[in_episode][:-1], timesteps.state.agent_pos)
+    positions = jax.tree_util.tree_map(
+      lambda x: x[in_episode][:-1], timesteps.state.agent_pos
+    )
 
-    img = render_fn(jax.tree_map(lambda x: x[0], timesteps.state))
+    img = render_fn(jax.tree_util.tree_map(lambda x: x[0], timesteps.state))
     renderer.place_arrows_on_image(
       img, positions, actions, maze_height, maze_width, arrow_scale=5, ax=ax
     )
@@ -641,7 +649,7 @@ def learner_log_extra(
     # obs_images = []
     # max_len = min(config.get("MAX_EPISODE_LOG_LEN", 40), len(rewards))
     # for idx in range(max_len):
-    #    index = lambda y: jax.tree_map(lambda x: x[idx], y)
+    #    index = lambda y: jax.tree_util.tree_map(lambda x: x[idx], y)
     #    #state_image = rgb_render(
     #    #    timesteps.state.grid[idx],
     #    #    index(timesteps.state.agent),
@@ -665,7 +673,7 @@ def learner_log_extra(
     #        return f"action: {int(a)}"
     # actions_taken = [action_name(a) for a in actions]
 
-    # index = lambda t, idx: jax.tree_map(lambda x: x[idx], t)
+    # index = lambda t, idx: jax.tree_util.tree_map(lambda x: x[idx], t)
     # def panel_title_fn(timesteps, i):
     #    task_name = get_task_name(extract_task_info(index(timesteps, i)))
     #    #room_setting = int(timesteps.state.room_setting[i])
@@ -699,7 +707,7 @@ def learner_log_extra(
     # )
     # if not is_log_time: return
     if "online" in d:
-      d["online"] = jax.tree_map(lambda x: x[:, 0], d["online"])
+      d["online"] = jax.tree_util.tree_map(lambda x: x[:, 0], d["online"])
       log_data(**d["online"], key="online")
     if "dyna" in d:
       d["dyna"].pop("any_achievable", None)
@@ -713,10 +721,10 @@ def learner_log_extra(
       #   N=index(t_min) (simulation with lowest temperaturee)
       try:
         # PREPLAY
-        d["dyna"] = jax.tree_map(lambda x: x[0, 0, 0, :, 0], d["dyna"])
+        d["dyna"] = jax.tree_util.tree_map(lambda x: x[0, 0, 0, :, 0], d["dyna"])
       except:
         # DYNA
-        d["dyna"] = jax.tree_map(lambda x: x[0, 0, :, 0], d["dyna"])
+        d["dyna"] = jax.tree_util.tree_map(lambda x: x[0, 0, :, 0], d["dyna"])
 
       log_data(**d["dyna"], key="dyna")
 

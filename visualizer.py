@@ -93,7 +93,7 @@ def plot_timestep_observations(
 ):
   obs_images = []
   for idx in range(max_len):
-    index = lambda y: jax.tree_map(lambda x: x[idx], y)
+    index = lambda y: jax.tree_util.tree_map(lambda x: x[idx], y)
     # state_image = rgb_render(
     #    grid=timestep.state.grid[idx],
     #    agent=index(timestep.state.agent),

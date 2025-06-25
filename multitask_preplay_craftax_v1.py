@@ -65,11 +65,13 @@ def make_float(x):
 
 
 def concat_pytrees(tree1, tree2, **kwargs):
-  return jax.tree_map(lambda x, y: jnp.concatenate((x, y), **kwargs), tree1, tree2)
+  return jax.tree_util.tree_map(
+    lambda x, y: jnp.concatenate((x, y), **kwargs), tree1, tree2
+  )
 
 
 def add_time(v):
-  return jax.tree_map(lambda x: x[None], v)
+  return jax.tree_util.tree_map(lambda x: x[None], v)
 
 
 def concat_first_rest(first, rest):
@@ -500,7 +502,7 @@ class MultitaskPreplay(vbb.RecurrentLossFn):
     if self.dyna_coeff > 0.0:
       # will use time-step + previous rnn-state to simulate
       # next state at each time-step and compute predictions
-      remove_last = lambda x: jax.tree_map(lambda y: y[:-1], x)
+      remove_last = lambda x: jax.tree_util.tree_map(lambda y: y[:-1], x)
       h_tm1_online = concat_first_rest(online_state, remove_last(online_preds.state))
       h_tm1_target = concat_first_rest(target_state, remove_last(target_preds.state))
 
@@ -859,7 +861,7 @@ def learner_log_extra(
     obs_images = []
     max_len = min(config.get("MAX_EPISODE_LOG_LEN", 40), len(rewards))
     for idx in range(max_len):
-      index = lambda y: jax.tree_map(lambda x: x[idx], y)
+      index = lambda y: jax.tree_util.tree_map(lambda x: x[idx], y)
       obs_image = render_fn(index(timesteps.state.env_state))
       obs_images.append(obs_image)
 
@@ -869,7 +871,7 @@ def learner_log_extra(
     actions_taken = [Action(a).name for a in actions]
 
     def index(t, idx):
-      return jax.tree_map(lambda x: x[idx], t)
+      return jax.tree_util.tree_map(lambda x: x[idx], t)
 
     def panel_title_fn(timesteps, i):
       title = f"t={i}\n"
@@ -901,7 +903,7 @@ def learner_log_extra(
     #   T=0 (1st time-point)
     #   B=0 (1st batch sample)
     #   N=index(t_min) (simulation with lowest temperaturee)
-    dyna_data = jax.tree_map(lambda x: x[0, 0, :, sim_idx], data["dyna"])
+    dyna_data = jax.tree_util.tree_map(lambda x: x[0, 0, :, sim_idx], data["dyna"])
 
     jax.lax.cond(
       is_log_time,
