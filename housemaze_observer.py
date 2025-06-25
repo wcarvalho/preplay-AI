@@ -283,11 +283,7 @@ def experience_logger(
 
       # Get actions and positions for trajectory
       episode_actions = actions[in_episode][:-1]  # Actions that led to each state
-<<<<<<< HEAD
-      episode_positions = jax.tree_map(
-=======
       episode_positions = jax.tree_util.tree_map(
->>>>>>> 8c565009f3a060ccf4ceedf62d5015bd41524413
         lambda x: x[in_episode][:-1], timesteps.state.agent_pos
       )
 
