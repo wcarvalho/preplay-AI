@@ -321,6 +321,96 @@ def make_logger(
   )
 
 
+def create_log_dict(info, achievements, config):
+  to_log = {
+    "episode_return": info["returned_episode_returns"],
+    "episode_length": info["returned_episode_lengths"],
+  }
+
+  for achievement in Achievement:
+    info[f"achievements/{achievement.name.lower()}"] = achievements[:, :, achievement.value].astype(np.float32)
+  sum_achievements = 0
+
+  for k, v in info.items():
+    if "achievements" in k.lower():
+      to_log[k] = v
+      sum_achievements += v / 100.0
+
+  to_log["achievements"] = sum_achievements
+
+  return to_log
+
+
+batch_logs = {}
+log_times = []
+
+
+def batch_log(update_step, log, config):
+  update_step = int(update_step)
+  if update_step not in batch_logs:
+    batch_logs[update_step] = []
+
+  batch_logs[update_step].append(log)
+
+  num_repeats = config.get("NUM_REPEATS", 1)
+  if len(batch_logs[update_step]) == num_repeats:
+    agg_logs = {}
+    for key in batch_logs[update_step][0]:
+      agg = []
+      if key in ["goal_heatmap"]:
+        agg = [batch_logs[update_step][0][key]]
+      else:
+        for i in range(num_repeats):
+          val = batch_logs[update_step][i][key]
+          if not jnp.isnan(val).any():
+            agg.append(val)
+
+      agg_logs[key] = np.mean(agg)
+
+    log_times.append(time.time())
+    wandb.log(agg_logs)
+
+
+def default_craftax_log_fn(trajectory, update_step, config):
+  one_twenth = max(config["NUM_UPDATES"] // 100, 1)
+  should_save = jnp.logical_or(
+    update_step == 0, update_step % one_twenth == 0
+  )
+
+  def log(trajectory, update_step, config):
+    # construct dict that matches what they work with
+    done = trajectory.timestep.last()
+    log_state = trajectory.timestep.state
+    info = {
+      "returned_episode_returns": log_state.returned_episode_returns,
+      "returned_episode_lengths": log_state.returned_episode_lengths,
+      "timestep": log_state.timestep,
+      "returned_episode": done,
+    }
+
+    achievements = trajectory.timestep.state.env_state.achievements
+
+    metric = jax.tree.map(
+      lambda x: (x * info["returned_episode"]).sum()
+      / (1e-5 + info["returned_episode"].sum()),
+      info,
+    )
+
+    def callback(metric, achievements, update_step, config):
+      if update_step % one_twenth != 0:
+        return
+      to_log = create_log_dict(metric, achievements, config)
+      batch_log(update_step, to_log, config)
+
+    jax.debug.callback(callback, metric, achievements, update_step, config)
+
+  jax.lax.cond(
+    should_save,
+    lambda: log(trajectory, update_step, config),
+    lambda: None,
+  )
+
+
 def run_single(config: dict, save_path: str = None):
   rng = jax.random.PRNGKey(config["SEED"])
   config["TEST_NUM_ENVS"] = config.get("TEST_NUM_ENVS", None) or config["NUM_ENVS"]
@@ -381,6 +471,8 @@ def run_single(config: dict, save_path: str = None):
   if config["ALG"] == "qlearning":
     train_fn = vbb.make_train(
       config=config,
+      save_path=save_path,
+      online_trajectory_log_fn=default_craftax_log_fn,
       env=vec_env,
       make_agent=qlearning_craftax.make_craftax_agent,
       make_optimizer=qlearning_craftax.make_optimizer,
@@ -397,6 +489,8 @@ def run_single(config: dict, save_path: str = None):
   elif config["ALG"] == "qlearning_sf_aux":
     train_fn = vbb.make_train(
       config=config,
+      save_path=save_path,
+      online_trajectory_log_fn=default_craftax_log_fn,
       env=vec_env,
       make_agent=qlearning_sf_aux_craftax.make_craftax_agent,
       make_optimizer=qlearning_sf_aux_craftax.make_optimizer,
@@ -413,6 +507,8 @@ def run_single(config: dict, save_path: str = None):
   elif config["ALG"] in ["dyna"]:
     train_fn = dyna_craftax.make_train(
       config=config,
+      save_path=save_path,
+      online_trajectory_log_fn=default_craftax_log_fn,
       env=vec_env,
       model_env=env,
       make_logger=partial(
@@ -423,22 +519,11 @@ def run_single(config: dict, save_path: str = None):
       ObserverCls=craftax_observer.Observer,
       vmap_env=vmap_env,
     )
-  elif config["ALG"] == "alphazero":
-    train_fn = alphazero_craftax.make_train(
-      config=config,
-      env=vec_env,
-      model_env=env,
-      make_logger=partial(
-        make_logger, learner_log_extra=alphazero_craftax.learner_log_extra
-      ),
-      train_env_params=env_params,
-      test_env_params=test_env_params,
-      ObserverCls=craftax_observer.Observer,
-      vmap_env=vmap_env,
-    )
   elif config["ALG"] in ["preplay"]:
     train_fn = multitask_preplay_craftax_v2.make_train_craftax_singlegoal(
       config=config,
+      save_path=save_path,
+      online_trajectory_log_fn=default_craftax_log_fn,
       env=vec_env,
       model_env=env,
       make_logger=partial(
@@ -450,24 +535,11 @@ def run_single(config: dict, save_path: str = None):
       ObserverCls=craftax_observer.Observer,
       vmap_env=vmap_env,
     )
-  elif config["ALG"] == "pqn":
-    constructor = get_pqn_fns(config)
-    train_fn = vpq.make_train(
-      config=config,
-      env=vec_env,
-      make_agent=constructor.make_agent,
-      make_optimizer=constructor.make_optimizer,
-      make_loss_fn_class=constructor.make_loss_fn_class,
-      make_actor=constructor.make_actor,
-      make_logger=make_logger,
-      train_env_params=env_params,
-      test_env_params=test_env_params,
-      ObserverCls=craftax_observer.Observer,
-      vmap_env=vmap_env,
-    )
   elif config["ALG"] == "usfa":
     train_fn = vbb.make_train(
       config=config,
+      save_path=save_path,
+      online_trajectory_log_fn=default_craftax_log_fn,
       env=vec_env,
       make_agent=usfa.make_craftax_agent,
       make_optimizer=usfa.make_optimizer,
@@ -790,10 +862,21 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "NUM_ENV_SEEDS": {"values": [0]},
-        "SEED": {"values": list(range(1, 5))},
+        "SEED": {"values": list(range(1, 11))},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "preplay-benchmark-2",
+      "group": "preplay-benchmark-0-5",
+    }
+  elif search == "preplay-benchmark-10k":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["preplay"]},
+        "NUM_ENV_SEEDS": {"values": [10_000]},
+        "SEED": {"values": list(range(1, 11))},
+      },
+      "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "group": "preplay-benchmark-10k-5",
     }
   else:
     raise NotImplementedError(search)

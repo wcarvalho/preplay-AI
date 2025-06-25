@@ -31,7 +31,12 @@ from jaxneurorl import losses
 from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
 from jaxneurorl.agents import qlearning as base_agent
-from networks import MLP, CraftaxObsEncoder, CraftaxMultiGoalObsEncoder, CategoricalHouzemazeObsEncoder
+from networks import (
+  MLP,
+  CraftaxObsEncoder,
+  CraftaxMultiGoalObsEncoder,
+  CategoricalHouzemazeObsEncoder,
+)
 
 
 from visualizer import plot_frames
@@ -965,6 +970,7 @@ class DynaAgentEnvModel(nn.Module):
 
   def compute_reward(self, timestep, task):
     return self.env.compute_reward(timestep, task, self.env_params)
+
 
 ########################
 # Craftax Agent
