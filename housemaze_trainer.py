@@ -691,11 +691,7 @@ def run_single(config: dict, save_path: str = None):
   # ---------------
   if save_path is not None:
     model_state = outs["runner_state"][0]
-<<<<<<< HEAD
-    params = jax.tree_map(lambda x: x[0], model_state.params)
-=======
     params = jax.tree_util.tree_map(lambda x: x[0], model_state.params)
->>>>>>> 8c565009f3a060ccf4ceedf62d5015bd41524413
     save_training_state(params, config, save_path, config["ALG"])
 
 
