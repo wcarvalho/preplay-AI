@@ -328,7 +328,9 @@ def create_log_dict(info, achievements, config):
   }
 
   for achievement in Achievement:
-    info[f"achievements/{achievement.name.lower()}"] = achievements[:, :, achievement.value].astype(np.float32)
+    info[f"achievements/{achievement.name.lower()}"] = achievements[
+      :, :, achievement.value
+    ].astype(np.float32)
   sum_achievements = 0
 
   for k, v in info.items():
@@ -373,9 +375,7 @@ def batch_log(update_step, log, config):
 
 def default_craftax_log_fn(trajectory, update_step, config):
   one_twenth = max(config["NUM_UPDATES"] // 100, 1)
-  should_save = jnp.logical_or(
-    update_step == 0, update_step % one_twenth == 0
-  )
+  should_save = jnp.logical_or(update_step == 0, update_step % one_twenth == 0)
 
   def log(trajectory, update_step, config):
     # construct dict that matches what they work with
