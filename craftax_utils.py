@@ -272,6 +272,7 @@ def astar(
 
     if tuple(current_pos) == tuple(goal_pos):
       pbar.close()
+      import pdb; pdb.set_trace()
       return jnp.array(current_path), iterations
 
     if tuple(current_pos) in closed_set:
@@ -287,7 +288,6 @@ def astar(
     for dx, dy in directions:
       new_x, new_y = int(current_pos[0] + dx), int(current_pos[1] + dy)
       new_pos = (new_x, new_y)
-
       if (
         0 <= new_x < rows
         and 0 <= new_y < cols
@@ -305,6 +305,7 @@ def astar(
           heapq.heappush(open_set, (f_score, count, new_pos, current_path + [new_pos]))
 
   pbar.close()
+  import pdb; pdb.set_trace()
   return [], iterations
 
 

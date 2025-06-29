@@ -93,9 +93,10 @@ for block_config in PATHS_CONFIGS:
       path = np.load(cache_file)
     else:
       # Calculate path for each start position + test object location
-      obs, state = env.reset(jax.random.PRNGKey(0), params)
+      key = jax.random.PRNGKey(0)
+      obs, state = env.reset(key, params)
 
-      path, _ = craftax_utils.astar(state, goal_object)
+      path, _ = craftax_utils.astar(state, goal_object, key=key)
       path = np.array(path)
       np.save(cache_file, path)
 
@@ -111,6 +112,7 @@ for block_config in PATHS_CONFIGS:
     )
     if len(path) == 0:
       raise RuntimeError("Empty path?")
+    import pdb; pdb.set_trace()
 
     waypoints = get_path_waypoints(path)
     if evaluation:
