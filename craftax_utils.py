@@ -33,8 +33,8 @@ except ImportError:
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "craftax_cache")
 
-TRAIN_COLOR = "red"
-TEST_COLOR = "#679FE5"  # pretty blue
+TRAIN_COLOR = "#679FE5"  # pretty blue
+TEST_COLOR = "red"
 TEST_COLOR2 = "#FFB700"
 
 

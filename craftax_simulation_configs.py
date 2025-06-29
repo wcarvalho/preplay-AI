@@ -112,7 +112,7 @@ for block_config in PATHS_CONFIGS:
     )
     if len(path) == 0:
       raise RuntimeError("Empty path?")
-    import pdb; pdb.set_trace()
+
 
     waypoints = get_path_waypoints(path)
     if evaluation:
