@@ -824,7 +824,7 @@ def sweep(search: str = ""):
         "goal": "maximize",
       },
       "parameters": {
-        "SEED": {"values": list(range(1, 11))},
+        "SEED": {"values": list(range(11, 21))},
         "env.exp": {"values": ["exp4"]},
       },
       "overrides": ["alg=usfa", "rlenv=housemaze", "user=wilka"],
@@ -866,7 +866,7 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["preplay"]},
-        "SEED": {"values": list(range(1, 11))},
+        "SEED": {"values": list(range(11, 14))},
         "SIMULATION_LENGTH": {"values": [15]},
         "env.exp": {"values": ["exp4"]},
       },

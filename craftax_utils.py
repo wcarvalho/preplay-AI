@@ -26,10 +26,7 @@ except ModuleNotFoundError:
   print("No craftax_fullmap_renderer found")
   pass
 
-try:
-  from tqdm.notebook import tqdm
-except ImportError:
-  from tqdm import tqdm
+from tqdm import tqdm
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "craftax_cache")
 

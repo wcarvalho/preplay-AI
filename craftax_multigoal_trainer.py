@@ -330,6 +330,7 @@ def run_single(config: dict, save_path: str = None):
   if config["ALG"] == "qlearning":
     train_fn = vbb.make_train(
       config=config,
+      save_path=save_path,
       env=vec_env,
       make_agent=qlearning_craftax.make_multigoal_craftax_agent,
       make_optimizer=qlearning_craftax.make_optimizer,
@@ -346,6 +347,7 @@ def run_single(config: dict, save_path: str = None):
   elif config["ALG"] == "usfa":
     train_fn = vbb.make_train(
       config=config,
+      save_path=save_path,
       env=vec_env,
       make_agent=functools.partial(
         usfa.make_multigoal_craftax_agent, all_tasks=all_tasks
@@ -362,6 +364,7 @@ def run_single(config: dict, save_path: str = None):
   elif config["ALG"] in ["dyna"]:
     train_fn = dyna_craftax.make_train(
       config=config,
+      save_path=save_path,
       env=vec_env,
       model_env=env,
       make_logger=partial(
@@ -375,6 +378,7 @@ def run_single(config: dict, save_path: str = None):
   elif config["ALG"] in ["preplay"]:
     train_fn = multitask_preplay_craftax_v2.make_train_craftax_multigoal(
       config=config,
+      save_path=save_path,
       env=vec_env,
       model_env=env,
       make_logger=partial(
@@ -400,28 +404,28 @@ def run_single(config: dict, save_path: str = None):
   # ---------------
   # save model weights
   # ---------------
-  alg_name = config["ALG"]
-  if save_path is not None:
+  #alg_name = config["ALG"]
+  #if save_path is not None:
 
-    def save_params(params: Dict, filename: Union[str, os.PathLike]) -> None:
-      flattened_dict = flatten_dict(params, sep=",")
-      save_file(flattened_dict, filename)
+  #  def save_params(params: Dict, filename: Union[str, os.PathLike]) -> None:
+  #    flattened_dict = flatten_dict(params, sep=",")
+  #    save_file(flattened_dict, filename)
 
-    model_state = outs["runner_state"][0]
-    # save only params of the firt run
-    params = jax.tree.map(lambda x: x[0], model_state.params)
-    os.makedirs(save_path, exist_ok=True)
+  #  model_state = outs["runner_state"][0]
+  #  # save only params of the firt run
+  #  params = jax.tree.map(lambda x: x[0], model_state.params)
+  #  os.makedirs(save_path, exist_ok=True)
 
-    save_params(params, f"{save_path}/{alg_name}.safetensors")
-    print(f"Parameters of first batch saved in {save_path}/{alg_name}.safetensors")
+  #  save_params(params, f"{save_path}/{alg_name}.safetensors")
+  #  print(f"Parameters of first batch saved in {save_path}/{alg_name}.safetensors")
 
-    config_filename = f"{save_path}/{alg_name}.config"
-    import pickle
+  #  config_filename = f"{save_path}/{alg_name}.config"
+  #  import pickle
 
-    # Save the dictionary as a pickle file
-    with open(config_filename, "wb") as f:
-      pickle.dump(config, f)
-    print(f"Config saved in {config_filename}")
+  #  # Save the dictionary as a pickle file
+  #  with open(config_filename, "wb") as f:
+  #    pickle.dump(config, f)
+  #  print(f"Config saved in {config_filename}")
 
 
 def sweep(search: str = ""):
@@ -501,7 +505,7 @@ def sweep(search: str = ""):
       "metric": metric,
       "parameters": {
         "ALG": {"values": ["usfa"]},
-        "SEED": {"values": list(range(1, 11))},
+        "SEED": {"values": list(range(17, 25))},
       },
       "overrides": ["alg=usfa_craftax", "rlenv=craftax-multigoal", "user=wilka"],
       "group": "usfa-final-5",
@@ -521,10 +525,10 @@ def sweep(search: str = ""):
       "metric": metric,
       "parameters": {
         "ALG": {"values": ["preplay"]},
-        "SEED": {"values": list(range(1, 11))},
+        "SEED": {"values": list(range(14, 17))},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-dyna-multigoal", "user=wilka"],
-      "group": "preplay-final-7",
+      "group": "preplay-final-1",
     }
 
   else:
