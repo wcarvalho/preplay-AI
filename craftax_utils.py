@@ -30,8 +30,8 @@ from tqdm import tqdm
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "craftax_cache")
 
-TRAIN_COLOR = "red"
-TEST_COLOR = "#679FE5"  # pretty blue
+TRAIN_COLOR = "#679FE5"  # pretty blue
+TEST_COLOR = "red"
 TEST_COLOR2 = "#FFB700"
 
 
@@ -284,7 +284,6 @@ def astar(
     for dx, dy in directions:
       new_x, new_y = int(current_pos[0] + dx), int(current_pos[1] + dy)
       new_pos = (new_x, new_y)
-
       if (
         0 <= new_x < rows
         and 0 <= new_y < cols

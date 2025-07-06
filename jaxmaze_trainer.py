@@ -39,18 +39,14 @@ os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 
 from jaxneurorl.agents import value_based_basics as vbb
-from jaxneurorl.agents import value_based_pqn as vpq
 from jaxneurorl import launcher
-from jaxneurorl import utils
 from jaxneurorl import loggers
 
-import alphazero
 import qlearning_housemaze
 import usfa_housemaze
 import multitask_preplay_housemaze
 import dyna_craftax
 import multitask_preplay_craftax_v2
-import networks
 import housemaze_observer as humansf_observers
 from housemaze.human_dyna import experiments as housemaze_experiments
 
@@ -90,152 +86,6 @@ class AlgorithmConstructor:
   make_optimizer: Callable
   make_loss_fn_class: Callable
   make_actor: Callable
-
-
-def get_qlearning_fns(
-  config,
-  num_categories=10_000,
-):
-  HouzemazeObsEncoder = functools.partial(
-    networks.CategoricalHouzemazeObsEncoder,
-    num_categories=num_categories,
-    embed_hidden_dim=config["EMBED_HIDDEN_DIM"],
-    mlp_hidden_dim=config["MLP_HIDDEN_DIM"],
-    num_embed_layers=config["NUM_EMBED_LAYERS"],
-    num_mlp_layers=config["NUM_MLP_LAYERS"],
-    activation=config["ACTIVATION"],
-    norm_type=config.get("NORM_TYPE", "none"),
-  )
-
-  return AlgorithmConstructor(
-    make_agent=qlearning_housemaze.make_housemaze_agent,
-    make_optimizer=qlearning_housemaze.make_optimizer,
-    make_loss_fn_class=qlearning_housemaze.make_loss_fn_class,
-    make_actor=qlearning_housemaze.make_actor,
-  )
-
-
-def get_sf_fns(
-  config,
-  env,
-  env_params,
-  num_categories=10_000,
-):
-  HouzemazeObsEncoder = functools.partial(
-    networks.CategoricalHouzemazeObsEncoder,
-    num_categories=num_categories,
-    embed_hidden_dim=config["EMBED_HIDDEN_DIM"],
-    mlp_hidden_dim=config["MLP_HIDDEN_DIM"],
-    num_embed_layers=config["NUM_EMBED_LAYERS"],
-    num_mlp_layers=config["NUM_MLP_LAYERS"],
-    activation=config["ACTIVATION"],
-    norm_type=config.get("NORM_TYPE", "none"),
-  )
-  train_objects = env_params.reset_params.train_objects[0]
-  train_tasks = jnp.array([env.task_runner.task_vector(o) for o in train_objects])
-  return AlgorithmConstructor(
-    make_agent=functools.partial(
-      usfa_housemaze.make_agent,
-      train_tasks=train_tasks,
-      ObsEncoderCls=HouzemazeObsEncoder,
-    ),
-    make_optimizer=usfa_housemaze.make_optimizer,
-    make_loss_fn_class=usfa_housemaze.make_loss_fn_class,
-    make_actor=functools.partial(usfa_housemaze.make_actor, remove_gpi_dim=False),
-  )
-
-
-def get_dynaq_fns(
-  config, env, env_params, task_objects, num_categories=10_000, rng=None
-):
-  if rng is None:
-    rng = jax.random.PRNGKey(42)
-  import distrax
-
-  HouzemazeObsEncoder = functools.partial(
-    networks.CategoricalHouzemazeObsEncoder,
-    num_categories=num_categories,
-    embed_hidden_dim=config["EMBED_HIDDEN_DIM"],
-    mlp_hidden_dim=config["MLP_HIDDEN_DIM"],
-    num_embed_layers=config["NUM_EMBED_LAYERS"],
-    num_mlp_layers=config["NUM_MLP_LAYERS"],
-    activation=config["ACTIVATION"],
-    norm_type=config.get("NORM_TYPE", "none"),
-  )
-
-  sim_policy = config["SIM_POLICY"]
-  num_simulations = config["NUM_SIMULATIONS"]
-  if sim_policy == "gamma":
-    temp_dist = distrax.Gamma(
-      concentration=config["TEMP_CONCENTRATION"], rate=config["TEMP_RATE"]
-    )
-
-    rng, rng_ = jax.random.split(rng)
-    temperatures = temp_dist.sample(seed=rng_, sample_shape=(num_simulations - 1,))
-    temperatures = jnp.concatenate((temperatures, jnp.array((1e-5,))))
-    greedy_idx = int(temperatures.argmin())
-
-    def simulation_policy(preds: struct.PyTreeNode, sim_rng: jax.Array):
-      q_values = preds.q_vals
-      assert q_values.shape[0] == temperatures.shape[0]
-      logits = q_values / jnp.expand_dims(temperatures, -1)
-      return distrax.Categorical(logits=logits).sample(seed=sim_rng)
-
-  elif sim_policy == "epsilon":
-    epsilon_setting = config["SIM_EPSILON_SETTING"]
-    if epsilon_setting == 1:
-      vals = np.logspace(num=256, start=1, stop=3, base=0.1)
-    elif epsilon_setting == 2:
-      vals = np.logspace(num=256, start=0.05, stop=0.9, base=0.1)
-    epsilons = jax.random.choice(rng, vals, shape=(num_simulations - 1,))
-    epsilons = jnp.concatenate((jnp.zeros(1), epsilons))
-    greedy_idx = int(epsilons.argmin())
-
-    def simulation_policy(preds: struct.PyTreeNode, sim_rng: jax.Array):
-      q_values = preds.q_vals
-      assert q_values.shape[0] == epsilons.shape[0]
-      sim_rng = jax.random.split(sim_rng, q_values.shape[0])
-      return jax.vmap(qlearning_housemaze.epsilon_greedy_act, in_axes=(0, 0, 0))(
-        q_values, epsilons, sim_rng
-      )
-
-  else:
-    raise NotImplementedError
-
-  def make_init_offtask_timestep(x: multitask_env.TimeStep, offtask_w: jax.Array):
-    task_object = (task_objects * offtask_w).sum(-1)
-    task_object = task_object.astype(jnp.int32)
-    new_state = x.state.replace(
-      step_num=jnp.zeros_like(x.state.step_num),
-      task_w=offtask_w,
-      task_object=task_object,  # only used for logging
-      is_train_task=jnp.full(x.reward.shape, False),
-    )
-    return x.replace(
-      state=new_state,
-      observation=jax.vmap(jax.vmap(env.make_observation))(
-        new_state, x.observation.prev_action
-      ),
-      # reset reward, discount, step type
-      reward=jnp.zeros_like(x.reward),
-      discount=jnp.ones_like(x.discount),
-      step_type=jnp.ones_like(x.step_type),
-    )
-
-  return AlgorithmConstructor(
-    make_agent=functools.partial(
-      multitask_preplay_housemaze.make_agent, ObsEncoderCls=HouzemazeObsEncoder
-    ),
-    make_optimizer=multitask_preplay_housemaze.make_optimizer,
-    make_loss_fn_class=functools.partial(
-      multitask_preplay_housemaze.make_loss_fn_class,
-      make_init_offtask_timestep=make_init_offtask_timestep,
-      simulation_policy=simulation_policy,
-      online_coeff=config["ONLINE_COEFF"],
-      dyna_coeff=config.get("DYNA_COEFF", 1.0),
-    ),
-    make_actor=multitask_preplay_housemaze.make_actor,
-  )
 
 
 def extract_task_info(timestep: multitask_env.TimeStep):
