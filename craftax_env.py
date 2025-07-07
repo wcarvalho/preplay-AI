@@ -8,6 +8,7 @@ Changes:
 
 import jax
 from jax import lax
+from enum import Enum
 from jax.tree_util import tree_map
 from gymnax.environments import spaces, environment
 from typing import Tuple, Optional
@@ -41,6 +42,163 @@ assert MAX_ACHIEVEMENT + 1 == len(ACHIEVEMENT_REWARD_MAP), (
 )
 
 
+# ACHIEVEMENTS
+class FirstFloorAchievement(Enum):
+  COLLECT_WOOD = 0
+  PLACE_TABLE = 1
+  EAT_COW = 2
+  COLLECT_SAPLING = 3
+  COLLECT_DRINK = 4
+  MAKE_WOOD_PICKAXE = 5
+  MAKE_WOOD_SWORD = 6
+  PLACE_PLANT = 7
+  DEFEAT_ZOMBIE = 8
+  COLLECT_STONE = 9
+  PLACE_STONE = 10
+  EAT_PLANT = 11
+  DEFEAT_SKELETON = 12
+  MAKE_STONE_PICKAXE = 13
+  MAKE_STONE_SWORD = 14
+  WAKE_UP = 15
+  PLACE_FURNACE = 16
+  COLLECT_COAL = 17
+  COLLECT_IRON = 18
+  COLLECT_DIAMOND = 19
+  MAKE_IRON_PICKAXE = 20
+  MAKE_IRON_SWORD = 21
+
+  MAKE_ARROW = 22
+  MAKE_TORCH = 23
+  PLACE_TORCH = 24
+
+
+def achievement_to_block_type(achievement: FirstFloorAchievement) -> BlockType:
+  if achievement.value == Achievement.COLLECT_WOOD.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.PLACE_TABLE.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.EAT_COW.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.COLLECT_SAPLING.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.COLLECT_DRINK.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.MAKE_WOOD_PICKAXE.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.MAKE_WOOD_SWORD.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.PLACE_PLANT.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.DEFEAT_ZOMBIE.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.COLLECT_STONE.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.PLACE_STONE.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.EAT_PLANT.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.DEFEAT_SKELETON.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.MAKE_STONE_PICKAXE.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.MAKE_STONE_SWORD.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.WAKE_UP.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.PLACE_FURNACE.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.COLLECT_COAL.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.COLLECT_IRON.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.COLLECT_DIAMOND.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.MAKE_IRON_PICKAXE.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.MAKE_IRON_SWORD.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.MAKE_ARROW.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.MAKE_TORCH.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+  elif achievement.value == Achievement.PLACE_TORCH.value:
+    import ipdb
+
+    ipdb.set_trace()
+
+
 @struct.dataclass
 class EnvParams:
   max_timesteps: int = 100000
@@ -70,6 +228,7 @@ class StaticEnvParams:
   max_mob_projectiles: int = 3
   max_player_projectiles: int = 3
   use_precondition: bool = False
+  randomize_objects: bool = False
 
 
 dummy_achievements = jnp.zeros(len(ACHIEVEMENT_REWARD_MAP) + 1, dtype=jnp.float32)
@@ -673,6 +832,42 @@ def get_possible_achievements(
   return possible_achievements
 
 
+RANDOMIZABLE_BLOCKS = jax.numpy.array(
+  [
+    BlockType.GRASS.value,
+    BlockType.STONE.value,
+    BlockType.TREE.value,
+    BlockType.WOOD.value,
+    BlockType.PATH.value,
+    BlockType.COAL.value,
+    BlockType.IRON.value,
+    BlockType.DIAMOND.value,
+    BlockType.CRAFTING_TABLE.value,
+    BlockType.FURNACE.value,
+    BlockType.PLANT.value,
+    BlockType.RIPE_PLANT.value,
+    BlockType.WALL_MOSS.value,
+    BlockType.STALAGMITE.value,
+    BlockType.SAPPHIRE.value,
+    BlockType.RUBY.value,
+    BlockType.CHEST.value,
+    BlockType.FOUNTAIN.value,
+    BlockType.FIRE_GRASS.value,
+    BlockType.ICE_GRASS.value,
+    BlockType.GRAVEL.value,
+    BlockType.FIRE_TREE.value,
+    BlockType.ICE_SHRUB.value,
+    BlockType.ENCHANTMENT_TABLE_FIRE.value,
+    BlockType.ENCHANTMENT_TABLE_ICE.value,
+    BlockType.NECROMANCER.value,
+    BlockType.GRAVE.value,
+    BlockType.GRAVE2.value,
+    BlockType.GRAVE3.value,
+    BlockType.NECROMANCER_VULNERABLE.value,
+  ]
+)
+
+
 def print_possible_achievements(
   possible_achievements: jnp.ndarray, return_list: bool = False
 ) -> None:
@@ -699,6 +894,75 @@ def print_possible_achievements(
       print(f"- {name}")
   else:
     print("\nNo achievements currently achievable")
+
+
+@jax.jit
+def masked_permutation(key, data, mask):
+  n = len(data)
+
+  # Generate random values for all positions
+  random_vals = jax.random.uniform(key, shape=(n,))
+
+  # Create indices array
+  indices = jnp.arange(n)
+
+  # Create pairs of (random_val, index) only for masked positions
+  # For unmasked positions, use a large value so they sort to the end
+  sort_keys = jnp.where(mask, random_vals, 1e9)
+
+  # Sort indices by the random values
+  sorted_indices = indices[jnp.argsort(sort_keys)]
+
+  # Create mapping from original position to new position
+  # Use lax.dynamic_slice to handle dynamic indexing
+  result = data.copy()
+
+  # Use scan to avoid explicit loops
+  def update_fn(carry, i):
+    result, mask_count = carry
+
+    # Check if position i is masked
+    is_masked = mask[i]
+
+    # If masked, get the corresponding sorted index
+    new_val = lax.cond(
+      is_masked, lambda: data[sorted_indices[mask_count]], lambda: data[i]
+    )
+
+    # Update result and mask count
+    new_result = result.at[i].set(new_val)
+    new_mask_count = mask_count + is_masked
+
+    return (new_result, new_mask_count), None
+
+  (final_result, _), _ = lax.scan(update_fn, (result, 0), jnp.arange(n))
+
+  return final_result
+
+
+def randomize_map_blocks(rng, map):
+  """
+  Randomize the positions of blocks that are in randomizable_blocks on the first level only,
+  while keeping non-randomizable blocks in their original positions.
+
+  Args:
+      rng: JAX random key
+      map: Array of shape [num_levels, height, width] containing block type integers
+      randomizable_blocks: Array of block type integer values that should be randomized
+
+  Returns:
+      Updated map with randomized block positions on level 0
+  """
+  # Only randomize the first level (surface level)
+  level_0 = map[0]
+  level_0_flattened = level_0.flatten()
+  randomizable_mask = jnp.isin(level_0, RANDOMIZABLE_BLOCKS).flatten()
+
+  level_0_flattened_permuted = masked_permutation(
+    rng, level_0_flattened, randomizable_mask
+  )
+
+  return map.at[0].set(level_0_flattened_permuted.reshape(level_0.shape))
 
 
 def generate_world(rng, params, static_params):
@@ -780,6 +1044,9 @@ def generate_world(rng, params, static_params):
   )
 
   rng, _rng = jax.random.split(rng)
+
+  if static_params.randomize_objects:
+    map = randomize_map_blocks(rng, map)
 
   state = EnvState(
     map=map,

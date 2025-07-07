@@ -404,8 +404,8 @@ def run_single(config: dict, save_path: str = None):
   # ---------------
   # save model weights
   # ---------------
-  #alg_name = config["ALG"]
-  #if save_path is not None:
+  # alg_name = config["ALG"]
+  # if save_path is not None:
 
   #  def save_params(params: Dict, filename: Union[str, os.PathLike]) -> None:
   #    flattened_dict = flatten_dict(params, sep=",")

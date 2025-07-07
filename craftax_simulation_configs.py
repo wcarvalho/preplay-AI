@@ -113,7 +113,6 @@ for block_config in PATHS_CONFIGS:
     if len(path) == 0:
       raise RuntimeError("Empty path?")
 
-
     waypoints = get_path_waypoints(path)
     if evaluation:
       waypoints = waypoints[:1]
