@@ -1,0 +1,63 @@
+[project]
+name = "preplay-ai"
+version = "0.1.0"
+description = "Multitask Preplay - Model-based RL research in JAX"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    {name = "Wilka Carvalho", email = "wcarvalho92@gmail.com"},
+]
+dependencies = [
+    # JAX ecosystem
+    "jax>=0.4.20",
+    "jaxlib>=0.4.20",
+    "flax>=0.8.4",
+    "optax>=0.2.1",
+    "chex>=0.1.86",
+    "rlax>=0.1.6",
+
+    # RL environments & utilities
+    "gymnax",
+    "craftax",
+    "flashbax",
+    "mctx>=0.0.5",
+
+    # Config & logging
+    "hydra-core",
+    "omegaconf",
+    "wandb",
+
+    # Compute utilities
+    "ray[tune]>=2.10.0",
+    "scipy>=1.12.0",
+    "numpy",
+
+    # Serialization
+    "safetensors",
+
+    # Utilities
+    "tqdm>=4.66.2",
+    "typing_extensions>=4.11.0",
+    "ipdb",
+    "ruff",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff",
+    "ipywidgets",
+    "polars",
+]
+
+[tool.ruff]
+line-length = 88
+indent-width = 2
+target-version = "py310"
+
+[tool.ruff.format]
+indent-style = "space"
+
+[tool.uv]
+dev-dependencies = [
+    "ruff",
+]

@@ -23,7 +23,7 @@ class BasicObserverState:
   episode_returns: jax.Array
   episode_lengths: jax.Array
   finished: jax.Array
-  idx: jax.Array = jnp.array(0, dtype=jnp.int32)
+  idx: jax.Array = struct.field(default_factory=lambda: jnp.array(0, dtype=jnp.int32))
 
 
 def get_first(b):

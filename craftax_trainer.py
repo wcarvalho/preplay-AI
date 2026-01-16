@@ -59,10 +59,12 @@ import craftax_observer
 import networks
 import alphazero_craftax
 import dyna_craftax
+import her_craftax
 import multitask_preplay_craftax_v2
 import qlearning_craftax
 import qlearning_sf_aux_craftax
 import usfa_craftax as usfa
+import base_algorithm
 
 
 @struct.dataclass
@@ -551,6 +553,22 @@ def run_single(config: dict, save_path: str = None):
       ObserverCls=craftax_observer.Observer,
       vmap_env=vmap_env,
     )
+  elif config["ALG"] == "her":
+    train_fn = base_algorithm.make_train(
+      config=config,
+      save_path=save_path,
+      online_trajectory_log_fn=default_craftax_log_fn,
+      env=vec_env,
+      make_agent=her_craftax.make_craftax_agent,
+      make_optimizer=her_craftax.make_optimizer,
+      make_loss_fn_class=her_craftax.make_loss_fn_class,
+      make_actor=her_craftax.make_actor,
+      make_logger=partial(make_logger, learner_log_extra=her_craftax.learner_log_extra),
+      train_env_params=env_params,
+      test_env_params=test_env_params,
+      ObserverCls=craftax_observer.Observer,
+      vmap_env=vmap_env,
+    )
   else:
     raise NotImplementedError(config["ALG"])
 
@@ -705,6 +723,16 @@ def sweep(search: str = ""):
       },
       "overrides": ["alg=pqn-craftax", "rlenv=craftax-10m", "user=wilka"],
       "group": "pqn-7",
+    }
+  elif search == "her":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "NUM_ENV_SEEDS": {"values": [0]},
+        "SEED": {"values": list(range(1, 2))},
+      },
+      "overrides": ["alg=her", "rlenv=craftax-10m", "user=wilka"],
+      "group": "her-1",
     }
   ############################################################
   # More "final" experiments

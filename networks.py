@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 from flax import struct
 
-from jaxneurorl.agents.value_based_pqn import MLP, BatchRenorm, get_activation_fn
+from base_algorithm import MLP, BatchRenorm, get_activation_fn
 
 Observation = struct.PyTreeNode
 

@@ -837,6 +837,7 @@ RANDOMIZABLE_BLOCKS = jax.numpy.array(
     BlockType.GRASS.value,
     BlockType.STONE.value,
     BlockType.TREE.value,
+    BlockType.WATER.value,
     BlockType.WOOD.value,
     BlockType.PATH.value,
     BlockType.COAL.value,

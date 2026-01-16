@@ -3,24 +3,38 @@
 
 ## Install
 
-### For re-running results
+### Using uv (recommended)
 
-### For Development
+```bash
+# Install uv if you don't have it
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-Adding jaxneurorl in case you want to change library
-```
-git submodule init
-git submodule update
-```
+# Create virtual environment and install dependencies
+uv sync
 
-```
-mamba create -n preplay-ai python=3.10 pip wheel -y
-
-# in case a mamba env is already active
-mamba deactivate
-mamba activate preplay-ai
-mamba env update -f conda_envs/dev.yaml
-pip install -e libraries/jaxneurorl
+# For development dependencies (ruff, etc.)
+uv sync --all-extras
 ```
 
-VSCODE: add `libraries/jaxneurorl` to `python.autoComplete.extraPaths`
+### Running scripts
+
+```bash
+# Run any script with uv
+uv run python craftax_trainer.py app.parallel=none app.debug=True
+
+# Or activate the environment first
+source .venv/bin/activate
+python craftax_trainer.py app.parallel=none app.debug=True
+```
+
+### JAX with GPU (optional)
+
+If you need GPU support, install the appropriate JAX version after `uv sync`:
+
+```bash
+# For CUDA 12
+uv pip install --upgrade "jax[cuda12]"
+
+# For CUDA 11
+uv pip install --upgrade "jax[cuda11_pip]"
+```
