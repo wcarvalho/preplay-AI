@@ -2,12 +2,16 @@
 Hindsight experience replay
 
 This is a self-contained module that only depends on:
-1. base_algorithm.py
+1. base_algorithm.py (consolidated jaxneurorl components)
 2. networks.py (CraftaxObsEncoder, CraftaxMultiGoalObsEncoder)
 """
 
 from distrax import Categorical
-from networks import CraftaxMultiGoalObsEncoder, CraftaxObsEncoder
+from networks import (
+  CategoricalHouzemazeObsEncoder,
+  CraftaxMultiGoalObsEncoder,
+  CraftaxObsEncoder,
+)
 from base_algorithm import TimeStep
 from visualizer import plot_frames
 from craftax.craftax.renderer import render_craftax_pixels
@@ -45,31 +49,33 @@ RNNInput = base.RNNInput
 
 
 ENVIRONMENT_TO_GOAL_FNS = {
-    'jaxmaxe': {
-        lambda t: t.observation.task_w,
-        lambda t: t.observation.state_features,
-        },
-    'craftax-multigoal': {
-        lambda t: t.observation.task_w,
-        lambda t: t.observation.state_features,
-        },
-    'craftax-gen':{
-        lambda t: jnp.ones_like(t.observation.achievements),
-        lambda t: t.observation.achievements,
-        }
+  "jaxmaze": (
+    lambda t: t.observation.task_w,
+    lambda t: t.observation.state_features,
+    lambda t: t.observation.position,  # housemaze uses .position
+  ),
+  "craftax-multigoal": (
+    lambda t: t.observation.task_w,
+    lambda t: t.observation.state_features,
+    lambda t: t.observation.player_position,
+  ),
+  "craftax-gen": (
+    lambda t: jnp.ones_like(t.observation.achievements),
+    lambda t: t.observation.achievements,
+    lambda t: t.observation.player_position,
+  ),
 }
 
-
-def player_position_fn(t):
-  return t.observation.player_position
 
 class Predictions(NamedTuple):
   q_vals: jax.Array
   rnn_states: jax.Array
 
+
 class GoalPosition(NamedTuple):
   goal: jax.Array
   position: jax.Array
+
 
 class RnnAgent(nn.Module):
   """_summary_
@@ -108,8 +114,7 @@ class RnnAgent(nn.Module):
     rng, _rng = jax.random.split(rng)
 
     new_rnn_state, rnn_out = self.rnn(rnn_state, rnn_in, _rng)
-    goal_embedding = jax.vmap(
-      self.task_encoder)(self.goal_from_timestep(x))
+    goal_embedding = jax.vmap(self.task_encoder)(self.goal_from_timestep(x))
     q_in = jnp.concatenate((rnn_out, goal_embedding), axis=-1)
 
     q_vals = self.q_fn(q_in)
@@ -120,11 +125,8 @@ class RnnAgent(nn.Module):
     ), new_rnn_state
 
   def unroll(
-      self,
-      rnn_state,
-      xs: TimeStep,
-      rng: jax.random.PRNGKey,
-      goal: Optional[Goal]=None):
+    self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey, goal: Optional[Goal] = None
+  ):
     # rnn_state: [B, D]
     # xs: [T, B] or [T]
     ref = rnn_state[0]
@@ -154,7 +156,6 @@ class RnnAgent(nn.Module):
     q_in = jnp.concatenate((rnn_out, goal_embedding), axis=-1)
     q_vals = q_fn(q_in)
 
-
     return Predictions(
       q_vals=q_vals,
       rnn_states=rnn_out,
@@ -180,7 +181,6 @@ def is_truncated(timestep):
 
 
 def episode_finished_mask(timesteps):
-
   # either termination or truncation
   is_last_t = make_float(timesteps.last())
 
@@ -311,28 +311,31 @@ class HerLossFn(base.RecurrentLossFn):
     td_error = jnp.swapaxes(td_error, 0, 1)
     # first label online loss with online
     all_metrics.update({f"{k}/online": v for k, v in metrics.items()})
-    #all_log_info["online"] = log_info
+    # all_log_info["online"] = log_info
     td_error = jnp.concatenate((td_error, jnp.zeros(B)[None]), 0)
     td_error = jnp.abs(td_error)
 
     ##################
     # Q-learning on fake goals
     ##################
-    key_grad = jax.random.split(key_grad, B+1)
+    key_grad = jax.random.split(key_grad, B + 1)
     # 1. sample fake goals from trajectory using data.timestep
     # [N, B, D]
     new_goals = jax.vmap(self.sample_goals, (1, 0), 1)(data.timestep, key_grad[1:])
 
     # 2. Compute Q-values for new goals
     def her_loss(
-        new_goal: Union[jnp.ndarray, struct.PyTreeNode,],
-        sub_key_grad,
-        timestep,
-        actions,
-        loss_mask,
-        online_state,
-        target_state,
-        ):
+      new_goal: Union[
+        jnp.ndarray,
+        struct.PyTreeNode,
+      ],
+      sub_key_grad,
+      timestep,
+      actions,
+      loss_mask,
+      online_state,
+      target_state,
+    ):
       """new_goal is [D], sub_key_grad is [2], loss_mask is [T]"""
 
       sub_key_grad, sub_key_grad_ = jax.random.split(sub_key_grad)
@@ -350,32 +353,33 @@ class HerLossFn(base.RecurrentLossFn):
 
       reward = self.her_reward_fn(timestep, new_goal)
       return self.loss_fn(
-          timestep=timestep,
-          online_preds=online_preds,
-          target_preds=target_preds,
-          actions=actions,
-          rewards=reward,
-          is_last=make_float(timestep.last()),
-          non_terminal=timestep.discount,
-          loss_mask=loss_mask,
+        timestep=timestep,
+        online_preds=online_preds,
+        target_preds=target_preds,
+        actions=actions,
+        rewards=reward,
+        is_last=make_float(timestep.last()),
+        non_terminal=timestep.discount,
+        loss_mask=loss_mask,
       )
-    her_loss = jax.vmap(her_loss, (0, 0, None, None, None, None, None))
-    her_loss = jax.vmap(her_loss, (1, 1, 1,    1,    1,    0,    0), 0)
 
-    key_grad = jax.random.split(
-        key_grad[0], self.ngoals*B).reshape(
-          self.ngoals, B, -1)
-  
+    her_loss = jax.vmap(her_loss, (0, 0, None, None, None, None, None))
+    her_loss = jax.vmap(her_loss, (1, 1, 1, 1, 1, 0, 0), 0)
+
+    key_grad = jax.random.split(key_grad[0], self.ngoals * B).reshape(
+      self.ngoals, B, -1
+    )
+
     # [T, N]
     _, her_loss, her_metrics, her_log_info = her_loss(
-        new_goals,                            # [N, B, D]
-        key_grad,                             # [N, B, 2]
-        data.timestep,                        # [T, B, D]
-        data.action,                          # [T, B]
-        episode_finished_mask(data.timestep), # [T, B]
-        online_state,                         # [B, D]
-        target_state,                         # [B, D]
-        )
+      new_goals,  # [N, B, D]
+      key_grad,  # [N, B, 2]
+      data.timestep,  # [T, B, D]
+      data.action,  # [T, B]
+      episode_finished_mask(data.timestep),  # [T, B]
+      online_state,  # [B, D]
+      target_state,  # [B, D]
+    )
 
     loss = loss + self.her_coeff * her_loss.mean(1)
     all_metrics.update({f"{k}/her": v for k, v in her_metrics.items()})
@@ -385,17 +389,18 @@ class HerLossFn(base.RecurrentLossFn):
 
     return td_error, loss, all_metrics
 
+
 ############################################
 # Environment Specific
 ############################################
 
-def make_loss_fn_class(config) -> base.RecurrentLossFn:
 
-  task_vector_fn, achievement_fn = ENVIRONMENT_TO_GOAL_FNS[config['ENV']]
+def make_loss_fn_class(config) -> base.RecurrentLossFn:
+  task_vector_fn, achievement_fn, position_fn = ENVIRONMENT_TO_GOAL_FNS[config["ENV"]]
 
   def sample_goals(timesteps, rng):
     """
-    There is data at T time-points. We want to """
+    There is data at T time-points. We want to"""
     # T, C
     achievements = achievement_fn(timesteps)
     # T
@@ -404,12 +409,13 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     position_achieved = jnp.ones_like(goal_achieved)
 
     # T
-    logits = config['GOAL_BETA']*goal_achieved + position_achieved
-    probabilities = logits/jnp.sum(logits, axis=-1, keepdims=True)
+    logits = config["GOAL_BETA"] * goal_achieved + position_achieved
+    probabilities = logits / jnp.sum(logits, axis=-1, keepdims=True)
 
     # N
     indices = Categorical(probs=probabilities).sample(
-        seed=rng, sample_shape=(config['NUM_HER_GOALS']))
+      seed=rng, sample_shape=(config["NUM_HER_GOALS"])
+    )
 
     index = lambda x, i: jax.lax.dynamic_index_in_dim(x, i, keepdims=False)
     index = jax.vmap(index, (None, 0), 0)
@@ -418,53 +424,52 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     features_at_indices = index(achievements, indices)
 
     # [N, 2] <- [T, 2], [N]
-    positions_at_indices = index(player_position_fn(timesteps), indices)
+    positions_at_indices = index(position_fn(timesteps), indices)
     assert positions_at_indices.shape[0] == features_at_indices.shape[0]
     assert positions_at_indices.shape[1] == 2
     return GoalPosition(
       features_at_indices,
-      positions_at_indices+1 # reserve 0 for empty position
-      )
+      positions_at_indices + 1,  # reserve 0 for empty position
+    )
 
   def online_reward_fn(timesteps):
     task_vector = task_vector_fn(timesteps)
     achievements = achievement_fn(timesteps)
-    goal_reward = (task_vector*achievements).sum(-1)
+    goal_reward = (task_vector * achievements).sum(-1)
 
-    return .5*goal_reward
+    return 0.5 * goal_reward
 
   def her_reward_fn(timesteps, new_goal):
     # position reward
     position = new_goal.position
-    player_position = player_position_fn(timesteps)
+    player_position = position_fn(timesteps)
     position_reward = (player_position == position).all(1).astype(jnp.float32)
 
     # achievement reward
     goal = new_goal.goal
     achievements = achievement_fn(timesteps)
-    goal_reward = (goal*achievements).sum(-1)
+    goal_reward = (goal * achievements).sum(-1)
 
     assert goal_reward.ndim == 1
     assert position_reward.ndim == 1
-    return .5*position_reward + .5*goal_reward
+    return 0.5 * position_reward + 0.5 * goal_reward
 
   return functools.partial(
-      HerLossFn,
-      discount=config["GAMMA"],
-      importance_sampling_exponent=config.get(
-          "IMPORTANCE_SAMPLING_EXPONENT", 0.6),
-      max_priority_weight=config.get("MAX_PRIORITY_WEIGHT", 0.9),
-      tx_pair=(
-          rlax.SIGNED_HYPERBOLIC_PAIR
-          if config.get("TX_PAIR", "none") == "hyperbolic"
-          else rlax.IDENTITY_PAIR
-      ),
-      step_cost=config.get("STEP_COST", 0.0),
-      her_coeff=config.get("her_COEFF", 0.001),
-      ngoals=config.get("NUM_HER_GOALS", 10),
-      sample_goals=sample_goals,
-      online_reward_fn=online_reward_fn,
-      her_reward_fn=her_reward_fn,
+    HerLossFn,
+    discount=config["GAMMA"],
+    importance_sampling_exponent=config.get("IMPORTANCE_SAMPLING_EXPONENT", 0.6),
+    max_priority_weight=config.get("MAX_PRIORITY_WEIGHT", 0.9),
+    tx_pair=(
+      rlax.SIGNED_HYPERBOLIC_PAIR
+      if config.get("TX_PAIR", "none") == "hyperbolic"
+      else rlax.IDENTITY_PAIR
+    ),
+    step_cost=config.get("STEP_COST", 0.0),
+    her_coeff=config.get("her_COEFF", 0.001),
+    ngoals=config.get("NUM_HER_GOALS", 10),
+    sample_goals=sample_goals,
+    online_reward_fn=online_reward_fn,
+    her_reward_fn=her_reward_fn,
   )
 
 
@@ -495,8 +500,7 @@ def crafax_learner_log_fn(data: dict, config: dict):
     # Create a figure with three subplots
     width = 0.3
     nT = len(rewards)  # e.g. 20 --> 8
-    fig, (ax1, ax2, ax3, ax4) = plt.subplots(
-        4, 1, figsize=(int(width * nT), 16))
+    fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(int(width * nT), 16))
 
     # Plot rewards and q-values in the top subplot
     def format(ax):
@@ -567,7 +571,7 @@ def crafax_learner_log_fn(data: dict, config: dict):
       if i >= len(timesteps.reward) - 1:
         return title
       title += (
-          f"\nr={timesteps.reward[i + 1]:.2f}, $\\gamma={timesteps.discount[i + 1]}$"
+        f"\nr={timesteps.reward[i + 1]:.2f}, $\\gamma={timesteps.discount[i + 1]}$"
       )
 
       if hasattr(timesteps.observation, "achievements"):
@@ -587,10 +591,10 @@ def crafax_learner_log_fn(data: dict, config: dict):
       return title
 
     fig = plot_frames(
-        timesteps=timesteps,
-        frames=obs_images,
-        panel_title_fn=panel_title_fn,
-        ncols=6,
+      timesteps=timesteps,
+      frames=obs_images,
+      panel_title_fn=panel_title_fn,
+      ncols=6,
     )
     if wandb.run is not wandb.sdk.lib.disabled.RunDisabled:
       wandb.log({"learner_example/trajectory": wandb.Image(fig)})
@@ -601,8 +605,7 @@ def crafax_learner_log_fn(data: dict, config: dict):
   is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
 
   jax.lax.cond(
-      is_log_time, lambda d: jax.debug.callback(
-          callback, d), lambda d: None, data
+    is_log_time, lambda d: jax.debug.callback(callback, d), lambda d: None, data
   )
 
 
@@ -642,21 +645,26 @@ class DuellingMLP(nn.Module):
     return q_values
 
 
-class CraftaxTaskEncoder(nn.Module):
+# --------------------
+# Craftax
+# --------------------
+
+
+class TaskEncoder(nn.Module):
   """Task encoder for regular craftax setting"""
+
+  vocab_size: int = 128
 
   @nn.compact
   def __call__(self, goal: GoalPosition):
     # task is binary
-    kernel_init = nn.initializers.variance_scaling(
-        1.0, "fan_in", "normal", out_axis=0)
+    kernel_init = nn.initializers.variance_scaling(1.0, "fan_in", "normal", out_axis=0)
     # [D]
-    task = nn.Dense(
-      128, kernel_init=kernel_init, use_bias=False)(goal.goal)
+    task = nn.Dense(128, kernel_init=kernel_init, use_bias=False)(goal.goal)
 
     # position is categorical
     # [2, D]
-    position = jax.vmap(flax.linen.Embed(100, 128))(goal.position)
+    position = jax.vmap(flax.linen.Embed(100, self.vocab_size))(goal.position)
     return jnp.concatenate((task, position.reshape(-1)))
 
 
@@ -667,11 +675,11 @@ class CraftaxMulitgoalTaskEncoder(nn.Module):
   def __call__(self, obs: struct.PyTreeNode):
     achieved = obs.state_features
 
-def craftax_goal_from_env_timestep(t: TimeStep, env: str):
-  task_vector_fn, _ = ENVIRONMENT_TO_GOAL_FNS[env]
+
+def goal_from_env_timestep(t: TimeStep, env: str):
+  task_vector_fn, _, position_fn = ENVIRONMENT_TO_GOAL_FNS[env]
   return GoalPosition(
-    task_vector_fn(t).astype(jnp.float32),
-    jnp.zeros_like(player_position_fn(t))
+    task_vector_fn(t).astype(jnp.float32), jnp.zeros_like(position_fn(t))
   )
 
 
@@ -683,11 +691,6 @@ def make_craftax_agent(
   rng: jax.random.PRNGKey,
 ):
   rnn = base.ScannedRNN(hidden_dim=config["AGENT_RNN_DIM"])
-
-  def goal_from_timestep(t):
-    task_vector_fn, _ = ENVIRONMENT_TO_GOAL_FNS[config['ENV']]
-    return GoalPosition(task_vector_fn(t), player_position_fn(t))
-
 
   agent = RnnAgent(
     observation_encoder=CraftaxObsEncoder(
@@ -706,8 +709,8 @@ def make_craftax_agent(
       out_dim=env.action_space(env_params).n,
       use_bias=config.get("USE_BIAS", True),
     ),
-    task_encoder=CraftaxTaskEncoder(),
-    goal_from_timestep=partial(craftax_goal_from_env_timestep, env=config['ENV']),
+    task_encoder=TaskEncoder(),
+    goal_from_timestep=partial(goal_from_env_timestep, env=config["ENV"]),
   )
 
   rng, _rng = jax.random.split(rng)
@@ -740,7 +743,7 @@ def make_multigoal_craftax_agent(
       use_bias=config.get("USE_BIAS", True),
       action_dim=env.action_space(env_params).n,
     ),
-    task_encoder=CraftaxTaskEncoder(),
+    task_encoder=TaskEncoder(),
     rnn=rnn,
     q_fn=DuellingMLP(
       hidden_dim=config.get("Q_HIDDEN_DIM", 512),
@@ -748,8 +751,55 @@ def make_multigoal_craftax_agent(
       out_dim=env.action_space(env_params).n,
       use_bias=config.get("USE_BIAS", True),
     ),
-    goal_from_timestep=partial(craftax_goal_from_env_timestep, env=config['ENV']),
+    goal_from_timestep=partial(goal_from_env_timestep, env=config["ENV"]),
   )
+  rng, _rng = jax.random.split(rng)
+  network_params = agent.init(_rng, example_timestep, method=agent.initialize)
+
+  def reset_fn(params, example_timestep, reset_rng):
+    batch_dims = (example_timestep.reward.shape[0],)
+    return agent.apply(
+      params, batch_dims=batch_dims, rng=reset_rng, method=agent.initialize_carry
+    )
+
+  return agent, network_params, reset_fn
+
+
+# --------------------
+# JaxMaze
+# --------------------
+
+
+def make_jaxmaze_agent(
+  config: dict,
+  env: environment.Environment,
+  env_params: environment.EnvParams,
+  example_timestep: TimeStep,
+  rng: jax.random.PRNGKey,
+):
+  rnn = base.ScannedRNN(hidden_dim=config["AGENT_RNN_DIM"])
+
+  agent = RnnAgent(
+    observation_encoder=CategoricalHouzemazeObsEncoder(
+      num_categories=max(10_000, env.total_categories(env_params)),
+      embed_hidden_dim=config["EMBED_HIDDEN_DIM"],
+      mlp_hidden_dim=config["MLP_HIDDEN_DIM"],
+      num_embed_layers=config["NUM_EMBED_LAYERS"],
+      num_mlp_layers=config["NUM_MLP_LAYERS"],
+      activation=config["ACTIVATION"],
+      norm_type=config.get("NORM_TYPE", "none"),
+    ),
+    rnn=rnn,
+    q_fn=DuellingMLP(
+      hidden_dim=config.get("Q_HIDDEN_DIM", 512),
+      num_layers=config.get("NUM_Q_LAYERS", 1),
+      out_dim=env.action_space(env_params).n,
+      use_bias=config.get("USE_BIAS", True),
+    ),
+    task_encoder=TaskEncoder(10_000),
+    goal_from_timestep=partial(goal_from_env_timestep, env="jaxmaze"),
+  )
+
   rng, _rng = jax.random.split(rng)
   network_params = agent.init(_rng, example_timestep, method=agent.initialize)
 

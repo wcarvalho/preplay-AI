@@ -320,7 +320,6 @@ def simulate_n_trajectories(
   return all_timesteps, sim_outputs
 
 
-
 ################################
 # function to copy something n times
 ################################

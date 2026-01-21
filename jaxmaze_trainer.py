@@ -47,6 +47,8 @@ import usfa_housemaze
 import multitask_preplay_housemaze
 import dyna_craftax
 import multitask_preplay_craftax_v2
+import her
+import base_algorithm
 import housemaze_observer as humansf_observers
 from housemaze.human_dyna import experiments as housemaze_experiments
 
@@ -368,6 +370,27 @@ def run_single(config: dict, save_path: str = None):
       task_objects=task_objects,
       all_tasks=all_tasks,
     )
+  elif alg_name == "her":
+    train_fn = base_algorithm.make_train(
+      config=config,
+      env=env,
+      save_path=save_path,
+      train_env_params=env_params,
+      test_env_params=test_env_params,
+      ObserverCls=observer_class,
+      initial_params=initial_params,
+      make_agent=her.make_jaxmaze_agent,
+      make_optimizer=her.make_optimizer,
+      make_loss_fn_class=her.make_loss_fn_class,
+      make_actor=her.make_actor,
+      make_logger=functools.partial(
+        make_logger,
+        render_fn=housemaze_render_fn,
+        extract_task_info=extract_task_info,
+        get_task_name=get_task_name,
+        action_names=action_names,
+      ),
+    )
 
   else:
     raise NotImplementedError(alg_name)
@@ -476,6 +499,20 @@ def sweep(search: str = ""):
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=housemaze", "user=wilka"],
       "group": "preplay-eps-1",
+    }
+  elif search == "her":
+    sweep_config = {
+      "metric": {
+        "name": "evaluator_performance/0.0 avg_episode_return",
+        "goal": "maximize",
+      },
+      "parameters": {
+        "ALG": {"values": ["her"]},
+        "SEED": {"values": list(range(1, 2))},
+        "env.exp": {"values": ["exp4"]},
+      },
+      "overrides": ["alg=her", "rlenv=housemaze", "user=wilka"],
+      "group": "her-testing-1",
     }
   # elif search == "dynaq_shared":
   #  sweep_config = {

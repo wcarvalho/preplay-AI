@@ -32,7 +32,7 @@ if sys.platform == "linux":
         "--xla_gpu_enable_latency_hiding_scheduler=true",  # Better scheduling
       ]
     ),
-    )
+  )
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "true")
 os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.95")
 
@@ -571,7 +571,6 @@ def run_single(config: dict, save_path: str = None):
       vmap_env=vmap_env,
     )
   elif config["ALG"] == "her":
-
     train_fn = base_algorithm.make_train(
       config=config,
       save_path=save_path,
@@ -581,7 +580,7 @@ def run_single(config: dict, save_path: str = None):
       make_optimizer=her.make_optimizer,
       make_loss_fn_class=her.make_loss_fn_class,
       make_actor=her.make_actor,
-      #make_logger=partial(make_logger, learner_log_extra=her.learner_log_extra),
+      # make_logger=partial(make_logger, learner_log_extra=her.learner_log_extra),
       train_env_params=env_params,
       test_env_params=test_env_params,
       ObserverCls=craftax_observer.Observer,

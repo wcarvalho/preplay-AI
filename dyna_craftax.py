@@ -687,8 +687,6 @@ def get_in_episode(timestep):
   return in_episode
 
 
-
-
 def render_fn(state):
   image = render_craftax_pixels(state, block_pixel_size=BLOCK_PIXEL_SIZE_IMG)
   return image / 255.0
