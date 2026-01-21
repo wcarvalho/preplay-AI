@@ -214,6 +214,7 @@ class EnvState:
 class Observation(struct.PyTreeNode):
   image: chex.Array
   goal: chex.Array
+  player_position: chex.Array
 
 
 def get_map_obs_shape():
@@ -698,6 +699,7 @@ class MultiGoalObservation(struct.PyTreeNode):
   train_tasks: chex.Array
   # goals: chex.Array
   state_features: chex.Array
+  player_position: chex.Array
   previous_action: int = None
 
 
@@ -793,8 +795,8 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
       task_w=task_w,
       previous_action=action,
       train_tasks=train_tasks,
-      # goals=active_task_vectors,
       state_features=state_features,
+      player_position=state.player_position,
     )
 
 

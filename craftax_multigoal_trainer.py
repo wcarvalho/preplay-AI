@@ -16,6 +16,27 @@ python craftax_multigoal_trainer.py \
 """
 
 import os
+import sys
+
+from jax import config as jax_config
+
+jax_config.update("jax_default_matmul_precision", "bfloat16")
+os.environ.setdefault("NVIDIA_TF32_OVERRIDE", "1")
+# These XLA flags are only supported on h100/h200 GPUs (Linux)
+if sys.platform == "linux":
+  os.environ.setdefault(
+    "XLA_FLAGS",
+    " ".join(
+      [
+        "--xla_gpu_enable_triton_softmax_fusion=true",  # Fuse softmax ops
+        "--xla_gpu_triton_gemm_any=true",  # Use Triton for more GEMMs
+        "--xla_gpu_enable_async_collectives=true",  # Async communication
+        "--xla_gpu_enable_latency_hiding_scheduler=true",  # Better scheduling
+      ]
+    ),
+  )
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "true")
+os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.95")
 
 
 import wandb
@@ -49,12 +70,14 @@ from jaxneurorl.wrappers import TimestepWrapper
 
 import craftax_observer
 import networks
-import alphazero_craftax
+import archive.alphazero_craftax as alphazero_craftax
 import dyna_craftax
 import multitask_preplay_craftax_v2
 import qlearning_craftax
 import qlearning_sf_aux_craftax
 import usfa_craftax as usfa
+import her
+import base_algorithm
 
 import craftax_simulation_configs
 from craftax_web_env import (
@@ -390,6 +413,22 @@ def run_single(config: dict, save_path: str = None):
       ObserverCls=craftax_observer.Observer,
       vmap_env=vmap_env,
     )
+  elif config["ALG"] == "her":
+    train_fn = base_algorithm.make_train(
+      config=config,
+      save_path=save_path,
+      env=vec_env,
+      make_agent=her.make_multigoal_craftax_agent,
+      make_optimizer=her.make_optimizer,
+      make_loss_fn_class=her.make_loss_fn_class,
+      make_actor=her.make_actor,
+      #make_logger=partial(
+      #  make_logger, learner_log_extra=her.crafax_learner_log_fn),
+      train_env_params=env_params,
+      test_env_params=test_env_params,
+      ObserverCls=craftax_observer.Observer,
+      vmap_env=vmap_env,
+    )
   else:
     raise NotImplementedError(config["ALG"])
 
@@ -485,6 +524,16 @@ def sweep(search: str = ""):
       },
       "overrides": ["alg=preplay", "rlenv=craftax-dyna-multigoal", "user=wilka"],
       "group": "preplay-testing-7",
+    }
+  elif search == "her":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["her"]},
+        "SEED": {"values": list(range(1, 2))},
+      },
+      "overrides": ["alg=her", "rlenv=craftax-multigoal", "user=wilka"],
+      "group": "her-testing-1",
     }
 
   ############################################################

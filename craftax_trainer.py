@@ -16,8 +16,25 @@ python craftax_trainer.py \
 """
 
 import os
+import sys
+from jax import config as jax_config
 
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+jax_config.update("jax_default_matmul_precision", "bfloat16")
+os.environ.setdefault("NVIDIA_TF32_OVERRIDE", "1")
+if sys.platform == "linux":
+  os.environ.setdefault(
+    "XLA_FLAGS",
+    " ".join(
+      [
+        "--xla_gpu_enable_triton_softmax_fusion=true",  # Fuse softmax ops
+        "--xla_gpu_triton_gemm_any=true",  # Use Triton for more GEMMs
+        "--xla_gpu_enable_async_collectives=true",  # Async communication
+        "--xla_gpu_enable_latency_hiding_scheduler=true",  # Better scheduling
+      ]
+    ),
+    )
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "true")
+os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.95")
 
 MAX_SCORE = 226.0
 
@@ -57,9 +74,9 @@ from jaxneurorl.wrappers import TimestepWrapper
 
 import craftax_observer
 import networks
-import alphazero_craftax
+import archive.alphazero_craftax as alphazero_craftax
 import dyna_craftax
-import her_craftax
+import her
 import multitask_preplay_craftax_v2
 import qlearning_craftax
 import qlearning_sf_aux_craftax
@@ -554,6 +571,7 @@ def run_single(config: dict, save_path: str = None):
       vmap_env=vmap_env,
     )
   elif config["ALG"] == "her":
+
     train_fn = base_algorithm.make_train(
       config=config,
       save_path=save_path,

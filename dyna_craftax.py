@@ -38,8 +38,10 @@ from networks import (
   CategoricalHouzemazeObsEncoder,
 )
 
-
+from craftax.craftax.constants import Action, BLOCK_PIXEL_SIZE_IMG, Achievement
+from craftax.craftax.renderer import render_craftax_pixels
 from visualizer import plot_frames
+
 
 from housemaze import renderer
 
@@ -685,9 +687,6 @@ def get_in_episode(timestep):
   return in_episode
 
 
-from craftax.craftax.constants import Action, BLOCK_PIXEL_SIZE_IMG, Achievement
-from craftax.craftax.renderer import render_craftax_pixels
-from visualizer import plot_frames
 
 
 def render_fn(state):

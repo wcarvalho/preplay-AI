@@ -320,15 +320,6 @@ def simulate_n_trajectories(
   return all_timesteps, sim_outputs
 
 
-def reset_achievements(x_t):
-  return x_t.replace(
-    state=x_t.state.replace(
-      env_state=x_t.state.env_state.replace(
-        achievements=jnp.zeros_like(x_t.state.env_state.achievements),
-      )
-    )
-  )
-
 
 ################################
 # function to copy something n times
@@ -1557,7 +1548,6 @@ class DynaAgentEnvModelSharedHead(nn.Module):
     task = self.task_fn(task)
     inp = jnp.concatenate((rnn_out, task), axis=-1)
     if self.q_head_type == "dot":
-      # CHECKED
       return self.q_fn(inp, task)
     else:
       return self.q_fn(inp)

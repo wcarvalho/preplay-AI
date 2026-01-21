@@ -729,7 +729,7 @@ def default_make_logger(
 
 
 ##############################
-# Training Infrastructure (from value_based_basics.py)
+# Training Infrastructure
 ##############################
 
 

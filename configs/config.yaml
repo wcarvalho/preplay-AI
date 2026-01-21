@@ -12,6 +12,10 @@ hydra:
   sweep:
     dir: .
     subdir: .
+  job_logging:
+    handlers:
+      file:
+        filename: null
 
 app:
   parallel: "none"  # none, slurm_wandb, slurm, wandb
