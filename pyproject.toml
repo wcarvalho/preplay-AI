@@ -45,8 +45,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+gpu = [
+    "jax[cuda12]",
+]
 dev = [
-    "ruff",
     "ipywidgets",
     "polars",
 ]
