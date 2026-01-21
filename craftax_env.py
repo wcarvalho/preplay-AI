@@ -261,6 +261,7 @@ class Observation(struct.PyTreeNode):
   achievable: chex.Array
   achievements: chex.Array
   task_w: chex.Array
+  player_position: chex.Array
   previous_action: Optional[chex.Array] = None
 
 
@@ -1298,6 +1299,7 @@ class CraftaxSymbolicEnvNoAutoReset(EnvironmentNoAutoReset):
       achievements=achievements,
       achievable=achievable,
       task_w=task_w,
+      player_position=state.player_position,
       previous_action=previous_action,
     )
 

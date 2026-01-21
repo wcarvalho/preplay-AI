@@ -1,9 +1,8 @@
 """
-Recurrent Q-learning for Craftax.
-Add an auxiliary task for predicting achievements. This predicts both which has been achieved at this timestep and which is achievable.
+Hindsight experience replay
 
 This is a self-contained module that only depends on:
-1. base_algorithm.py (consolidated jaxneurorl components)
+1. base_algorithm.py
 2. networks.py (CraftaxObsEncoder, CraftaxMultiGoalObsEncoder)
 """
 
@@ -377,7 +376,7 @@ class HerLossFn(base.RecurrentLossFn):
         online_state,                         # [B, D]
         target_state,                         # [B, D]
         )
-    
+
     loss = loss + self.her_coeff * her_loss.mean(1)
     all_metrics.update({f"{k}/her": v for k, v in her_metrics.items()})
     all_log_info["her"] = her_log_info

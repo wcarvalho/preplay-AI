@@ -697,10 +697,14 @@ def default_experience_logger(
   **kwargs,
 ):
   def callback(ts: train_state, os: BasicObserverState):
-    end = min(os.idx + 1, len(os.episode_lengths))
+    # [B]
+    end = jnp.minimum(os.idx + 1, jnp.array(len(os.episode_lengths)))
+    def mean(x):
+      return jnp.array([x[idx, :e] for idx, e in enumerate(end)]).mean()
+        
     metrics = {
-      f"{key}/avg_episode_length": os.episode_lengths[:end].mean(),
-      f"{key}/avg_episode_return": os.episode_returns[:end].mean(),
+      f"{key}/avg_episode_length": mean(os.episode_lengths),
+      f"{key}/avg_episode_return": mean(os.episode_returns),
       f"{key}/num_actor_steps": ts.timesteps,
       f"{key}/num_learner_updates": ts.n_updates,
     }
