@@ -11,7 +11,7 @@ from base_algorithm import MLP, BatchRenorm, get_activation_fn
 Observation = struct.PyTreeNode
 
 
-class CategoricalHouzemazeObsEncoder(nn.Module):
+class CategoricalJaxmazeObsEncoder(nn.Module):
   """_summary_
 
   - observation encoder: CNN over binary inputs
@@ -100,7 +100,7 @@ class CategoricalHouzemazeObsEncoder(nn.Module):
     return outputs
 
 
-class FloatHouzemazeObsEncoder(nn.Module):
+class FloatJaxmazeObsEncoder(nn.Module):
   """_summary_
 
   - observation encoder: CNN over binary inputs

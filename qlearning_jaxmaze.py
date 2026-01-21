@@ -26,7 +26,7 @@ from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
 from jaxneurorl.agents import qlearning as base_agent
 import networks
-from networks import CraftaxObsEncoder, CategoricalHouzemazeObsEncoder
+from networks import CraftaxObsEncoder, CategoricalJaxmazeObsEncoder
 
 
 Agent = nn.Module
@@ -95,7 +95,7 @@ class RnnAgent(nn.Module):
     return self.rnn.initialize_carry(*args, **kwargs)
 
 
-def make_housemaze_agent(
+def make_jaxmaze_agent(
   config: dict,
   env: environment.Environment,
   env_params: environment.EnvParams,
@@ -114,7 +114,7 @@ def make_housemaze_agent(
 
   float_obs = config.get("FLOAT_OBS", False)
   if float_obs:
-    observation_encoder = networks.FloatHouzemazeObsEncoder(
+    observation_encoder = networks.FloatJaxmazeObsEncoder(
       mlp_hidden_dim=config["MLP_HIDDEN_DIM"],
       num_mlp_layers=config["NUM_MLP_LAYERS"],
       activation=config["ACTIVATION"],
@@ -123,7 +123,7 @@ def make_housemaze_agent(
       use_bias=config.get("USE_BIAS", True),
     )
   else:
-    observation_encoder = networks.CategoricalHouzemazeObsEncoder(
+    observation_encoder = networks.CategoricalJaxmazeObsEncoder(
       num_categories=max(10_000, env.total_categories(env_params)),
       embed_hidden_dim=config["EMBED_HIDDEN_DIM"],
       mlp_hidden_dim=config["MLP_HIDDEN_DIM"],

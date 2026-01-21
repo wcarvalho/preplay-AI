@@ -35,7 +35,7 @@ from networks import (
   MLP,
   CraftaxObsEncoder,
   CraftaxMultiGoalObsEncoder,
-  CategoricalHouzemazeObsEncoder,
+  CategoricalJaxmazeObsEncoder,
 )
 
 from craftax.craftax.constants import Action, BLOCK_PIXEL_SIZE_IMG, Achievement
@@ -43,7 +43,7 @@ from craftax.craftax.renderer import render_craftax_pixels
 from visualizer import plot_frames
 
 
-from housemaze import renderer
+from jaxmaze import renderer
 
 Agent = nn.Module
 Params = flax.core.FrozenDict
@@ -1056,7 +1056,7 @@ def make_jaxmaze_agent(
     cell_type=cell_type,
     unroll_output_state=True,
   )
-  observation_encoder = CategoricalHouzemazeObsEncoder(
+  observation_encoder = CategoricalJaxmazeObsEncoder(
     num_categories=max(10_000, env.total_categories(env_params)),
     embed_hidden_dim=config["EMBED_HIDDEN_DIM"],
     mlp_hidden_dim=config["MLP_HIDDEN_DIM"],

@@ -30,7 +30,7 @@ from networks import MLP, CraftaxObsEncoder
 
 from visualizer import plot_frames
 
-from housemaze import renderer
+from jaxmaze import renderer
 
 Agent = nn.Module
 Params = flax.core.FrozenDict

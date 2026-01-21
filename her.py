@@ -8,7 +8,7 @@ This is a self-contained module that only depends on:
 
 from distrax import Categorical
 from networks import (
-  CategoricalHouzemazeObsEncoder,
+  CategoricalJaxmazeObsEncoder,
   CraftaxMultiGoalObsEncoder,
   CraftaxObsEncoder,
 )
@@ -52,7 +52,7 @@ ENVIRONMENT_TO_GOAL_FNS = {
   "jaxmaze": (
     lambda t: t.observation.task_w,
     lambda t: t.observation.state_features,
-    lambda t: t.observation.position,  # housemaze uses .position
+    lambda t: t.observation.position,  # jaxmaze uses .position
   ),
   "craftax-multigoal": (
     lambda t: t.observation.task_w,
@@ -780,7 +780,7 @@ def make_jaxmaze_agent(
   rnn = base.ScannedRNN(hidden_dim=config["AGENT_RNN_DIM"])
 
   agent = RnnAgent(
-    observation_encoder=CategoricalHouzemazeObsEncoder(
+    observation_encoder=CategoricalJaxmazeObsEncoder(
       num_categories=max(10_000, env.total_categories(env_params)),
       embed_hidden_dim=config["EMBED_HIDDEN_DIM"],
       mlp_hidden_dim=config["MLP_HIDDEN_DIM"],
@@ -793,10 +793,10 @@ def make_jaxmaze_agent(
     q_fn=DuellingMLP(
       hidden_dim=config.get("Q_HIDDEN_DIM", 512),
       num_layers=config.get("NUM_Q_LAYERS", 1),
-      out_dim=env.action_space(env_params).n,
+      out_dim=env.num_actions(env_params),
       use_bias=config.get("USE_BIAS", True),
     ),
-    task_encoder=TaskEncoder(10_000),
+    task_encoder=TaskEncoder(500),
     goal_from_timestep=partial(goal_from_env_timestep, env="jaxmaze"),
   )
 

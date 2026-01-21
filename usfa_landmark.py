@@ -22,7 +22,7 @@ from jaxneurorl import losses
 from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
 
-from networks import CategoricalHouzemazeObsEncoder
+from networks import CategoricalJaxmazeObsEncoder
 
 Params = flax.core.FrozenDict
 
@@ -365,7 +365,7 @@ def make_agent(
   train_tasks: jnp.ndarray,
   all_tasks: jnp.ndarray,
 ) -> Tuple[nn.Module, Params, vbb.AgentResetFn]:
-  observation_encoder = CategoricalHouzemazeObsEncoder(
+  observation_encoder = CategoricalJaxmazeObsEncoder(
     num_categories=max(10_000, env.total_categories(env_params)),
     embed_hidden_dim=config["EMBED_HIDDEN_DIM"],
     mlp_hidden_dim=config["MLP_HIDDEN_DIM"],

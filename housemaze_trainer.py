@@ -45,17 +45,17 @@ from jaxneurorl import utils
 from jaxneurorl import loggers
 
 import alphazero
-import qlearning_housemaze
-import usfa_housemaze
-import multitask_preplay_housemaze
+import qlearning_jaxmaze
+import usfa_jaxmaze
+import multitask_preplay_jaxmaze
 import multitask_preplay_craftax_v2
 import networks
-import housemaze_observer as humansf_observers
-from housemaze.human_dyna import experiments as housemaze_experiments
+import jaxmaze_observer as humansf_observers
+from jaxmaze.human_dyna import experiments as jaxmaze_experiments
 
-from housemaze import renderer
-from housemaze import utils as housemaze_utils
-from housemaze.human_dyna import multitask_env
+from jaxmaze import renderer
+from jaxmaze import utils as jaxmaze_utils
+from jaxmaze.human_dyna import multitask_env
 
 
 def make_logger(
@@ -95,8 +95,8 @@ def get_qlearning_fns(
   config,
   num_categories=10_000,
 ):
-  HouzemazeObsEncoder = functools.partial(
-    networks.CategoricalHouzemazeObsEncoder,
+  JaxmazeObsEncoder = functools.partial(
+    networks.CategoricalJaxmazeObsEncoder,
     num_categories=num_categories,
     embed_hidden_dim=config["EMBED_HIDDEN_DIM"],
     mlp_hidden_dim=config["MLP_HIDDEN_DIM"],
@@ -107,10 +107,10 @@ def get_qlearning_fns(
   )
 
   return AlgorithmConstructor(
-    make_agent=qlearning_housemaze.make_housemaze_agent,
-    make_optimizer=qlearning_housemaze.make_optimizer,
-    make_loss_fn_class=qlearning_housemaze.make_loss_fn_class,
-    make_actor=qlearning_housemaze.make_actor,
+    make_agent=qlearning_jaxmaze.make_jaxmaze_agent,
+    make_optimizer=qlearning_jaxmaze.make_optimizer,
+    make_loss_fn_class=qlearning_jaxmaze.make_loss_fn_class,
+    make_actor=qlearning_jaxmaze.make_actor,
   )
 
 
@@ -120,8 +120,8 @@ def get_sf_fns(
   env_params,
   num_categories=10_000,
 ):
-  HouzemazeObsEncoder = functools.partial(
-    networks.CategoricalHouzemazeObsEncoder,
+  JaxmazeObsEncoder = functools.partial(
+    networks.CategoricalJaxmazeObsEncoder,
     num_categories=num_categories,
     embed_hidden_dim=config["EMBED_HIDDEN_DIM"],
     mlp_hidden_dim=config["MLP_HIDDEN_DIM"],
@@ -134,13 +134,13 @@ def get_sf_fns(
   train_tasks = jnp.array([env.task_runner.task_vector(o) for o in train_objects])
   return AlgorithmConstructor(
     make_agent=functools.partial(
-      usfa_housemaze.make_agent,
+      usfa_jaxmaze.make_agent,
       train_tasks=train_tasks,
-      ObsEncoderCls=HouzemazeObsEncoder,
+      ObsEncoderCls=JaxmazeObsEncoder,
     ),
-    make_optimizer=usfa_housemaze.make_optimizer,
-    make_loss_fn_class=usfa_housemaze.make_loss_fn_class,
-    make_actor=functools.partial(usfa_housemaze.make_actor, remove_gpi_dim=False),
+    make_optimizer=usfa_jaxmaze.make_optimizer,
+    make_loss_fn_class=usfa_jaxmaze.make_loss_fn_class,
+    make_actor=functools.partial(usfa_jaxmaze.make_actor, remove_gpi_dim=False),
   )
 
 
@@ -151,8 +151,8 @@ def get_dynaq_fns(
     rng = jax.random.PRNGKey(42)
   import distrax
 
-  HouzemazeObsEncoder = functools.partial(
-    networks.CategoricalHouzemazeObsEncoder,
+  JaxmazeObsEncoder = functools.partial(
+    networks.CategoricalJaxmazeObsEncoder,
     num_categories=num_categories,
     embed_hidden_dim=config["EMBED_HIDDEN_DIM"],
     mlp_hidden_dim=config["MLP_HIDDEN_DIM"],
@@ -194,7 +194,7 @@ def get_dynaq_fns(
       q_values = preds.q_vals
       assert q_values.shape[0] == epsilons.shape[0]
       sim_rng = jax.random.split(sim_rng, q_values.shape[0])
-      return jax.vmap(qlearning_housemaze.epsilon_greedy_act, in_axes=(0, 0, 0))(
+      return jax.vmap(qlearning_jaxmaze.epsilon_greedy_act, in_axes=(0, 0, 0))(
         q_values, epsilons, sim_rng
       )
 
@@ -223,17 +223,17 @@ def get_dynaq_fns(
 
   return AlgorithmConstructor(
     make_agent=functools.partial(
-      multitask_preplay_housemaze.make_agent, ObsEncoderCls=HouzemazeObsEncoder
+      multitask_preplay_jaxmaze.make_agent, ObsEncoderCls=JaxmazeObsEncoder
     ),
-    make_optimizer=multitask_preplay_housemaze.make_optimizer,
+    make_optimizer=multitask_preplay_jaxmaze.make_optimizer,
     make_loss_fn_class=functools.partial(
-      multitask_preplay_housemaze.make_loss_fn_class,
+      multitask_preplay_jaxmaze.make_loss_fn_class,
       make_init_offtask_timestep=make_init_offtask_timestep,
       simulation_policy=simulation_policy,
       online_coeff=config["ONLINE_COEFF"],
       dyna_coeff=config.get("DYNA_COEFF", 1.0),
     ),
-    make_actor=multitask_preplay_housemaze.make_actor,
+    make_actor=multitask_preplay_jaxmaze.make_actor,
   )
 
 
@@ -336,12 +336,12 @@ def run_single(config: dict, save_path: str = None):
   ###################
   exp = config["rlenv"]["ENV_KWARGS"].pop("exp")
   try:
-    exp_fn = getattr(housemaze_experiments, exp, None)
+    exp_fn = getattr(jaxmaze_experiments, exp, None)
   except Exception as e:
     raise RuntimeError(e)
   env_params, test_env_params, task_objects, idx2maze = exp_fn(config)
 
-  image_dict = housemaze_utils.load_image_dict()
+  image_dict = jaxmaze_utils.load_image_dict()
   # Reshape the images to separate the blocks
   images = image_dict["images"]
   reshaped = images.reshape(len(images), 8, 4, 8, 4, 3)
@@ -357,7 +357,7 @@ def run_single(config: dict, save_path: str = None):
   test_env_params = test_env_params.replace(float_obs=float_obs)
 
   if config["ALG"] == "usfa":
-    from housemaze.human_dyna import sf_task_runner
+    from jaxmaze.human_dyna import sf_task_runner
 
     task_runner = sf_task_runner.TaskRunner(
       task_objects=task_objects,
@@ -380,14 +380,14 @@ def run_single(config: dict, save_path: str = None):
     num_categories=200,
   )
 
-  env = housemaze_utils.AutoResetWrapper(env)
+  env = jaxmaze_utils.AutoResetWrapper(env)
 
   ###################
   ## custom observer
   ###################
   action_names = {action.value: action.name for action in env.action_enum()}
 
-  def housemaze_render_fn(state: multitask_env.EnvState):
+  def jaxmaze_render_fn(state: multitask_env.EnvState):
     return renderer.create_image_from_grid(
       state.grid, state.agent_pos, state.agent_dir, image_dict
     )
@@ -414,48 +414,48 @@ def run_single(config: dict, save_path: str = None):
   if alg_name == "qlearning":
     make_train = functools.partial(
       vbb.make_train,
-      make_agent=qlearning_housemaze.make_housemaze_agent,
-      make_optimizer=qlearning_housemaze.make_optimizer,
-      make_loss_fn_class=qlearning_housemaze.make_loss_fn_class,
-      make_actor=qlearning_housemaze.make_actor,
+      make_agent=qlearning_jaxmaze.make_jaxmaze_agent,
+      make_optimizer=qlearning_jaxmaze.make_optimizer,
+      make_loss_fn_class=qlearning_jaxmaze.make_loss_fn_class,
+      make_actor=qlearning_jaxmaze.make_actor,
       make_logger=functools.partial(
         make_logger,
-        render_fn=housemaze_render_fn,
+        render_fn=jaxmaze_render_fn,
         extract_task_info=extract_task_info,
         get_task_name=get_task_name,
         action_names=action_names,
         learner_log_extra=functools.partial(
-          qlearning_housemaze.learner_log_extra,
+          qlearning_jaxmaze.learner_log_extra,
           config=config,
           action_names=action_names,
           extract_task_info=extract_task_info,
           get_task_name=get_task_name,
-          render_fn=housemaze_render_fn,
+          render_fn=jaxmaze_render_fn,
         ),
       ),
     )
   elif alg_name == "usfa":
     make_train = functools.partial(
-      usfa_housemaze.make_train,
+      usfa_jaxmaze.make_train,
       make_agent=functools.partial(
-        usfa_housemaze.make_agent,
+        usfa_jaxmaze.make_agent,
         train_tasks=train_tasks,
         all_tasks=all_tasks,
-        # ObsEncoderCls=HouzemazeObsEncoder,
+        # ObsEncoderCls=JaxmazeObsEncoder,
       ),
       make_logger=functools.partial(
         make_logger,
-        render_fn=housemaze_render_fn,
+        render_fn=jaxmaze_render_fn,
         extract_task_info=extract_task_info,
         get_task_name=get_task_name,
         action_names=action_names,
         learner_log_extra=functools.partial(
-          usfa_housemaze.learner_log_extra,
+          usfa_jaxmaze.learner_log_extra,
           config=config,
           action_names=action_names,
           extract_task_info=extract_task_info,
           get_task_name=get_task_name,
-          render_fn=housemaze_render_fn,
+          render_fn=jaxmaze_render_fn,
         ),
       ),
     )
@@ -464,21 +464,21 @@ def run_single(config: dict, save_path: str = None):
       vpq.make_train,
       make_agent=functools.partial(
         vpq.make_agent,
-        # ObsEncoderCls=HouzemazeObsEncoder,
+        # ObsEncoderCls=JaxmazeObsEncoder,
       ),
       make_logger=functools.partial(
         make_logger,
-        render_fn=housemaze_render_fn,
+        render_fn=jaxmaze_render_fn,
         extract_task_info=extract_task_info,
         get_task_name=get_task_name,
         action_names=action_names,
         learner_log_extra=functools.partial(
-          qlearning_housemaze.learner_log_extra,
+          qlearning_jaxmaze.learner_log_extra,
           config=config,
           action_names=action_names,
           extract_task_info=extract_task_info,
           get_task_name=get_task_name,
-          render_fn=housemaze_render_fn,
+          render_fn=jaxmaze_render_fn,
         ),
       ),
     )
@@ -510,7 +510,7 @@ def run_single(config: dict, save_path: str = None):
       vbb.make_train,
       make_agent=functools.partial(
         alphazero.make_agent,
-        # ObsEncoderCls=HouzemazeObsEncoder,
+        # ObsEncoderCls=JaxmazeObsEncoder,
         test_env_params=test_env_params,
       ),
       make_optimizer=alphazero.make_optimizer,
@@ -525,7 +525,7 @@ def run_single(config: dict, save_path: str = None):
       ),
       make_logger=functools.partial(
         make_logger,
-        render_fn=housemaze_render_fn,
+        render_fn=jaxmaze_render_fn,
         extract_task_info=extract_task_info,
         get_task_name=get_task_name,
         action_names=action_names,
@@ -569,7 +569,7 @@ def run_single(config: dict, save_path: str = None):
       q_values = preds.q_vals
       assert q_values.shape[0] == epsilons.shape[0]
       sim_rng = jax.random.split(sim_rng, q_values.shape[0])
-      return jax.vmap(qlearning_housemaze.epsilon_greedy_act, in_axes=(0, 0, 0))(
+      return jax.vmap(qlearning_jaxmaze.epsilon_greedy_act, in_axes=(0, 0, 0))(
         q_values, epsilons, sim_rng
       )
 
@@ -599,34 +599,34 @@ def run_single(config: dict, save_path: str = None):
     make_train = functools.partial(
       vbb.make_train,
       make_agent=functools.partial(
-        multitask_preplay_housemaze.make_agent,
-        # ObsEncoderCls=HouzemazeObsEncoder,
+        multitask_preplay_jaxmaze.make_agent,
+        # ObsEncoderCls=JaxmazeObsEncoder,
         model_env_params=test_env_params.replace(
           p_test_sample_train=jnp.array(0.5),
         ),
       ),
       make_loss_fn_class=functools.partial(
-        multitask_preplay_housemaze.make_loss_fn_class,
+        multitask_preplay_jaxmaze.make_loss_fn_class,
         make_init_offtask_timestep=make_init_offtask_timestep,
         simulation_policy=simulation_policy,
         online_coeff=config["ONLINE_COEFF"],
         dyna_coeff=config.get("DYNA_COEFF", 1.0),
       ),
-      make_optimizer=qlearning_housemaze.make_optimizer,
-      make_actor=multitask_preplay_housemaze.make_actor,
+      make_optimizer=qlearning_jaxmaze.make_optimizer,
+      make_actor=multitask_preplay_jaxmaze.make_actor,
       make_logger=functools.partial(
         make_logger,
-        render_fn=housemaze_render_fn,
+        render_fn=jaxmaze_render_fn,
         extract_task_info=extract_task_info,
         get_task_name=get_task_name,
         action_names=action_names,
         learner_log_extra=functools.partial(
-          multitask_preplay_housemaze.learner_log_extra,
+          multitask_preplay_jaxmaze.learner_log_extra,
           config=config,
           action_names=action_names,
           extract_task_info=extract_task_info,
           get_task_name=get_task_name,
-          render_fn=housemaze_render_fn,
+          render_fn=jaxmaze_render_fn,
           sim_idx=greedy_idx,
         ),
       ),
@@ -646,23 +646,23 @@ def run_single(config: dict, save_path: str = None):
       model_env=env,
       make_logger=functools.partial(
         make_logger,
-        render_fn=housemaze_render_fn,
+        render_fn=jaxmaze_render_fn,
         extract_task_info=extract_task_info,
         get_task_name=get_task_name,
         action_names=action_names,
         learner_log_extra=functools.partial(
-          multitask_preplay_housemaze.learner_log_extra,
+          multitask_preplay_jaxmaze.learner_log_extra,
           config=config,
           action_names=action_names,
           extract_task_info=extract_task_info,
           get_task_name=get_task_name,
-          render_fn=housemaze_render_fn,
+          render_fn=jaxmaze_render_fn,
           sim_idx=0,
         ),
       ),
       train_env_params=env_params,
       test_env_params=test_env_params,
-      # ObsEncoderCls=HouzemazeObsEncoder,
+      # ObsEncoderCls=JaxmazeObsEncoder,
       task_objects=task_objects,
       all_tasks=all_tasks,
     )
@@ -710,7 +710,7 @@ def sweep(search: str = ""):
         # "FLOAT_OBS": {"values": [True]},
         "AGENT_RNN_DIM": {"values": [1024]},
       },
-      "overrides": ["alg=ql", "rlenv=housemaze", "user=wilka"],
+      "overrides": ["alg=ql", "rlenv=jaxmaze", "user=wilka"],
       "group": "ql-11-fixed-obs-large-rnn-float",
     }
   elif search == "ql2":
@@ -727,7 +727,7 @@ def sweep(search: str = ""):
         "NUM_EMBED_LAYERS": {"values": [1, 0]},
         # "AGENT_RNN_DIM": {"values": [1024]},
       },
-      "overrides": ["alg=ql", "rlenv=housemaze", "user=wilka"],
+      "overrides": ["alg=ql", "rlenv=jaxmaze", "user=wilka"],
       "group": "ql-11-fixed-obs-large-rnn-cat",
     }
   elif search == "usfa":
@@ -743,7 +743,7 @@ def sweep(search: str = ""):
         "LEARN_VECTORS": {"values": ["TRAIN", "ALL_TASKS"]},
         # "VIS_COEFF": {"values": [0.0, 0.1]},
       },
-      "overrides": ["alg=usfa", "rlenv=housemaze", "user=wilka"],
+      "overrides": ["alg=usfa", "rlenv=jaxmaze", "user=wilka"],
       "group": "usfa-landmark-3",
     }
   elif search == "dyna":
@@ -761,7 +761,7 @@ def sweep(search: str = ""):
         # "OFFTASK_SIMULATION": {"values": [False]},
         # "TOTAL_TIMESTEPS": {"values": [100_000_000]},
       },
-      "overrides": ["alg=preplay_jaxmaze", "rlenv=housemaze", "user=wilka"],
+      "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "dyna-new-4",
     }
   elif search == "preplay":
@@ -780,7 +780,7 @@ def sweep(search: str = ""):
         "LR": {"values": [0.001, 0.0003]},
         # "KNOWN_OFFTASK_GOAL": {"values": [False, True]},
       },
-      "overrides": ["alg=preplay_jaxmaze", "rlenv=housemaze", "user=wilka"],
+      "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "preplay-eps-1",
     }
   # elif search == "dynaq_shared":
@@ -798,7 +798,7 @@ def sweep(search: str = ""):
   #      "NUM_Q_LAYERS": {"values": [1, 2, 3]},
   #      "Q_HIDDEN_DIM": {"values": [512, 1024]},
   #    },
-  #    "overrides": ["alg=preplay", "rlenv=housemaze", "user=wilka"],
+  #    "overrides": ["alg=preplay", "rlenv=jaxmaze", "user=wilka"],
   #    "group": "dynaq-big-6",
   #  }
   # =================================================================
@@ -814,7 +814,7 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 11))},
         "env.exp": {"values": ["exp4"]},
       },
-      "overrides": ["alg=ql", "rlenv=housemaze", "user=wilka"],
+      "overrides": ["alg=ql", "rlenv=jaxmaze", "user=wilka"],
       "group": "ql-final-rotations-2",
     }
   elif search == "usfa-final":
@@ -827,7 +827,7 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(11, 21))},
         "env.exp": {"values": ["exp4"]},
       },
-      "overrides": ["alg=usfa", "rlenv=housemaze", "user=wilka"],
+      "overrides": ["alg=usfa", "rlenv=jaxmaze", "user=wilka"],
       "group": "usfa-final-rotations-2",
     }
   elif search == "dyna-final":
@@ -841,7 +841,7 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 11))},
         "env.exp": {"values": ["exp4"]},
       },
-      "overrides": ["alg=preplay_jaxmaze", "rlenv=housemaze", "user=wilka"],
+      "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "dyna-final-rotations-3",
     }
   elif search == "preplay-old-final":
@@ -855,7 +855,7 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(6, 11))},
         "env.exp": {"values": ["exp4"]},
       },
-      "overrides": ["alg=preplay", "rlenv=housemaze", "user=wilka"],
+      "overrides": ["alg=preplay", "rlenv=jaxmaze", "user=wilka"],
       "group": "preplay-old-final-rotations-4",
     }
   elif search == "preplay-final":
@@ -870,7 +870,7 @@ def sweep(search: str = ""):
         "SIMULATION_LENGTH": {"values": [15]},
         "env.exp": {"values": ["exp4"]},
       },
-      "overrides": ["alg=preplay_jaxmaze", "rlenv=housemaze", "user=wilka"],
+      "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "preplay-final-rotations-5",
     }
 
@@ -886,7 +886,7 @@ def sweep(search: str = ""):
         "MAINQ_COEFF": {"values": [0.0]},
         "env.exp": {"values": ["exp4"]},
       },
-      "overrides": ["alg=preplay_jaxmaze", "rlenv=housemaze", "user=wilka"],
+      "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "preplay-ablation-rotations-5",
     }
 

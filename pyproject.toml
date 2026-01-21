@@ -21,6 +21,8 @@ dependencies = [
     "craftax",
     "flashbax",
     "mctx>=0.0.5",
+    "jaxneurorl @ file:///Users/wilka/git/research/preplay_ai_experiment/libraries/jaxneurorl",
+    "jaxmaze @ git+https://github.com/wcarvalho/JaxMaze.git",
 
     # Config & logging
     "hydra-core",

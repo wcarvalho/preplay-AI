@@ -36,11 +36,11 @@ from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
 from jaxneurorl.agents import qlearning as base_agent
 from networks import MLP, CraftaxObsEncoder, CraftaxMultiGoalObsEncoder
-from networks import CategoricalHouzemazeObsEncoder
+from networks import CategoricalJaxmazeObsEncoder
 
 from visualizer import plot_frames
 
-from housemaze import renderer
+from jaxmaze import renderer
 
 
 def info(x):
@@ -2193,7 +2193,7 @@ def make_jaxmaze_multigoal_agent(
   rng: jax.random.PRNGKey,
   model_env: Optional[environment.Environment] = None,
   model_env_params: Optional[environment.EnvParams] = None,
-  # ObsEncoderCls: nn.Module = CategoricalHouzemazeObsEncoder,
+  # ObsEncoderCls: nn.Module = CategoricalJaxmazeObsEncoder,
 ) -> Tuple[nn.Module, Params, vbb.AgentResetFn]:
   model_env_params = model_env_params or env_params
   cell_type = config.get("RNN_CELL_TYPE", "OptimizedLSTMCell")
@@ -2212,7 +2212,7 @@ def make_jaxmaze_multigoal_agent(
     QFnCls = DuellingMLP
   else:
     QFnCls = MLP
-  observation_encoder = CategoricalHouzemazeObsEncoder(
+  observation_encoder = CategoricalJaxmazeObsEncoder(
     num_categories=max(10_000, env.total_categories(env_params)),
     embed_hidden_dim=config["EMBED_HIDDEN_DIM"],
     mlp_hidden_dim=config["MLP_HIDDEN_DIM"],

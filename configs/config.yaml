@@ -1,7 +1,7 @@
 defaults:
 - _self_
 - alg: ql.yaml
-- rlenv: housemaze.yaml
+- rlenv: jaxmaze.yaml
 - user: wilka.yaml
 - debug: short.yaml
 
@@ -13,9 +13,8 @@ hydra:
     dir: .
     subdir: .
   job_logging:
-    handlers:
-      file:
-        filename: null
+    root:
+      handlers: [console]
 
 app:
   parallel: "none"  # none, slurm_wandb, slurm, wandb

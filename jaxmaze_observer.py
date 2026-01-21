@@ -1,5 +1,6 @@
 import abc
 import collections
+from dataclasses import field
 from typing import Dict, Union, Optional, Callable, Optional
 
 import jax
@@ -11,7 +12,7 @@ import numpy as np
 import wandb
 import matplotlib.pyplot as plt
 
-from housemaze import renderer
+from jaxmaze import renderer
 from visualizer import plot_frames
 from jaxneurorl.agents.basics import TimeStep
 
@@ -48,9 +49,9 @@ class BasicObserverState:
   timestep_buffer: fbx.trajectory_buffer.TrajectoryBufferState
   prediction_buffer: fbx.trajectory_buffer.TrajectoryBufferState
   task_info_buffer: fbx.trajectory_buffer.TrajectoryBufferState
-  idx: jax.Array = jnp.array(0, dtype=jnp.int32)
-  episodes: jax.Array = jnp.array(0, dtype=jnp.int32)
-  env_steps: jax.Array = jnp.array(0, dtype=jnp.int32)
+  idx: jax.Array = field(default_factory=lambda: jnp.array(0, dtype=jnp.int32))
+  episodes: jax.Array = field(default_factory=lambda: jnp.array(0, dtype=jnp.int32))
+  env_steps: jax.Array = field(default_factory=lambda: jnp.array(0, dtype=jnp.int32))
 
 
 def get_first(b):
