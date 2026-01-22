@@ -5,7 +5,7 @@ JAX_DEBUG_NANS=True \
 JAX_DISABLE_JIT=1 \
 RL_RESULTS_DIR=/tmp/rl_results \
 HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue jaxmaze_trainer.py \
-  app.debug=True \
+  app.debug=False \
   app.wandb=True \
   app.search=preplay
 
@@ -222,13 +222,11 @@ def run_single(config: dict, save_path: str = None):
       radius=config.get("VIS_RADIUS", 5),
       vis_coeff=config.get("VIS_COEFF", 0.0),
     )
-    # def success_fn(timestep):
-    #  features = timestep.observation.state_features
-    #  task_w = timestep.observation.task_w
-    #  # only first half count. 2nd half are about visibility.
-    #  half = len(features)//2
-    #  import ipdb; ipdb.set_trace()
-    #  return (features[:half]*task_w[:half]).sum(-1)
+  elif config["ALG"] == "her":
+    task_runner = multitask_env.TaskRunner(
+      task_objects=task_objects,
+      terminate_with_any=False,
+      )
   else:
     task_runner = multitask_env.TaskRunner(task_objects=task_objects)
     # success_fn = lambda timestep: timestep.rewards > .5
@@ -530,7 +528,7 @@ def sweep(search: str = ""):
         #"HER_COEFF": {"values": [1, .1, .01]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-sanity-1",
+      "group": "her-sanity-2",
     }
   # elif search == "dynaq_shared":
   #  sweep_config = {

@@ -1378,15 +1378,10 @@ def make_train(
       if save_path is not None:
 
         def save_params(params, n_updates):
-          def callback(params, n_updates):
-            if n_updates % one_tenth != 0:
-              return
-            idx = int(n_updates // one_tenth)
-            save_training_state(
-              params, config, save_path, config["ALG"], idx, n_updates
-            )
-
-          jax.debug.callback(callback, params, n_updates)
+          idx = int(n_updates // one_tenth)
+          save_training_state(
+            params, config, save_path, config["ALG"], idx, n_updates
+          )
 
         should_save = jnp.logical_or(
           train_state.n_updates == 0, train_state.n_updates % one_tenth == 0
@@ -1394,7 +1389,7 @@ def make_train(
 
         jax.lax.cond(
           should_save,
-          lambda: save_params(train_state.params, train_state.n_updates),
+          lambda: jax.debug.callback(save_params, train_state.params, train_state.n_updates),
           lambda: None,
         )
 

@@ -61,8 +61,8 @@ target-version = "py310"
 [tool.ruff.format]
 indent-style = "space"
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "ruff",
 ]
 
