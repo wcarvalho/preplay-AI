@@ -311,7 +311,7 @@ class HerLossFn(base.RecurrentLossFn):
     td_error = jnp.swapaxes(td_error, 0, 1)
     # first label online loss with online
     all_metrics.update({f"{k}/online": v for k, v in metrics.items()})
-    # all_log_info["online"] = log_info
+    all_log_info["online"] = log_info
     td_error = jnp.concatenate((td_error, jnp.zeros(B)[None]), 0)
     td_error = jnp.abs(td_error)
 
@@ -478,6 +478,7 @@ def craftax_render_fn(state):
   image = render_craftax_pixels(state, block_pixel_size=BLOCK_PIXEL_SIZE_IMG)
   return image / 255.0
 
+
 def jaxmaze_learner_log_fn(
   data: dict,
   config: dict,
@@ -487,17 +488,13 @@ def jaxmaze_learner_log_fn(
   get_task_name: Callable = lambda t: "Task",
 ):
   def callback(d):
-    n_updates = d.pop("n_updates")
-
     # Extract the relevant data
     # only use data from batch dim = 0
     # [T, B, ...] --> # [T, ...]
     d_ = jax.tree_util.tree_map(lambda x: x[:, 0], d)
-
-    mask = d_["mask"]
-    discounts = d_["data"].timestep.discount
-    rewards = d_["data"].timestep.reward
-    actions = d_["data"].action
+    discounts = d_["timesteps"].discount
+    rewards = d_["timesteps"].reward
+    actions = d_["actions"]
     q_values = d_["q_values"]
     q_target = d_["q_target"]
     q_values_taken = rlax.batched_index(q_values, actions)
@@ -506,83 +503,90 @@ def jaxmaze_learner_log_fn(
 
     # Get task_vector and achievements for reward debugging
     task_vector_fn, achievement_fn, _ = ENVIRONMENT_TO_GOAL_FNS[config["ENV"]]
-    timesteps = d_["data"].timestep
-    task_vector = task_vector_fn(timesteps)  # [T, D]
-    achievements = achievement_fn(timesteps)  # [T, D]
+    timesteps = d_["timesteps"]
+    task_vector = task_vector_fn(timesteps)  # [T, D] - binary vectors
+    achievements = achievement_fn(timesteps)  # [T, D] - binary vectors
 
-    # Create a figure with six subplots (added 2 for task_vector and achievements)
+    # Figure dimensions
     width = 0.3
-    nT = len(rewards)  # e.g. 20 --> 8
-    fig, (ax0a, ax0b, ax1, ax2, ax3, ax4) = plt.subplots(6, 1, figsize=(int(width * nT), 24))
+    nT = len(rewards)
+    height = 3
+    fig_width = max(2, int(width * nT))  # Ensure minimum width of 2
 
-    # Plot rewards and q-values in the top subplot
+    # Helper function for formatting axes
     def format(ax):
       ax.set_xlabel("Time")
       ax.grid(True)
       ax.set_xticks(range(0, len(rewards), 1))
 
-    # Plot task_vector (used to compute rewards)
-    if task_vector.ndim > 1:
-      # Multiple dimensions - plot as heatmap
-      im = ax0a.imshow(task_vector.T, aspect='auto', cmap='viridis', interpolation='nearest')
-      ax0a.set_ylabel("Task Vector Dims")
-      ax0a.set_title("Task Vector (used for reward)")
-      plt.colorbar(im, ax=ax0a)
-    else:
-      ax0a.plot(task_vector)
-      ax0a.set_title("Task Vector (used for reward)")
-    format(ax0a)
+    ##############################
+    # Plot 1: Reward Computation
+    ##############################
+    fig1, (ax1a, ax1b, ax1c) = plt.subplots(3, 1, figsize=(fig_width, height * 3))
 
-    # Plot achievements (used to compute rewards)
-    if achievements.ndim > 1:
-      # Multiple dimensions - plot as heatmap
-      im = ax0b.imshow(achievements.T, aspect='auto', cmap='viridis', interpolation='nearest')
-      ax0b.set_ylabel("Achievement Dims")
-      ax0b.set_title("Achievements (state features)")
-      plt.colorbar(im, ax=ax0b)
-    else:
-      ax0b.plot(achievements)
-      ax0b.set_title("Achievements (state features)")
-    format(ax0b)
+    # Task vector (binary heatmap)
+    im = ax1a.imshow(
+      task_vector.T, aspect="auto", cmap="viridis", interpolation="nearest"
+    )
+    ax1a.set_title("Task Vector")
+    ax1a.set_ylabel("Dims")
+    plt.colorbar(im, ax=ax1a)
+    format(ax1a)
 
-    ax1.plot(rewards, label="Rewards")
-    ax1.plot(q_values_taken, label="Q-Values")
-    ax1.plot(q_target, label="Q-Targets")
-    ax1.set_title("Rewards and Q-Values")
-    format(ax1)
-    ax1.legend()
+    # Achievements (binary heatmap)
+    im = ax1b.imshow(
+      achievements.T, aspect="auto", cmap="viridis", interpolation="nearest"
+    )
+    ax1b.set_title("Achievements")
+    ax1b.set_ylabel("Dims")
+    plt.colorbar(im, ax=ax1b)
+    format(ax1b)
 
-    # Plot TD errors in the middle subplot
-    ax2.plot(td_errors)
-    format(ax2)
-    ax2.set_title("TD Errors")
+    # Rewards only
+    ax1c.plot(rewards, label="Rewards")
+    ax1c.set_title("Rewards")
+    ax1c.legend()
+    format(ax1c)
 
-    # Plot Q-loss in the bottom subplot
-    ax3.plot(q_loss)
-    format(ax3)
-    ax3.set_title("Q-Loss")
-
-    # Plot episode quantities
-    is_last = d_["data"].timestep.last()
-    ax4.plot(discounts, label="Discounts")
-    ax4.plot(mask, label="mask")
-    ax4.plot(is_last, label="is_last")
-    format(ax4)
-    ax4.set_title("Episode markers")
-    ax4.legend()
-
-    # Adjust the spacing between subplots
-    # plt.tight_layout()
-    # log
     if wandb.run is not wandb.sdk.lib.disabled.RunDisabled:
-      wandb.log({f"learner_example/q-values": wandb.Image(fig)})
-    plt.close(fig)
+      wandb.log({"learner_example/reward_computation": wandb.Image(fig1)})
+    plt.close(fig1)
+
+    ##############################
+    # Plot 2: Training Metrics
+    ##############################
+    fig2, (ax2a, ax2b, ax2c) = plt.subplots(3, 1, figsize=(fig_width, height * 3))
+
+    # Rewards, Q-values, Q-targets
+    ax2a.plot(rewards, label="Rewards")
+    ax2a.plot(q_values_taken, label="Q-Values")
+    ax2a.plot(q_target, label="Q-Targets")
+    ax2a.set_title("Rewards and Q-Values")
+    ax2a.legend()
+    format(ax2a)
+
+    # TD errors
+    ax2b.plot(td_errors)
+    ax2b.set_title("TD Errors")
+    format(ax2b)
+
+    # Episode markers
+    is_last = d_["timesteps"].last()
+    ax2c.plot(discounts, label="Discounts")
+    ax2c.plot(is_last, label="is_last")
+    ax2c.set_title("Episode Markers")
+    ax2c.legend()
+    format(ax2c)
+
+    if wandb.run is not wandb.sdk.lib.disabled.RunDisabled:
+      wandb.log({"learner_example/training_metrics": wandb.Image(fig2)})
+    plt.close(fig2)
 
     ##############################
     # plot images of env
     ##############################
     # timestep = jax.tree_util.tree_map(lambda x: jnp.array(x), d_['data'].timestep)
-    timesteps: TimeStep = d_["data"].timestep
+    timesteps: TimeStep = d_["timesteps"]
 
     # ------------
     # get images
@@ -598,7 +602,7 @@ def jaxmaze_learner_log_fn(
       #    index(timesteps.state.agent),
       #    env_params.view_size,
       #    tile_size=8)
-      obs_image = render_fn(index(d_["data"].timestep.state))
+      obs_image = render_fn(index(d_["timesteps"].state))
       # state_images.append(state_image)
       obs_images.append(obs_image)
 
@@ -646,108 +650,114 @@ def jaxmaze_learner_log_fn(
   is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
 
   jax.lax.cond(
-    is_log_time, lambda d: jax.debug.callback(callback, d), lambda d: None, data
+    is_log_time,
+    lambda d: jax.debug.callback(callback, d["online"]),
+    lambda d: None,
+    data,
   )
 
 
 def crafax_learner_log_fn(data: dict, config: dict):
   def callback(d):
-    n_updates = d.pop("n_updates")
-
     # Extract the relevant data
     # only use data from batch dim = 0
     # [T, B, ...] --> # [T, ...]
     d_ = jax.tree_util.tree_map(lambda x: x[:, 0], d)
 
-    mask = d_["mask"]
-    discounts = d_["data"].timestep.discount
-    rewards = d_["data"].timestep.reward
-    actions = d_["data"].action
+    discounts = d_["timesteps"].discount
+    rewards = d_["timesteps"].reward
+    actions = d_["actions"]
     q_values = d_["q_values"]
     q_target = d_["q_target"]
     q_values_taken = rlax.batched_index(q_values, actions)
     td_errors = d_["td_errors"]
-    q_loss = d_["q_loss"]
 
     # Get task_vector and achievements for reward debugging
     task_vector_fn, achievement_fn, _ = ENVIRONMENT_TO_GOAL_FNS[config["ENV"]]
-    timesteps = d_["data"].timestep
-    task_vector = task_vector_fn(timesteps)  # [T, D]
-    achievements = achievement_fn(timesteps)  # [T, D]
+    timesteps = d_["timesteps"]
+    task_vector = task_vector_fn(timesteps)  # [T, D] - binary vectors
+    achievements = achievement_fn(timesteps)  # [T, D] - binary vectors
 
-    # Create a figure with six subplots (added 2 for task_vector and achievements)
+    # Figure dimensions
     width = 0.3
-    nT = len(rewards)  # e.g. 20 --> 8
-    fig, (ax0a, ax0b, ax1, ax2, ax3, ax4) = plt.subplots(6, 1, figsize=(int(width * nT), 24))
+    nT = len(rewards)
+    height = 3
+    fig_width = max(2, int(width * nT))  # Ensure minimum width of 2
 
-    # Plot rewards and q-values in the top subplot
+    # Helper function for formatting axes
     def format(ax):
       ax.set_xlabel("Time")
       ax.grid(True)
       ax.set_xticks(range(0, len(rewards), 1))
 
-    # Plot task_vector (used to compute rewards)
-    if task_vector.ndim > 1:
-      # Multiple dimensions - plot as heatmap
-      im = ax0a.imshow(task_vector.T, aspect='auto', cmap='viridis', interpolation='nearest')
-      ax0a.set_ylabel("Task Vector Dims")
-      ax0a.set_title("Task Vector (used for reward)")
-      plt.colorbar(im, ax=ax0a)
-    else:
-      ax0a.plot(task_vector)
-      ax0a.set_title("Task Vector (used for reward)")
-    format(ax0a)
+    ##############################
+    # Plot 1: Reward Computation
+    ##############################
+    fig1, (ax1a, ax1b, ax1c) = plt.subplots(3, 1, figsize=(fig_width, height * 3))
 
-    # Plot achievements (used to compute rewards)
-    if achievements.ndim > 1:
-      # Multiple dimensions - plot as heatmap
-      im = ax0b.imshow(achievements.T, aspect='auto', cmap='viridis', interpolation='nearest')
-      ax0b.set_ylabel("Achievement Dims")
-      ax0b.set_title("Achievements (state features)")
-      plt.colorbar(im, ax=ax0b)
-    else:
-      ax0b.plot(achievements)
-      ax0b.set_title("Achievements (state features)")
-    format(ax0b)
+    # Task vector (binary heatmap)
+    im = ax1a.imshow(
+      task_vector.T, aspect="auto", cmap="viridis", interpolation="nearest"
+    )
+    ax1a.set_title("Task Vector")
+    ax1a.set_ylabel("Dims")
+    plt.colorbar(im, ax=ax1a)
+    format(ax1a)
 
-    ax1.plot(rewards, label="Rewards")
-    ax1.plot(q_values_taken, label="Q-Values")
-    ax1.plot(q_target, label="Q-Targets")
-    ax1.set_title("Rewards and Q-Values")
-    format(ax1)
-    ax1.legend()
+    # Achievements (binary heatmap)
+    im = ax1b.imshow(
+      achievements.T, aspect="auto", cmap="viridis", interpolation="nearest"
+    )
+    ax1b.set_title("Achievements")
+    ax1b.set_ylabel("Dims")
+    plt.colorbar(im, ax=ax1b)
+    format(ax1b)
 
-    # Plot TD errors in the middle subplot
-    ax2.plot(td_errors)
-    format(ax2)
-    ax2.set_title("TD Errors")
+    # Rewards only
+    ax1c.plot(rewards, label="Rewards")
+    ax1c.set_title("Rewards")
+    ax1c.legend()
+    format(ax1c)
 
-    # Plot Q-loss in the bottom subplot
-    ax3.plot(q_loss)
-    format(ax3)
-    ax3.set_title("Q-Loss")
-
-    # Plot episode quantities
-    is_last = d_["data"].timestep.last()
-    ax4.plot(discounts, label="Discounts")
-    ax4.plot(mask, label="mask")
-    ax4.plot(is_last, label="is_last")
-    format(ax4)
-    ax4.set_title("Episode markers")
-    ax4.legend()
-
-    # Adjust the spacing between subplots
-    # plt.tight_layout()
-    # log
     if wandb.run is not wandb.sdk.lib.disabled.RunDisabled:
-      wandb.log({f"learner_example/q-values": wandb.Image(fig)})
-    plt.close(fig)
+      wandb.log({"learner_example/reward_computation": wandb.Image(fig1)})
+    plt.close(fig1)
+
+    ##############################
+    # Plot 2: Training Metrics
+    ##############################
+    fig2, (ax2a, ax2b, ax2c) = plt.subplots(3, 1, figsize=(fig_width, height * 3))
+
+    # Rewards, Q-values, Q-targets
+    ax2a.plot(rewards, label="Rewards")
+    ax2a.plot(q_values_taken, label="Q-Values")
+    ax2a.plot(q_target, label="Q-Targets")
+    ax2a.set_title("Rewards and Q-Values")
+    ax2a.legend()
+    format(ax2a)
+
+    # TD errors
+    ax2b.plot(td_errors)
+    ax2b.set_title("TD Errors")
+    format(ax2b)
+
+    # Episode markers
+    is_last = d_["timesteps"].last()
+    ax2c.plot(discounts, label="Discounts")
+    ax2c.plot(is_last, label="is_last")
+    ax2c.set_title("Episode Markers")
+    ax2c.legend()
+    format(ax2c)
+
+    if wandb.run is not wandb.sdk.lib.disabled.RunDisabled:
+      wandb.log({"learner_example/training_metrics": wandb.Image(fig2)})
+    plt.close(fig2)
 
     ##############################
     # plot images of env
     ##############################
-    # timestep = jax.tree_util.tree_map(lambda x: jnp.array(x), d_['data'].timestep)
-    timesteps: TimeStep = d_["data"].timestep
+    # timestep = jax.tree_util.tree_map(lambda x: jnp.array(x), d_['timesteps'])
+    timesteps: TimeStep = d_["timesteps"]
 
     # ------------
     # get images
@@ -760,7 +770,7 @@ def crafax_learner_log_fn(data: dict, config: dict):
       def index(y):
         return jax.tree_util.tree_map(lambda x: x[idx], y)
 
-      obs_image = craftax_render_fn(index(d_["data"].timestep.state.env_state))
+      obs_image = craftax_render_fn(index(d_["timesteps"].state.env_state))
       obs_images.append(obs_image)
     # ------------
     # plot

@@ -22,7 +22,7 @@ dependencies = [
     "flashbax",
     "mctx>=0.0.5",
     "jaxneurorl",
-    "jaxmaze @ git+https://github.com/wcarvalho/JaxMaze.git",
+    "jaxmaze",
 
     # Config & logging
     "hydra-core",
@@ -30,7 +30,6 @@ dependencies = [
     "wandb",
 
     # Compute utilities
-    "ray[tune]>=2.10.0",
     "scipy>=1.12.0",
     "numpy",
 
@@ -47,6 +46,7 @@ dependencies = [
 [project.optional-dependencies]
 gpu = [
     "jax[cuda12]",
+    "jaxlib"
 ]
 dev = [
     "ipywidgets",
@@ -68,3 +68,4 @@ dev-dependencies = [
 
 [tool.uv.sources]
 jaxneurorl = { path = "libraries/jaxneurorl", editable = true }
+jaxmaze = { path = "libraries/jaxmaze", editable = true }

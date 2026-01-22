@@ -3,9 +3,10 @@
 TESTING:
 JAX_DEBUG_NANS=True \
 JAX_DISABLE_JIT=1 \
+RL_RESULTS_DIR=/tmp/rl_results \
 HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue jaxmaze_trainer.py \
   app.debug=True \
-  app.wandb=False \
+  app.wandb=True \
   app.search=preplay
 
 RUNNING ON SLURM:
@@ -523,13 +524,13 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["her"]},
         "SEED": {"values": list(range(1, 2))},
-        "env.exp": {"values": ["exp4"]},
-        "NUM_HER_GOALS": {"values": [10]},
+        "env.exp": {"values": ["her_test"]},
+        "NUM_HER_GOALS": {"values": [1]},
         #"GOAL_BETA": {"values": [1.0, .1, 10.]},
         #"HER_COEFF": {"values": [1, .1, .01]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-testing-3",
+      "group": "her-sanity-1",
     }
   # elif search == "dynaq_shared":
   #  sweep_config = {
