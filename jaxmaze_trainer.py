@@ -9,8 +9,9 @@ HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue jaxmaz
   app.search=preplay
 
 RUNNING ON SLURM:
-python jaxmaze_trainer.py \
-  app.parallel=slurm_wandb \
+RL_RESULTS_DIR=/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results \
+JAX_PLATFORMS=cpu python jaxmaze_trainer.py \
+  app.parallel=slurm \
   app.search=dynaq_shared
 """
 
@@ -35,7 +36,15 @@ from flax.traverse_util import flatten_dict, unflatten_dict
 
 import numpy as np
 
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "true"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".90" # Use 90% of the A100 VRAM
+os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
+
+# Use TF32 for matmuls (significant speedup on A100)
+os.environ["XLA_FLAGS"] = "--xla_gpu_enable_latency_hiding_scheduler=true"
+# Tell JAX to use the fastest matmul precision
+import jax
+jax.config.update("jax_default_matmul_precision", "tensorfloat32")
 
 
 from jaxneurorl.agents import value_based_basics as vbb
@@ -45,8 +54,6 @@ from jaxneurorl import loggers
 import qlearning_jaxmaze
 import usfa_jaxmaze
 import multitask_preplay_jaxmaze
-import dyna_craftax
-import multitask_preplay_craftax_v2
 import her
 import base_algorithm
 import jaxmaze_observer as humansf_observers
@@ -321,6 +328,7 @@ def run_single(config: dict, save_path: str = None):
       ),
     )
   elif alg_name in ("dyna"):
+    import dyna_craftax
     train_fn = dyna_craftax.make_train(
       config=config,
       env=env,
@@ -339,6 +347,7 @@ def run_single(config: dict, save_path: str = None):
       ),
     )
   elif alg_name in ("preplay"):
+    import multitask_preplay_craftax_v2
     train_fn = multitask_preplay_craftax_v2.make_train_jaxmaze_multigoal(
       config=config,
       env=env,
@@ -386,6 +395,14 @@ def run_single(config: dict, save_path: str = None):
         extract_task_info=extract_task_info,
         get_task_name=get_task_name,
         action_names=action_names,
+        learner_log_extra=functools.partial(
+          her.jaxmaze_learner_log_fn,
+          config=config,
+          action_names=action_names,
+          extract_task_info=extract_task_info,
+          get_task_name=get_task_name,
+          render_fn=jaxmaze_render_fn,
+        ),
       ),
     )
 
@@ -507,9 +524,12 @@ def sweep(search: str = ""):
         "ALG": {"values": ["her"]},
         "SEED": {"values": list(range(1, 2))},
         "env.exp": {"values": ["exp4"]},
+        "NUM_HER_GOALS": {"values": [10]},
+        #"GOAL_BETA": {"values": [1.0, .1, 10.]},
+        #"HER_COEFF": {"values": [1, .1, .01]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-testing-1",
+      "group": "her-testing-3",
     }
   # elif search == "dynaq_shared":
   #  sweep_config = {
@@ -634,7 +654,9 @@ def main(config: DictConfig):
     absolute_config_path=CONFIG_PATH,
     run_fn=run_single,
     sweep_fn=sweep,
-    folder=os.environ.get("RL_RESULTS_DIR", "/tmp/rl_results_dir"),
+    folder=os.environ.get(
+      "RL_RESULTS_DIR",
+      "/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results"),
   )
 
 
