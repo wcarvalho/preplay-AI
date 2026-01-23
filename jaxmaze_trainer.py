@@ -44,7 +44,6 @@ os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
 
 # Use TF32 for matmuls (significant speedup on A100)
 os.environ["XLA_FLAGS"] = "--xla_gpu_enable_latency_hiding_scheduler=true"
-# os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 
 from jaxneurorl.agents import value_based_basics as vbb
@@ -524,14 +523,14 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["her"]},
         "SEED": {"values": [2]},
-        "env.exp": {"values": ["exp4"]},
-        "NUM_HER_GOALS": {"values": [1]},
-        "GOAL_BETA": {"values": [1.0, 0.1, 10.0]},
-        "HER_COEFF": {"values": [1, 0.1, 0.01]},
-        # "LEARNER_EXTRA_LOG_PERIOD": {"values": [100]},
+        "env.exp": {"values": ["her_test"]},
+        "NUM_HER_GOALS": {"values": [1, 10]},
+        "GOAL_BETA": {"values": [1.0, 10.0]},
+        "HER_COEFF": {"values": [0.1, 0.01]},
+        "LEARNER_EXTRA_LOG_PERIOD": {"values": [25]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-exp-5",
+      "group": "her-exp-6",
     }
   elif search == "her2":
     sweep_config = {
@@ -545,13 +544,13 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["her_test", "exp4"]},
         "NUM_HER_GOALS": {"values": [1]},
         "HER_COEFF": {"values": [1.0, 0.0]},
-        "base": {"values": ["vbb"]},
+        "base": {"values": ["base2"]},
         # "GOAL_BETA": {"values": [1.0, .1, 10.]},
         # "HER_COEFF": {"values": [1, .1, .01]},
         # "LEARNER_EXTRA_LOG_PERIOD": {"values": [100]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-sanity-fast-OS-settings-10",
+      "group": "her-sanity-fast-OS-settings-11",
     }
   # elif search == "dynaq_shared":
   #  sweep_config = {

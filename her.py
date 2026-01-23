@@ -471,7 +471,7 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
 
     # T
     logits = config["GOAL_BETA"] * goal_achieved + position_achieved
-    probabilities = logits / (jnp.sum(logits, axis=-1, keepdims=True) + 1e-5)
+    probabilities = jax.nn.softmax(logits)
 
     # N
     indices = Categorical(probs=probabilities).sample(
@@ -713,7 +713,7 @@ def jaxmaze_learner_log_fn(
   is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
 
   def plot_both(d):
-    plot_individual(d["online"], "online")
+    #plot_individual(d["online"], "online")
     plot_individual(d["her"], "her")
 
   jax.lax.cond(
@@ -792,7 +792,7 @@ def crafax_learner_log_fn(data: dict, config: dict):
     plt.close(fig3)
 
   def plot_both(d):
-    plot_individual(d["online"], "online")
+    #plot_individual(d["online"], "online")
     plot_individual(d["her"], "her")
 
   # this will be the value after update is applied
@@ -873,7 +873,8 @@ class TaskEncoder(nn.Module):
 def goal_from_env_timestep(t: TimeStep, env: str):
   task_vector_fn, _, position_fn = ENVIRONMENT_TO_GOAL_FNS[env]
   return GoalPosition(
-    task_vector_fn(t).astype(jnp.float32), jnp.zeros_like(position_fn(t))
+    task_vector_fn(t).astype(jnp.float32),
+    jnp.zeros_like(position_fn(t))
   )
 
 

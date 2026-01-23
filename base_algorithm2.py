@@ -1238,6 +1238,9 @@ def make_train(
       loss_fn=loss_fn,
     )
 
+    # Re-initialize buffer_state since the original was donated/deleted by buffer.add
+    buffer_state = buffer.init(init_transition_example)
+
     ##############################
     # DEFINE TRAINING LOOP
     ##############################
