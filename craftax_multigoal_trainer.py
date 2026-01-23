@@ -422,8 +422,7 @@ def run_single(config: dict, save_path: str = None):
       make_optimizer=her.make_optimizer,
       make_loss_fn_class=her.make_loss_fn_class,
       make_actor=her.make_actor,
-      make_logger=partial(
-        make_logger, learner_log_extra=her.crafax_learner_log_fn),
+      make_logger=partial(make_logger, learner_log_extra=her.crafax_learner_log_fn),
       train_env_params=env_params,
       test_env_params=test_env_params,
       ObserverCls=craftax_observer.Observer,
@@ -598,8 +597,8 @@ def main(config: DictConfig):
     run_fn=run_single,
     sweep_fn=sweep,
     folder=os.environ.get(
-      "RL_RESULTS_DIR",
-      "/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results"),
+      "RL_RESULTS_DIR", "/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results"
+    ),
   )
 
 

@@ -22,6 +22,7 @@ from functools import partial
 from typing import Callable, NamedTuple, Union, Optional
 
 import matplotlib
+
 matplotlib.use("Agg")
 
 import flax
@@ -93,8 +94,7 @@ class RnnAgent(nn.Module):
   goal_from_timestep: Callable[[TimeStep], jax.Array]
 
   def setup(self):
-    kernel_init = nn.initializers.variance_scaling(1.0, "fan_in", "normal", out_axis=0)
-    self.task_fn = nn.Dense(128, kernel_init=kernel_init)
+    self.q_embed = nn.Sequential([nn.Dense(256), nn.relu])
 
   def initialize(self, x: TimeStep):
     """Only used for initialization."""
@@ -115,7 +115,7 @@ class RnnAgent(nn.Module):
     goal_embedding = jax.vmap(self.task_encoder)(self.goal_from_timestep(x))
     q_in = jnp.concatenate((rnn_out, goal_embedding), axis=-1)
 
-    q_vals = self.q_fn(q_in)
+    q_vals = self.q_fn(self.q_embed(q_in))
 
     return Predictions(
       q_vals=q_vals,
@@ -152,7 +152,7 @@ class RnnAgent(nn.Module):
     goal_embedding = task_encoder(goal)
 
     q_in = jnp.concatenate((rnn_out, goal_embedding), axis=-1)
-    q_vals = q_fn(q_in)
+    q_vals = q_fn(self.q_embed(q_in))
 
     return Predictions(
       q_vals=q_vals,
@@ -294,7 +294,7 @@ class HerLossFn(base.RecurrentLossFn):
     }
     T, B = loss_mask.shape[:2]
 
-    # [T-1, B], [T]
+    # [B, T-1], [T], [B, T], [B, T]
     td_error, loss, metrics, log_info = jax.vmap(self.loss_fn, 1, 0)(
       data.timestep,
       online_preds,
@@ -313,6 +313,8 @@ class HerLossFn(base.RecurrentLossFn):
     td_error = jnp.concatenate((td_error, jnp.zeros(B)[None]), 0)
     td_error = jnp.abs(td_error)
 
+    if self.her_coeff < 1e-5:
+      return td_error, loss, all_metrics
     ##################
     # Q-learning on fake goals
     ##################
@@ -346,6 +348,7 @@ class HerLossFn(base.RecurrentLossFn):
       # [T, ...], [2], [T, D]
       inputs = (timestep, sub_key_grad_, expanded_new_goal)
       unroll = functools.partial(self.network.apply, method=self.network.unroll)
+      # TODO: remove unroll, add a function that 
       online_preds, _ = unroll(params, online_state, *inputs)
       target_preds, _ = unroll(target_params, target_state, *inputs)
 
@@ -477,12 +480,16 @@ def craftax_render_fn(state):
   return image / 255.0
 
 
-def create_data_plots(d_, env_name):
+def create_data_plots(d_, env_name, n_rows_fig1=3):
   """Create reward computation and training metrics plots.
 
   Args:
     d_: Dictionary with processed data (batch dimension already removed)
     env_name: Name of the environment (e.g., 'jaxmaze', 'craftax')
+    n_rows_fig1: Number of rows in the first figure (default 3).
+
+  Returns:
+    (fig1, axes1, fig2, axes2): The two figures and their axes arrays.
   """
   # Get task_vector and achievements for reward debugging
   task_vector_fn, achievement_fn, _ = ENVIRONMENT_TO_GOAL_FNS[env_name]
@@ -514,7 +521,8 @@ def create_data_plots(d_, env_name):
   ##############################
   # Plot 1: Reward Computation
   ##############################
-  fig1, (ax1a, ax1b, ax1c) = plt.subplots(3, 1, figsize=(fig_width, height * 3))
+  fig1, axes1 = plt.subplots(n_rows_fig1, 1, figsize=(fig_width, height * n_rows_fig1))
+  ax1a, ax1b, ax1c = axes1[0], axes1[1], axes1[2]
 
   # Task vector (binary heatmap)
   im = ax1a.imshow(
@@ -522,7 +530,6 @@ def create_data_plots(d_, env_name):
   )
   ax1a.set_title("Task Vector")
   ax1a.set_ylabel("Dims")
-  plt.colorbar(im, ax=ax1a)
   format(ax1a)
 
   # Achievements (binary heatmap)
@@ -531,7 +538,6 @@ def create_data_plots(d_, env_name):
   )
   ax1b.set_title("Achievements")
   ax1b.set_ylabel("Dims")
-  plt.colorbar(im, ax=ax1b)
   format(ax1b)
 
   # Rewards comparison
@@ -541,14 +547,11 @@ def create_data_plots(d_, env_name):
   ax1c.legend()
   format(ax1c)
 
-  if wandb.run is not wandb.sdk.lib.disabled.RunDisabled:
-    wandb.log({"learner_example/reward_computation": wandb.Image(fig1)})
-  plt.close(fig1)
-
   ##############################
   # Plot 2: Training Metrics
   ##############################
-  fig2, (ax2a, ax2b, ax2c) = plt.subplots(3, 1, figsize=(fig_width, height * 3))
+  fig2, axes2 = plt.subplots(3, 1, figsize=(fig_width, height * 3))
+  ax2a, ax2b, ax2c = axes2[0], axes2[1], axes2[2]
 
   # Rewards, Q-values, Q-targets
   ax2a.plot(data_rewards, label="Environment Rewards")
@@ -572,9 +575,7 @@ def create_data_plots(d_, env_name):
   ax2c.legend()
   format(ax2c)
 
-  if wandb.run is not wandb.sdk.lib.disabled.RunDisabled:
-    wandb.log({"learner_example/training_metrics": wandb.Image(fig2)})
-  plt.close(fig2)
+  return fig1, axes1, fig2, axes2
 
 
 def jaxmaze_learner_log_fn(
@@ -588,42 +589,44 @@ def jaxmaze_learner_log_fn(
   def callback(d):
     # Extract the relevant data
     # only use data from batch dim = 0
-    # [T, B, ...] --> # [T, ...]
-    d_ = jax.tree_util.tree_map(lambda x: x[:, 0], d)
+    # [B, T, ...] --> # [T, ...]
+    d_ = jax.tree_util.tree_map(lambda x: x[0], d)
 
-    # Create standard plots
-    create_data_plots(d_, config["ENV"])
+    # Create standard plots with 4th subplot for trajectory
+    fig1, axes1, fig2, axes2 = create_data_plots(d_, config["ENV"], n_rows_fig1=4)
 
-    # Extract actions for trajectory plotting
-    actions = d_["actions"]
+    # Formatting: no titles, use ylabels instead
+    axes1[0].set_title("")
+    axes1[0].set_ylabel("task vector")
+    axes1[0].set_xlabel("")
+    axes1[0].set_xticks([])
 
-    ##############################
-    # plot trajectory with arrows
-    ##############################
+    axes1[1].set_title("")
+    axes1[1].set_ylabel("achievements")
+    axes1[1].set_xlabel("")
+    axes1[1].set_xticks([])
+
+    axes1[2].set_title("")
+
+    # Populate 4th subplot with trajectory arrows
     timesteps: TimeStep = d_["timesteps"]
-
-    # Get maze dimensions and create figure
+    actions = d_["actions"]
     maze_height, maze_width, _ = timesteps.state.grid[0].shape
-    fig, ax = plt.subplots(1, figsize=(8, 8))
 
-    # Get mask for states within episode (non-terminal)
     non_terminal = timesteps.discount
     is_last = timesteps.last()
     term_cumsum = jnp.cumsum(is_last, -1)
     in_episode = (term_cumsum + non_terminal) < 2
 
-    # Get actions and positions for trajectory
-    episode_actions = actions[in_episode][:-1]  # Actions that led to each state
+    episode_actions = actions[in_episode][:-1]
     episode_positions = jax.tree_util.tree_map(
       lambda x: x[in_episode][:-1], timesteps.state.agent_pos
     )
 
-    # Render initial state as background
     index = lambda t, idx: jax.tree_util.tree_map(lambda x: x[idx], t)
     initial_state = index(timesteps.state, 0)
     img = render_fn(initial_state)
 
-    # Place arrows showing trajectory
     renderer.place_arrows_on_image(
       img,
       episode_positions,
@@ -631,21 +634,19 @@ def jaxmaze_learner_log_fn(
       maze_height,
       maze_width,
       arrow_scale=5,
-      ax=ax,
+      ax=axes1[3],
     )
+    axes1[3].axis("off")
 
-    # Add title with task and reward information
-    first_timestep = index(timesteps, 0)
-    task_name = get_task_name(extract_task_info(first_timestep))
-    total_reward = timesteps.reward[in_episode].sum()
-
-    title = f"{task_name}\nReward: {total_reward:.2f}"
-    ax.set_title(title, fontsize=10)
-    ax.axis("off")  # Remove axes for cleaner look
+    fig1.tight_layout()
 
     if wandb.run is not wandb.sdk.lib.disabled.RunDisabled:
-      wandb.log({"learner_example/trajectory": wandb.Image(fig)})
-    plt.close(fig)
+      wandb.log({
+        "learner_example/reward_computation": wandb.Image(fig1),
+        "learner_example/training_metrics": wandb.Image(fig2),
+      })
+    plt.close(fig1)
+    plt.close(fig2)
 
   # this will be the value after update is applied
   n_updates = data["n_updates"] + 1
@@ -667,7 +668,7 @@ def crafax_learner_log_fn(data: dict, config: dict):
     d_ = jax.tree_util.tree_map(lambda x: x[:, 0], d)
 
     # Create standard plots
-    create_data_plots(d_, config["ENV"])
+    fig1, axes1, fig2, axes2 = create_data_plots(d_, config["ENV"])
 
     # Extract data for trajectory plotting
     rewards = d_["timesteps"].reward
@@ -729,7 +730,13 @@ def crafax_learner_log_fn(data: dict, config: dict):
       ncols=6,
     )
     if wandb.run is not wandb.sdk.lib.disabled.RunDisabled:
-      wandb.log({"learner_example/trajectory": wandb.Image(fig)})
+      wandb.log({
+        "learner_example/reward_computation": wandb.Image(fig1),
+        "learner_example/training_metrics": wandb.Image(fig2),
+        "learner_example/trajectory": wandb.Image(fig),
+      })
+    plt.close(fig1)
+    plt.close(fig2)
     plt.close(fig)
 
   # this will be the value after update is applied
@@ -796,16 +803,8 @@ class TaskEncoder(nn.Module):
 
     # position is categorical
     # [2, D]
-    position = jax.vmap(flax.linen.Embed(100, self.vocab_size))(goal.position)
+    position = jax.vmap(flax.linen.Embed(self.vocab_size, 128))(goal.position)
     return jnp.concatenate((task, position.reshape(-1)))
-
-
-class CraftaxMulitgoalTaskEncoder(nn.Module):
-  """Task encoder for regular craftax setting"""
-
-  @nn.compact
-  def __call__(self, obs: struct.PyTreeNode):
-    achieved = obs.state_features
 
 
 def goal_from_env_timestep(t: TimeStep, env: str):
@@ -928,7 +927,7 @@ def make_jaxmaze_agent(
       out_dim=env.num_actions(env_params),
       use_bias=config.get("USE_BIAS", True),
     ),
-    task_encoder=TaskEncoder(500),
+    task_encoder=TaskEncoder(10_000),
     goal_from_timestep=partial(goal_from_env_timestep, env="jaxmaze"),
   )
 

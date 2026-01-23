@@ -36,13 +36,12 @@ dependencies = [
     "typing_extensions>=4.11.0",
     "ipdb",
     "ruff",
-    "jupyter>=1.1.1",
 ]
 
 [project.optional-dependencies]
 gpu = [
-    "jax[cuda12]",
-    "jaxlib"
+    "jax[cuda12]>=0.4.20",
+    "jaxlib>=0.4.20"
 ]
 jupyter = [
     "jupyter",

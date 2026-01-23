@@ -11,6 +11,7 @@ This module provides the foundational components for reinforcement learning algo
 """
 
 from pprint import pprint
+from tqdm import tqdm
 import abc
 import collections
 import copy
@@ -843,8 +844,7 @@ class RecurrentLossFn:
     mean_priority = (1 - self.max_priority_weight) * jnp.mean(abs_td_error, axis=0)
     priorities = max_priority + mean_priority
 
-    probs = batch.probabilities / (jnp.sum(batch.probabilities) + 1e-6)
-    importance_weights = (1.0 / (probs + 1e-6)).astype(jnp.float32)
+    importance_weights = (1.0 / (batch.probabilities + 1e-6)).astype(jnp.float32)
     importance_weights **= self.importance_sampling_exponent
     importance_weights /= jnp.max(importance_weights)
     batch_loss = jnp.mean(importance_weights * batch_loss)
@@ -1223,13 +1223,23 @@ def make_train(
 
     dummy_rng = jax.random.PRNGKey(0)
 
+    # Add dummy transitions so buffer can be sampled for shape inference
+    dummy_transitions = jax.tree.map(
+      lambda x: jnp.repeat(x[:, None], sample_sequence_length, axis=1),
+      init_transition,
+    )
+    dummy_buffer_state = buffer.add(buffer_state, dummy_transitions)
+
     _, _, dummy_metrics, dummy_grads = learn_step(
       train_state=train_state,
       rng=dummy_rng,
       buffer=buffer,
-      buffer_state=buffer_state,
+      buffer_state=dummy_buffer_state,
       loss_fn=loss_fn,
     )
+
+    # Re-initialize buffer_state since the original was donated/deleted by buffer.add
+    buffer_state = buffer.init(init_transition_example)
 
     ##############################
     # DEFINE TRAINING LOOP
@@ -1238,166 +1248,46 @@ def make_train(
     print("TRAINING")
     print("=" * 50)
 
-    def _train_step(old_runner_state: RunnerState, unused):
-      del unused
+    loss_name = loss_fn.__class__.__name__
 
-      ##############################
-      # 1. unroll for K steps + add to buffer
-      ##############################
+    # Create dummy traj_batch for initial carry (shape: TRAINING_INTERVAL, NUM_ENVS, ...)
+    dummy_traj_batch = jax.tree.map(
+      lambda x: jnp.zeros((config["TRAINING_INTERVAL"],) + x.shape, dtype=x.dtype),
+      init_transition,
+    )
+
+    ##############################
+    # WARMUP PHASE: fill buffer before learning
+    ##############################
+    warmup_steps = config["LEARNING_STARTS"] // config["NUM_ENVS"] // config["TRAINING_INTERVAL"]
+    # Ensure buffer has enough data to sample
+    min_warmup = (sample_sequence_length // config["TRAINING_INTERVAL"]) + 1
+    warmup_steps = max(warmup_steps, min_warmup)
+
+    def _warmup_step(runner_state, unused):
+      del unused
       runner_state, traj_batch = collect_trajectory(
-        runner_state=old_runner_state,
+        runner_state=runner_state,
         num_steps=config["TRAINING_INTERVAL"],
         actor_step_fn=actor.train_step,
         env_step_fn=vmap_step,
         env_params=train_env_params,
       )
-
-      rng = runner_state.rng
-      buffer_state = runner_state.buffer_state
       train_state = runner_state.train_state
-      buffer_state = runner_state.buffer_state
-
-      timesteps = (
-        train_state.timesteps + config["NUM_ENVS"] * config["TRAINING_INTERVAL"]
-      )
-
+      timesteps = train_state.timesteps + config["NUM_ENVS"] * config["TRAINING_INTERVAL"]
       train_state = train_state.replace(timesteps=timesteps)
 
-      num_steps, num_envs = traj_batch.timestep.reward.shape
-      assert num_steps == config["TRAINING_INTERVAL"]
-      assert num_envs == config["NUM_ENVS"]
       buffer_traj_batch = jax.tree_util.tree_map(
         lambda x: jnp.swapaxes(x, 0, 1), traj_batch
       )
+      buffer_state = buffer.add(runner_state.buffer_state, buffer_traj_batch)
 
-      buffer_state = buffer.add(buffer_state, buffer_traj_batch)
-      ##############################
-      # 2. Learner update
-      ##############################
-      is_learn_time = (buffer.can_sample(buffer_state)) & (
-        timesteps >= config["LEARNING_STARTS"]
+      runner_state = runner_state._replace(
+        train_state=train_state,
+        buffer_state=buffer_state,
       )
+      return runner_state, None
 
-      rng, _rng = jax.random.split(rng)
-      train_state, buffer_state, learner_metrics, grads = jax.lax.cond(
-        is_learn_time,
-        lambda train_state_, rng_: learn_step(
-          train_state=train_state_,
-          rng=rng_,
-          buffer=buffer,
-          buffer_state=buffer_state,
-          loss_fn=loss_fn,
-        ),
-        lambda train_state, rng: (
-          train_state,
-          buffer_state,
-          dummy_metrics,
-          dummy_grads,
-        ),
-        train_state,
-        _rng,
-      )
-
-      # update target network
-      train_state = jax.lax.cond(
-        train_state.n_updates % config["TARGET_UPDATE_INTERVAL"] == 0,
-        lambda train_state: train_state.replace(
-          target_network_params=jax.tree.map(lambda x: jnp.copy(x), train_state.params)
-        ),
-        lambda train_state: train_state,
-        operand=train_state,
-      )
-
-      ##############################
-      # 3. Logging learner metrics + evaluation episodes
-      ##############################
-      if online_trajectory_log_fn is not None:
-        online_trajectory_log_fn(traj_batch, train_state.n_updates, config)
-
-      log_period = max(1, int(config["LEARNER_LOG_PERIOD"]))
-      is_log_time = jnp.logical_and(
-        is_learn_time, train_state.n_updates % log_period == 0
-      )
-
-      train_state = train_state.replace(
-        n_logs=train_state.n_logs + is_log_time.astype(jnp.int32)
-      )
-
-      jax.lax.cond(
-        is_log_time,
-        lambda: log_performance(
-          config=config,
-          agent_reset_fn=agent_reset_fn,
-          actor_train_step_fn=actor.train_step,
-          actor_eval_step_fn=actor.eval_step,
-          env_reset_fn=vmap_reset,
-          env_step_fn=vmap_step,
-          train_env_params=train_env_params,
-          test_env_params=test_env_params,
-          runner_state=runner_state,
-          observer=eval_observer,
-          observer_state=init_eval_observer_state,
-          logger=logger,
-        ),
-        lambda: None,
-      )
-
-      loss_name = loss_fn.__class__.__name__
-      jax.lax.cond(
-        is_log_time,
-        lambda: logger.learner_logger(
-          runner_state.train_state, learner_metrics, key=loss_name
-        ),
-        lambda: None,
-      )
-
-      gradient_log_period = config.get("GRADIENT_LOG_PERIOD", 500)
-      if gradient_log_period:
-        log_period = max(1, int(gradient_log_period))
-        is_log_time = jnp.logical_and(
-          is_learn_time, train_state.n_updates % log_period == 0
-        )
-
-        jax.lax.cond(
-          is_log_time,
-          lambda: logger.gradient_logger(train_state, grads),
-          lambda: None,
-        )
-
-      ##############################
-      # 4. Create next runner state
-      ##############################
-      next_runner_state = runner_state._replace(
-        train_state=train_state, buffer_state=buffer_state, rng=rng
-      )
-
-      #########################################################
-      # 5. Every 20% of training, save parameters
-      #########################################################
-      one_tenth = config["NUM_UPDATES"] // 5
-      if save_path is not None:
-
-        def save_params(params, n_updates):
-          idx = int(n_updates // one_tenth)
-          save_training_state(
-            params, config, save_path, config["ALG"], idx, n_updates
-          )
-
-        should_save = jnp.logical_or(
-          train_state.n_updates == 0, train_state.n_updates % one_tenth == 0
-        )
-
-        jax.lax.cond(
-          should_save,
-          lambda: jax.debug.callback(save_params, train_state.params, train_state.n_updates),
-          lambda: None,
-        )
-
-      return next_runner_state, {}
-
-    ##############################
-    # TRAINING LOOP DEFINED. NOW RUN
-    ##############################
     rng, _rng = jax.random.split(rng)
     runner_state = RunnerState(
       train_state=train_state,
@@ -1408,32 +1298,142 @@ def make_train(
       rng=_rng,
     )
 
-    runner_state, _ = jax.lax.scan(
-      _train_step, runner_state, None, config["NUM_UPDATES"]
-    )
-    log_performance(
-      config=config,
-      agent_reset_fn=agent_reset_fn,
-      actor_train_step_fn=actor.train_step,
-      actor_eval_step_fn=actor.eval_step,
-      env_reset_fn=vmap_reset,
-      env_step_fn=vmap_step,
-      train_env_params=train_env_params,
-      test_env_params=test_env_params,
-      runner_state=runner_state,
-      observer=eval_observer,
-      observer_state=init_eval_observer_state,
-      logger=logger,
-    )
+    print(f"Warmup: {warmup_steps} steps to fill buffer")
 
-    # final save
-    jax.debug.callback(
-      save_training_state,
-      runner_state.train_state.params,
-      config,
-      save_path,
-      config["ALG"],
-    )
+    @jax.jit
+    def run_warmup(runner_state):
+      return jax.lax.scan(_warmup_step, runner_state, None, warmup_steps)
+
+    runner_state, _ = run_warmup(runner_state)
+
+    ##############################
+    # TRAINING LOOP (chunked Python loop)
+    ##############################
+    num_train_steps = config["NUM_UPDATES"] - warmup_steps
+    num_chunks = min(config.get("NUM_CHUNKS", 100), num_train_steps)
+    inner_steps = max(1, num_train_steps // num_chunks)
+    # Adjust num_chunks to not exceed total steps
+    num_chunks = num_train_steps // inner_steps
+
+    print(f"Training: {num_train_steps} updates in {num_chunks} chunks of {inner_steps} steps")
+
+    def _train_step(carry, unused):
+      del unused
+      runner_state, _, _, _ = carry
+
+      # 1. Collect trajectory (K steps)
+      runner_state, traj_batch = collect_trajectory(
+        runner_state=runner_state,
+        num_steps=config["TRAINING_INTERVAL"],
+        actor_step_fn=actor.train_step,
+        env_step_fn=vmap_step,
+        env_params=train_env_params,
+      )
+
+      rng = runner_state.rng
+      train_state = runner_state.train_state
+      buffer_state = runner_state.buffer_state
+
+      timesteps = train_state.timesteps + config["NUM_ENVS"] * config["TRAINING_INTERVAL"]
+      train_state = train_state.replace(timesteps=timesteps)
+
+      # 2. Add to buffer (swap axes: num_steps x num_envs -> num_envs x num_steps)
+      buffer_traj_batch = jax.tree_util.tree_map(
+        lambda x: jnp.swapaxes(x, 0, 1), traj_batch
+      )
+      buffer_state = buffer.add(buffer_state, buffer_traj_batch)
+
+      # 3. Learn step (unconditional — buffer is guaranteed full after warmup)
+      rng, _rng = jax.random.split(rng)
+      train_state, buffer_state, metrics, grads = learn_step(
+        train_state=train_state,
+        rng=_rng,
+        buffer=buffer,
+        buffer_state=buffer_state,
+        loss_fn=loss_fn,
+      )
+
+      # 4. Target network update
+      train_state = jax.lax.cond(
+        train_state.n_updates % config["TARGET_UPDATE_INTERVAL"] == 0,
+        lambda train_state: train_state.replace(
+          target_network_params=jax.tree.map(lambda x: jnp.copy(x), train_state.params)
+        ),
+        lambda train_state: train_state,
+        operand=train_state,
+      )
+
+      # 5. Return updated state (metrics/grads/traj overwritten each step, only last survives)
+      next_runner_state = runner_state._replace(
+        train_state=train_state, buffer_state=buffer_state, rng=rng
+      )
+
+      return (next_runner_state, metrics, grads, traj_batch), None
+
+    @jax.jit
+    def run_chunk(carry):
+      return jax.lax.scan(_train_step, carry, None, inner_steps)
+
+    @jax.jit
+    def jit_eval(runner_state):
+      log_performance(
+        config=config,
+        agent_reset_fn=agent_reset_fn,
+        actor_train_step_fn=actor.train_step,
+        actor_eval_step_fn=actor.eval_step,
+        env_reset_fn=vmap_reset,
+        env_step_fn=vmap_step,
+        train_env_params=train_env_params,
+        test_env_params=test_env_params,
+        runner_state=runner_state,
+        observer=eval_observer,
+        observer_state=init_eval_observer_state,
+        logger=logger,
+      )
+
+    carry = (runner_state, dummy_metrics, dummy_grads, dummy_traj_batch)
+
+    for chunk in tqdm(range(num_chunks), desc="Training"):
+      carry, _ = run_chunk(carry)
+      runner_state, last_metrics, last_grads, last_traj = carry
+
+      # --- Logging (every chunk = ~1% of training) ---
+      # 1. Learner metrics
+      logger.learner_logger(runner_state.train_state, last_metrics, key=loss_name)
+
+      # 2. Gradient norms
+      logger.gradient_logger(runner_state.train_state, last_grads)
+
+      # 3. Eval performance
+      jit_eval(runner_state)
+
+      # 4. Online trajectory logging
+      if online_trajectory_log_fn is not None:
+        online_trajectory_log_fn(last_traj, runner_state.train_state.n_updates, config)
+
+      # --- Save params every 10 chunks (~10% of training) ---
+      if save_path is not None and chunk % 10 == 0:
+        save_training_state(
+          runner_state.train_state.params,
+          config,
+          save_path,
+          config["ALG"],
+          idx=chunk // 10,
+          n_updates=int(runner_state.train_state.n_updates),
+        )
+
+
+    # Final eval
+    jit_eval(runner_state)
+
+    # Final save
+    if save_path is not None:
+      save_training_state(
+        runner_state.train_state.params,
+        config,
+        save_path,
+        config["ALG"],
+      )
 
     return {"runner_state": runner_state}
 

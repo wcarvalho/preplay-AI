@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.10"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'linux'",
@@ -3297,7 +3297,6 @@ dependencies = [
     { name = "jaxlib", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "jaxmaze" },
     { name = "jaxneurorl" },
-    { name = "jupyter" },
     { name = "mctx", version = "0.0.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "mctx", version = "0.0.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -3346,12 +3345,11 @@ requires-dist = [
     { name = "ipdb" },
     { name = "ipywidgets", marker = "extra == 'dev'" },
     { name = "jax", specifier = ">=0.4.20" },
-    { name = "jax", extras = ["cuda12"], marker = "extra == 'gpu'" },
+    { name = "jax", extras = ["cuda12"], marker = "extra == 'gpu'", specifier = ">=0.4.20" },
     { name = "jaxlib", specifier = ">=0.4.20" },
-    { name = "jaxlib", marker = "extra == 'gpu'" },
+    { name = "jaxlib", marker = "extra == 'gpu'", specifier = ">=0.4.20" },
     { name = "jaxmaze", editable = "libraries/jaxmaze" },
     { name = "jaxneurorl", editable = "libraries/jaxneurorl" },
-    { name = "jupyter", specifier = ">=1.1.1" },
     { name = "jupyter", marker = "extra == 'jupyter'" },
     { name = "mctx", specifier = ">=0.0.5" },
     { name = "numpy" },

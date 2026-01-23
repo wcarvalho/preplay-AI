@@ -1,20 +1,20 @@
 """
 
 TESTING:
+HYDRA_FULL_ERROR=1 \
 JAX_DEBUG_NANS=True \
 JAX_DISABLE_JIT=1 \
-HYDRA_FULL_ERROR=1 \
 RL_RESULTS_DIR=/tmp/rl_results \
 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue jaxmaze_trainer.py \
-  app.debug=True \
+  app.debug=False \
   app.wandb=True \
-  app.search=her
+  app.search=her2
 
 RUNNING ON SLURM:
 RL_RESULTS_DIR=/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results \
 JAX_PLATFORMS=cpu python jaxmaze_trainer.py \
   app.parallel=slurm \
-  app.search=dynaq_shared
+  app.search=her
 """
 
 from typing import Any, Callable, Dict, Union, Optional, Tuple
@@ -38,15 +38,13 @@ from flax.traverse_util import flatten_dict, unflatten_dict
 
 import numpy as np
 
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "true"
-os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".90" # Use 90% of the A100 VRAM
-os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
+#os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "true"
+#os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".90"  # Use 90% of the A100 VRAM
+#os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
 
-# Use TF32 for matmuls (significant speedup on A100)
-os.environ["XLA_FLAGS"] = "--xla_gpu_enable_latency_hiding_scheduler=true"
-# Tell JAX to use the fastest matmul precision
-import jax
-jax.config.update("jax_default_matmul_precision", "tensorfloat32")
+## Use TF32 for matmuls (significant speedup on A100)
+#os.environ["XLA_FLAGS"] = "--xla_gpu_enable_latency_hiding_scheduler=true"
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 
 from jaxneurorl.agents import value_based_basics as vbb
@@ -227,7 +225,7 @@ def run_single(config: dict, save_path: str = None):
     task_runner = multitask_env.TaskRunner(
       task_objects=task_objects,
       terminate_with_any=False,
-      )
+    )
   else:
     task_runner = multitask_env.TaskRunner(task_objects=task_objects)
     # success_fn = lambda timestep: timestep.rewards > .5
@@ -329,6 +327,7 @@ def run_single(config: dict, save_path: str = None):
     )
   elif alg_name in ("dyna"):
     import dyna_craftax
+
     train_fn = dyna_craftax.make_train(
       config=config,
       env=env,
@@ -348,6 +347,7 @@ def run_single(config: dict, save_path: str = None):
     )
   elif alg_name in ("preplay"):
     import multitask_preplay_craftax_v2
+
     train_fn = multitask_preplay_craftax_v2.make_train_jaxmaze_multigoal(
       config=config,
       env=env,
@@ -410,20 +410,9 @@ def run_single(config: dict, save_path: str = None):
     raise NotImplementedError(alg_name)
 
   start_time = time.time()
-  train_vjit = jax.jit(jax.vmap(train_fn))
-
-  rngs = jax.random.split(rng, config["NUM_SEEDS"])
-  outs = jax.block_until_ready(train_vjit(rngs))
+  outs = train_fn(rng)
   elapsed_time = time.time() - start_time
   print("Elapsed time: {:.2f} seconds".format(elapsed_time))
-
-  # ---------------
-  # save model weights
-  # ---------------
-  if save_path is not None:
-    model_state = outs["runner_state"][0]
-    params = jax.tree.map(lambda x: x[0], model_state.params)
-    save_training_state(params, config, save_path, config["ALG"])
 
 
 def sweep(search: str = ""):
@@ -437,12 +426,12 @@ def sweep(search: str = ""):
       "parameters": {
         "SEED": {"values": list(range(1))},
         "env.exp": {"values": ["exp4"]},
-        "STEP_COST": {"values": [1e-4, 1e-3, 0]},
+        #"STEP_COST": {"values": [1e-4]},
         # "FLOAT_OBS": {"values": [True]},
-        "AGENT_RNN_DIM": {"values": [1024]},
+        #"AGENT_RNN_DIM": {"values": [1024]},
       },
       "overrides": ["alg=ql", "rlenv=jaxmaze", "user=wilka"],
-      "group": "ql-11-fixed-obs-large-rnn-float",
+      "group": "ql-12-test",
     }
   elif search == "ql2":
     sweep_config = {
@@ -522,14 +511,34 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["her"]},
-        "SEED": {"values": list(range(1, 2))},
-        "env.exp": {"values": ["her_test"]},
+        "SEED": {"values": [2]},
+        "env.exp": {"values": ["exp4"]},
         "NUM_HER_GOALS": {"values": [1]},
-        #"GOAL_BETA": {"values": [1.0, .1, 10.]},
-        #"HER_COEFF": {"values": [1, .1, .01]},
+        "GOAL_BETA": {"values": [1.0, .1, 10.]},
+        "HER_COEFF": {"values": [1, .1, .01]},
+        #"LEARNER_EXTRA_LOG_PERIOD": {"values": [100]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-sanity-2",
+      "group": "her-exp-4",
+    }
+  elif search == "her2":
+    sweep_config = {
+      "metric": {
+        "name": "evaluator_performance/0.0 avg_episode_return",
+        "goal": "maximize",
+      },
+      "parameters": {
+        "ALG": {"values": ["her"]},
+        "SEED": {"values": [2]},
+        "env.exp": {"values": ["her_test"]},
+        "NUM_HER_GOALS": {"values": [1]},
+        "HER_COEFF": {"values": [1.0, 0.0]},
+        #"GOAL_BETA": {"values": [1.0, .1, 10.]},
+        #"HER_COEFF": {"values": [1, .1, .01]},
+        #"LEARNER_EXTRA_LOG_PERIOD": {"values": [100]},
+      },
+      "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
+      "group": "her-sanity-6",
     }
   # elif search == "dynaq_shared":
   #  sweep_config = {
@@ -655,8 +664,8 @@ def main(config: DictConfig):
     run_fn=run_single,
     sweep_fn=sweep,
     folder=os.environ.get(
-      "RL_RESULTS_DIR",
-      "/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results"),
+      "RL_RESULTS_DIR", "/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results"
+    ),
   )
 
 

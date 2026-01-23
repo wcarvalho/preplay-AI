@@ -1,8 +1,8 @@
 """
 
 TESTING:
-JAX_DEBUG_NANS=True \
 JAX_DISABLE_JIT=1 \
+JAX_DEBUG_NANS=True \
 HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue craftax_trainer.py \
   app.parallel=none \
   app.debug=True \
@@ -941,8 +941,8 @@ def main(config: DictConfig):
     run_fn=run_single,
     sweep_fn=sweep,
     folder=os.environ.get(
-      "RL_RESULTS_DIR",
-      "/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results"),
+      "RL_RESULTS_DIR", "/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results"
+    ),
   )
 
 
