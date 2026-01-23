@@ -3,11 +3,12 @@
 TESTING:
 JAX_DEBUG_NANS=True \
 JAX_DISABLE_JIT=1 \
+HYDRA_FULL_ERROR=1 \
 RL_RESULTS_DIR=/tmp/rl_results \
-HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue jaxmaze_trainer.py \
-  app.debug=False \
+JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue jaxmaze_trainer.py \
+  app.debug=True \
   app.wandb=True \
-  app.search=preplay
+  app.search=her
 
 RUNNING ON SLURM:
 RL_RESULTS_DIR=/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results \

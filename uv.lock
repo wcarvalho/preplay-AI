@@ -3326,6 +3326,9 @@ gpu = [
     { name = "jaxlib", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "jaxlib", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
+jupyter = [
+    { name = "jupyter" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -3349,6 +3352,7 @@ requires-dist = [
     { name = "jaxmaze", editable = "libraries/jaxmaze" },
     { name = "jaxneurorl", editable = "libraries/jaxneurorl" },
     { name = "jupyter", specifier = ">=1.1.1" },
+    { name = "jupyter", marker = "extra == 'jupyter'" },
     { name = "mctx", specifier = ">=0.0.5" },
     { name = "numpy" },
     { name = "omegaconf" },
@@ -3362,7 +3366,7 @@ requires-dist = [
     { name = "typing-extensions", specifier = ">=4.11.0" },
     { name = "wandb" },
 ]
-provides-extras = ["gpu", "dev"]
+provides-extras = ["gpu", "jupyter", "dev"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "ruff" }]
