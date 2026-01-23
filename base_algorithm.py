@@ -1259,7 +1259,9 @@ def make_train(
     ##############################
     # WARMUP PHASE: fill buffer before learning
     ##############################
-    warmup_steps = config["LEARNING_STARTS"] // config["NUM_ENVS"] // config["TRAINING_INTERVAL"]
+    warmup_steps = (
+      config["LEARNING_STARTS"] // config["NUM_ENVS"] // config["TRAINING_INTERVAL"]
+    )
     # Ensure buffer has enough data to sample
     min_warmup = (sample_sequence_length // config["TRAINING_INTERVAL"]) + 1
     warmup_steps = max(warmup_steps, min_warmup)
@@ -1274,7 +1276,9 @@ def make_train(
         env_params=train_env_params,
       )
       train_state = runner_state.train_state
-      timesteps = train_state.timesteps + config["NUM_ENVS"] * config["TRAINING_INTERVAL"]
+      timesteps = (
+        train_state.timesteps + config["NUM_ENVS"] * config["TRAINING_INTERVAL"]
+      )
       train_state = train_state.replace(timesteps=timesteps)
 
       buffer_traj_batch = jax.tree_util.tree_map(
@@ -1315,7 +1319,9 @@ def make_train(
     # Adjust num_chunks to not exceed total steps
     num_chunks = num_train_steps // inner_steps
 
-    print(f"Training: {num_train_steps} updates in {num_chunks} chunks of {inner_steps} steps")
+    print(
+      f"Training: {num_train_steps} updates in {num_chunks} chunks of {inner_steps} steps"
+    )
 
     def _train_step(carry, unused):
       del unused
@@ -1334,7 +1340,9 @@ def make_train(
       train_state = runner_state.train_state
       buffer_state = runner_state.buffer_state
 
-      timesteps = train_state.timesteps + config["NUM_ENVS"] * config["TRAINING_INTERVAL"]
+      timesteps = (
+        train_state.timesteps + config["NUM_ENVS"] * config["TRAINING_INTERVAL"]
+      )
       train_state = train_state.replace(timesteps=timesteps)
 
       # 2. Add to buffer (swap axes: num_steps x num_envs -> num_envs x num_steps)
@@ -1357,7 +1365,7 @@ def make_train(
       train_state = jax.lax.cond(
         train_state.n_updates % config["TARGET_UPDATE_INTERVAL"] == 0,
         lambda train_state: train_state.replace(
-          target_network_params=jax.tree.map(lambda x: jnp.copy(x), train_state.params)
+          target_network_params=train_state.params,
         ),
         lambda train_state: train_state,
         operand=train_state,
@@ -1421,7 +1429,6 @@ def make_train(
           idx=chunk // 10,
           n_updates=int(runner_state.train_state.n_updates),
         )
-
 
     # Final eval
     jit_eval(runner_state)

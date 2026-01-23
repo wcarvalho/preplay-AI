@@ -12,7 +12,6 @@ from networks import (
   CraftaxMultiGoalObsEncoder,
   CraftaxObsEncoder,
 )
-from base_algorithm import TimeStep
 from visualizer import plot_frames
 from craftax.craftax.renderer import render_craftax_pixels
 from craftax.craftax.constants import BLOCK_PIXEL_SIZE_IMG, Achievement, Action
@@ -34,7 +33,8 @@ import rlax
 import wandb
 from flax import struct
 from gymnax.environments import environment
-import base_algorithm as base
+from base_algorithm2 import TimeStep
+import base_algorithm2 as base
 
 make_optimizer = base.make_optimizer
 make_actor = base.make_actor
@@ -49,19 +49,19 @@ RNNInput = base.RNNInput
 
 ENVIRONMENT_TO_GOAL_FNS = {
   "jaxmaze": (
-    lambda t: t.observation.task_w,
-    lambda t: t.observation.state_features,
-    lambda t: t.observation.position,  # jaxmaze uses .position
+    lambda t: jax.lax.stop_gradient(t.observation.task_w),
+    lambda t: jax.lax.stop_gradient(t.observation.state_features),
+    lambda t: jax.lax.stop_gradient(t.observation.player_position),
   ),
   "craftax-multigoal": (
-    lambda t: t.observation.task_w,
-    lambda t: t.observation.state_features,
-    lambda t: t.observation.player_position,
+    lambda t: jax.lax.stop_gradient(t.observation.task_w),
+    lambda t: jax.lax.stop_gradient(t.observation.state_features),
+    lambda t: jax.lax.stop_gradient(t.observation.player_position),
   ),
   "craftax-gen": (
-    lambda t: jnp.ones_like(t.observation.achievements),
-    lambda t: t.observation.achievements,
-    lambda t: t.observation.player_position,
+    lambda t: jax.lax.stop_gradient(jnp.ones_like(t.observation.achievements)),
+    lambda t: jax.lax.stop_gradient(t.observation.achievements),
+    lambda t: jax.lax.stop_gradient(t.observation.player_position),
   ),
 }
 
@@ -93,9 +93,6 @@ class RnnAgent(nn.Module):
   task_encoder: nn.Module
   goal_from_timestep: Callable[[TimeStep], jax.Array]
 
-  def setup(self):
-    self.q_embed = nn.Sequential([nn.Dense(256), nn.relu])
-
   def initialize(self, x: TimeStep):
     """Only used for initialization."""
 
@@ -113,51 +110,51 @@ class RnnAgent(nn.Module):
 
     new_rnn_state, rnn_out = self.rnn(rnn_state, rnn_in, _rng)
     goal_embedding = jax.vmap(self.task_encoder)(self.goal_from_timestep(x))
-    q_in = jnp.concatenate((rnn_out, goal_embedding), axis=-1)
 
-    q_vals = self.q_fn(self.q_embed(q_in))
+    q_vals = jax.vmap(self.q_fn)(rnn_out, goal_embedding)
 
     return Predictions(
       q_vals=q_vals,
       rnn_states=rnn_out,
     ), new_rnn_state
 
-  def unroll(
-    self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey, goal: Optional[Goal] = None
-  ):
+  def unroll(self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey):
+    """
+    Docstring for unroll
+
     # rnn_state: [B, D]
-    # xs: [T, B] or [T]
-    ref = rnn_state[0]
-    has_batch = ref.ndim == 2
-    assert ref.ndim in (1, 2), f"leading dims: {ref.shape[:-1]}"
+    # xs: [T, B, ...]
+    """
 
-    observation_encoder = self.observation_encoder
-    q_fn = self.q_fn
-    task_encoder = jax.vmap(self.task_encoder)
+    # observations
+    embedding = nn.BatchApply(self.observation_encoder)(xs.observation)
 
-    if has_batch:
-      observation_encoder = nn.BatchApply(observation_encoder)
-      q_fn = nn.BatchApply(q_fn)
-      task_encoder = jax.vmap(task_encoder)
-
-    if goal is None:
-      goal = self.goal_from_timestep(xs)
-
-    embedding = observation_encoder(xs.observation)
-
+    # RNN
     rng, _rng = jax.random.split(rng)
     rnn_in = RNNInput(obs=embedding, reset=xs.first())
     new_rnn_state, rnn_out = self.rnn.unroll(rnn_state, rnn_in, _rng)
 
-    goal_embedding = task_encoder(goal)
+    # Goal
+    goal: Goal = self.goal_from_timestep(xs)
+    goal_embedding = jax.vmap(jax.vmap(self.task_encoder))(goal)
 
-    q_in = jnp.concatenate((rnn_out, goal_embedding), axis=-1)
-    q_vals = q_fn(self.q_embed(q_in))
+    # Q values
+    q_vals = jax.vmap(jax.vmap(self.q_fn))(rnn_out, goal_embedding)
 
     return Predictions(
       q_vals=q_vals,
       rnn_states=rnn_out,
     ), new_rnn_state
+
+  def apply_q(self, rnn_out, goal: Goal):
+    """
+    rnn_out [T, D],
+    goal [T, D],
+    """
+    goal_embedding = jax.vmap(self.task_encoder)(goal)
+    q_vals = jax.vmap(self.q_fn)(rnn_out, goal_embedding)
+
+    return Predictions(q_vals=q_vals, rnn_states=rnn_out)
 
   def initialize_carry(self, *args, **kwargs):
     """Initializes the RNN state."""
@@ -175,7 +172,7 @@ def is_truncated(timestep):
 
   # truncated is discount=1 on AND is last
   truncated = (non_terminal + is_last) > 1
-  return make_float(1 - truncated)
+  return jax.lax.stop_gradient(make_float(1 - truncated))
 
 
 def episode_finished_mask(timesteps):
@@ -185,7 +182,7 @@ def episode_finished_mask(timesteps):
   # time-step of termination and everything afterwards is masked out
   term_cumsum_t = jnp.cumsum(is_last_t, 0)
   loss_mask_t = make_float((term_cumsum_t + timesteps.discount) < 2)
-  return loss_mask_t
+  return jax.lax.stop_gradient(loss_mask_t)
 
 
 @struct.dataclass
@@ -244,7 +241,10 @@ class HerLossFn(base.RecurrentLossFn):
     batch_loss = 0.5 * jnp.square(batch_td_error)
 
     # []
-    batch_loss_mean = (batch_loss * loss_mask[:-1]).sum(0) / loss_mask[:-1].sum(0)
+    assert batch_loss.ndim == 1, "only coded for T dimension"
+    batch_loss_mean = (batch_loss * loss_mask[:-1]).sum(0) / (
+      loss_mask[:-1].sum(0) + 1e-5
+    )
 
     metrics = {
       "0.q_loss": batch_loss.mean(),
@@ -294,24 +294,29 @@ class HerLossFn(base.RecurrentLossFn):
     }
     T, B = loss_mask.shape[:2]
 
-    # [B, T-1], [T], [B, T], [B, T]
+    # [T, B, ...] reward info
+    online_reward_info = self.online_reward_fn(data.timestep)
+
+    # [B, T-1], [T], [B, T], [B, T, D]
     td_error, loss, metrics, log_info = jax.vmap(self.loss_fn, 1, 0)(
       data.timestep,
       online_preds,
       target_preds,
       data.action,
-      self.online_reward_fn(data.timestep),
+      online_reward_info['reward'],
       make_float(data.timestep.last()),
       data.timestep.discount,
       loss_mask,
     )
     # [B, T] --> [T, B]
     td_error = jnp.swapaxes(td_error, 0, 1)
+
+    swap = lambda x: jnp.swapaxes(x, 0, 1)
+    log_info["reward_info"] = jax.tree.map(swap, online_reward_info)
+
     # first label online loss with online
     all_metrics.update({f"{k}/online": v for k, v in metrics.items()})
     all_log_info["online"] = log_info
-    td_error = jnp.concatenate((td_error, jnp.zeros(B)[None]), 0)
-    td_error = jnp.abs(td_error)
 
     if self.her_coeff < 1e-5:
       return td_error, loss, all_metrics
@@ -324,7 +329,7 @@ class HerLossFn(base.RecurrentLossFn):
     new_goals = jax.vmap(self.sample_goals, (1, 0), 1)(data.timestep, key_grad[1:])
 
     # 2. Compute Q-values for new goals
-    def her_loss(
+    def her_loss_fn(
       new_goal: Union[
         jnp.ndarray,
         struct.PyTreeNode,
@@ -333,8 +338,8 @@ class HerLossFn(base.RecurrentLossFn):
       timestep,
       actions,
       loss_mask,
-      online_state,
-      target_state,
+      online_preds,
+      target_preds,
     ):
       """new_goal is [D], sub_key_grad is [2], loss_mask is [T]"""
 
@@ -347,44 +352,48 @@ class HerLossFn(base.RecurrentLossFn):
 
       # [T, ...], [2], [T, D]
       inputs = (timestep, sub_key_grad_, expanded_new_goal)
-      unroll = functools.partial(self.network.apply, method=self.network.unroll)
-      # TODO: remove unroll, add a function that 
-      online_preds, _ = unroll(params, online_state, *inputs)
-      target_preds, _ = unroll(target_params, target_state, *inputs)
 
-      reward = self.her_reward_fn(timestep, new_goal)
-      return self.loss_fn(
+      apply_q = functools.partial(self.network.apply, method=self.network.apply_q)
+      online_preds = apply_q(params, online_preds.rnn_states, expanded_new_goal)
+      target_preds = apply_q(target_params, target_preds.rnn_states, expanded_new_goal)
+
+      her_reward_info = self.her_reward_fn(timestep, new_goal)
+      td_error, batch_loss, metrics, log_info = self.loss_fn(
         timestep=timestep,
         online_preds=online_preds,
         target_preds=target_preds,
         actions=actions,
-        rewards=reward,
+        rewards=her_reward_info['reward'],
         is_last=make_float(timestep.last()),
         non_terminal=timestep.discount,
         loss_mask=loss_mask,
       )
+      log_info["reward_info"] = her_reward_info  # [T, ...]
+      return td_error, batch_loss, metrics, log_info
 
-    her_loss = jax.vmap(her_loss, (0, 0, None, None, None, None, None))
-    her_loss = jax.vmap(her_loss, (1, 1, 1, 1, 1, 0, 0), 0)
+    her_loss_fn = jax.vmap(her_loss_fn, (0, 0, None, None, None, None, None))
+    her_loss_fn = jax.vmap(her_loss_fn, 1, 0)
 
     key_grad = jax.random.split(key_grad[0], self.ngoals * B).reshape(
       self.ngoals, B, -1
     )
 
-    # [T, N]
-    _, her_loss, her_metrics, her_log_info = her_loss(
+    # [B, N, T], [B, N], [B, N, T], [B, N, T, D]
+    _, her_loss, her_metrics, her_log_info = her_loss_fn(
       new_goals,  # [N, B, D]
       key_grad,  # [N, B, 2]
       data.timestep,  # [T, B, D]
       data.action,  # [T, B]
       episode_finished_mask(data.timestep),  # [T, B]
-      online_state,  # [B, D]
-      target_state,  # [B, D]
+      online_preds,  # [T, B, D]
+      target_preds,  # [T, B, D]
     )
 
     loss = loss + self.her_coeff * her_loss.mean(1)
     all_metrics.update({f"{k}/her": v for k, v in her_metrics.items()})
-    all_log_info["her"] = her_log_info
+    all_log_info["her"] = jax.tree.map(
+      # only first goal
+      lambda x:x[:, 0], her_log_info)
     if self.logger.learner_log_extra is not None:
       self.logger.learner_log_extra(all_log_info)
 
@@ -394,24 +403,75 @@ class HerLossFn(base.RecurrentLossFn):
 ############################################
 # Environment Specific
 ############################################
-
-
 def make_loss_fn_class(config) -> base.RecurrentLossFn:
-  task_vector_fn, achievement_fn, position_fn = ENVIRONMENT_TO_GOAL_FNS[config["ENV"]]
+
+  def online_reward_fn(timesteps):
+    task_vector_fn, achievement_fn, position_fn = ENVIRONMENT_TO_GOAL_FNS[config["ENV"]]
+    task_vector = task_vector_fn(timesteps).astype(jnp.float32)
+    achievements = achievement_fn(timesteps).astype(jnp.float32)
+    goal_reward = (task_vector * achievements).sum(-1)
+
+    reward = 0.5 * goal_reward
+    reward = jax.tree.map(jax.lax.stop_gradient, reward)
+    return {
+      'reward': reward,
+      'goal_reward': goal_reward,
+      'goal_task_vector': task_vector,
+      'goal_achievements': achievements,
+    }
+
+  def her_reward_fn(timesteps, new_goal):
+    task_vector_fn, achievement_fn, position_fn = ENVIRONMENT_TO_GOAL_FNS[config["ENV"]]
+
+    # achievement reward
+    goal_task_vector = new_goal.goal  # [D]
+    goal_achievements = achievement_fn(timesteps)  # [T, D]
+    goal_reward = (goal_task_vector[None] * goal_achievements).sum(-1)  # [T]
+
+    # position reward
+    position = new_goal.position  # [2]
+    position_achievement = position_fn(timesteps)  # [T, 2]
+    position_reward = jax.vmap(jnp.equal, (None, 0))(position, position_achievement)
+    position_reward = position_reward.all(-1).astype(jnp.float32)
+
+    assert goal_reward.ndim == 1
+    assert position_reward.ndim == 1
+    reward = (
+      0.5 * position_reward +
+      0.5 * goal_reward
+    )
+    reward = jax.tree.map(jax.lax.stop_gradient, reward)
+
+    T = goal_achievements.shape[0]
+    goal_task_vector_tiled = jnp.tile(goal_task_vector[None], [T, 1])  # [T, D]
+    position_tiled = jnp.tile(position[None], [T, 1])  # [T, 2]
+
+    return {
+      'reward': reward,
+      'goal_reward': goal_reward,
+      'goal_task_vector': goal_task_vector_tiled,
+      'goal_achievements': goal_achievements,
+      'position_reward': position_reward,
+      'position_task_vector': position_tiled,
+      'position_achievement': position_achievement,
+    }
 
   def sample_goals(timesteps, rng):
     """
     There is data at T time-points. We want to"""
     # T, C
+    task_vector_fn, achievement_fn, position_fn = ENVIRONMENT_TO_GOAL_FNS[config["ENV"]]
+
     achievements = achievement_fn(timesteps)
-    # T
+    # T, if vector non-zero, achieved
     goal_achieved = achievements.sum(-1)
 
+    # all positions were achieved
     position_achieved = jnp.ones_like(goal_achieved)
 
     # T
     logits = config["GOAL_BETA"] * goal_achieved + position_achieved
-    probabilities = logits / jnp.sum(logits, axis=-1, keepdims=True)
+    probabilities = logits / (jnp.sum(logits, axis=-1, keepdims=True) + 1e-5)
 
     # N
     indices = Categorical(probs=probabilities).sample(
@@ -429,31 +489,11 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     assert positions_at_indices.shape[0] == features_at_indices.shape[0]
     assert positions_at_indices.shape[1] == 2
     return GoalPosition(
-      features_at_indices,
-      positions_at_indices + 1,  # reserve 0 for empty position
+      jax.lax.stop_gradient(features_at_indices),
+      # reserve 0 for empty position
+      jax.lax.stop_gradient(positions_at_indices) + 1,
     )
 
-  def online_reward_fn(timesteps):
-    task_vector = task_vector_fn(timesteps).astype(jnp.float32)
-    achievements = achievement_fn(timesteps).astype(jnp.float32)
-    goal_reward = (task_vector * achievements).sum(-1)
-
-    return 0.5 * goal_reward
-
-  def her_reward_fn(timesteps, new_goal):
-    # position reward
-    position = new_goal.position
-    player_position = position_fn(timesteps)
-    position_reward = (player_position == position).all(1).astype(jnp.float32)
-
-    # achievement reward
-    goal = new_goal.goal
-    achievements = achievement_fn(timesteps)
-    goal_reward = (goal * achievements).sum(-1)
-
-    assert goal_reward.ndim == 1
-    assert position_reward.ndim == 1
-    return 0.5 * position_reward + 0.5 * goal_reward
 
   return functools.partial(
     HerLossFn,
@@ -480,25 +520,19 @@ def craftax_render_fn(state):
   return image / 255.0
 
 
-def create_data_plots(d_, env_name, n_rows_fig1=3):
+def create_data_plots(d_, reward_info, is_her=False):
   """Create reward computation and training metrics plots.
 
   Args:
     d_: Dictionary with processed data (batch dimension already removed)
-    env_name: Name of the environment (e.g., 'jaxmaze', 'craftax')
-    n_rows_fig1: Number of rows in the first figure (default 3).
+    reward_info: Dictionary with reward computation info (all values [T, ...])
+    is_her: If True, plot both goal and position columns (2-col layout)
 
   Returns:
     (fig1, axes1, fig2, axes2): The two figures and their axes arrays.
   """
-  # Get task_vector and achievements for reward debugging
-  task_vector_fn, achievement_fn, _ = ENVIRONMENT_TO_GOAL_FNS[env_name]
-  timesteps = d_["timesteps"]
-  task_vector = task_vector_fn(timesteps)  # [T, D] - binary vectors
-  achievements = achievement_fn(timesteps)  # [T, D] - binary vectors
-  data_rewards = d_["timesteps"].reward
-  computed_rewards = (task_vector * achievements).sum(-1)
 
+  data_rewards = d_["timesteps"].reward
   discounts = d_["timesteps"].discount
   actions = d_["actions"]
   q_values = d_["q_values"]
@@ -510,10 +544,10 @@ def create_data_plots(d_, env_name, n_rows_fig1=3):
   width = 0.3
   nT = len(data_rewards)
   height = 3
-  fig_width = max(2, int(width * nT))  # Ensure minimum width of 2
+  fig_width = max(2, int(width * nT))
 
   # Helper function for formatting axes
-  def format(ax):
+  def format_ax(ax):
     ax.set_xlabel("Time")
     ax.grid(True)
     ax.set_xticks(range(0, len(data_rewards), 1))
@@ -521,31 +555,66 @@ def create_data_plots(d_, env_name, n_rows_fig1=3):
   ##############################
   # Plot 1: Reward Computation
   ##############################
-  fig1, axes1 = plt.subplots(n_rows_fig1, 1, figsize=(fig_width, height * n_rows_fig1))
-  ax1a, ax1b, ax1c = axes1[0], axes1[1], axes1[2]
-
-  # Task vector (binary heatmap)
-  im = ax1a.imshow(
-    task_vector.T, aspect="auto", cmap="viridis", interpolation="nearest"
+  n_rows = 3
+  n_cols = 2 if is_her else 1
+  fig1, axes1 = plt.subplots(
+    n_rows, n_cols, figsize=(fig_width * n_cols, height * n_rows)
   )
-  ax1a.set_title("Task Vector")
-  ax1a.set_ylabel("Dims")
-  format(ax1a)
+  if n_cols == 1:
+    axes1 = axes1[:, None]  # make 2D for uniform indexing
 
-  # Achievements (binary heatmap)
-  im = ax1b.imshow(
-    achievements.T, aspect="auto", cmap="viridis", interpolation="nearest"
+  # Column 0: goal reward info
+  ax = axes1[0, 0]
+  ax.plot(reward_info['goal_reward'], label="Goal Reward")
+  ax.set_title("Goal Reward")
+  ax.legend()
+  format_ax(ax)
+
+  ax = axes1[1, 0]
+  ax.imshow(
+    reward_info['goal_task_vector'].T, aspect="auto", cmap="viridis",
+    interpolation="nearest"
   )
-  ax1b.set_title("Achievements")
-  ax1b.set_ylabel("Dims")
-  format(ax1b)
+  ax.set_title("Goal Task Vector")
+  ax.set_ylabel("Dims")
+  format_ax(ax)
 
-  # Rewards comparison
-  ax1c.plot(data_rewards, label="Environment Rewards")
-  ax1c.plot(computed_rewards, label="Computed Rewards")
-  ax1c.set_title("Rewards")
-  ax1c.legend()
-  format(ax1c)
+  ax = axes1[2, 0]
+  ax.imshow(
+    reward_info['goal_achievements'].T, aspect="auto", cmap="viridis",
+    interpolation="nearest"
+  )
+  ax.set_title("Goal Achievements")
+  ax.set_ylabel("Dims")
+  format_ax(ax)
+
+  if is_her:
+    # Column 1: position reward info
+    ax = axes1[0, 1]
+    ax.plot(reward_info['position_reward'], label="Position Reward")
+    ax.set_title("Position Reward")
+    ax.legend()
+    format_ax(ax)
+
+    ax = axes1[1, 1]
+    ax.imshow(
+      reward_info['position_task_vector'].T, aspect="auto", cmap="viridis",
+      interpolation="nearest"
+    )
+    ax.set_title("Position Task Vector")
+    ax.set_ylabel("Dims")
+    format_ax(ax)
+
+    ax = axes1[2, 1]
+    ax.imshow(
+      reward_info['position_achievement'].T, aspect="auto", cmap="viridis",
+      interpolation="nearest"
+    )
+    ax.set_title("Position Achievement")
+    ax.set_ylabel("Dims")
+    format_ax(ax)
+
+  fig1.tight_layout()
 
   ##############################
   # Plot 2: Training Metrics
@@ -554,18 +623,17 @@ def create_data_plots(d_, env_name, n_rows_fig1=3):
   ax2a, ax2b, ax2c = axes2[0], axes2[1], axes2[2]
 
   # Rewards, Q-values, Q-targets
-  ax2a.plot(data_rewards, label="Environment Rewards")
-  ax2a.plot(computed_rewards, label="Computed Rewards")
+  ax2a.plot(reward_info['goal_reward'], label="Goal Reward")
   ax2a.plot(q_values_taken, label="Q-Values")
   ax2a.plot(q_target, label="Q-Targets")
   ax2a.set_title("Rewards and Q-Values")
   ax2a.legend()
-  format(ax2a)
+  format_ax(ax2a)
 
   # TD errors
   ax2b.plot(td_errors)
   ax2b.set_title("TD Errors")
-  format(ax2b)
+  format_ax(ax2b)
 
   # Episode markers
   is_last = d_["timesteps"].last()
@@ -573,7 +641,9 @@ def create_data_plots(d_, env_name, n_rows_fig1=3):
   ax2c.plot(is_last, label="is_last")
   ax2c.set_title("Episode Markers")
   ax2c.legend()
-  format(ax2c)
+  format_ax(ax2c)
+
+  fig2.tight_layout()
 
   return fig1, axes1, fig2, axes2
 
@@ -586,29 +656,15 @@ def jaxmaze_learner_log_fn(
   extract_task_info: Callable[[TimeStep], flax.struct.PyTreeNode] = lambda t: t,
   get_task_name: Callable = lambda t: "Task",
 ):
-  def callback(d):
-    # Extract the relevant data
-    # only use data from batch dim = 0
-    # [B, T, ...] --> # [T, ...]
+  def plot_individual(d, setting: str):
+    is_her = (setting == "her")
+    # [B, T, ...] --> [T, ...]
     d_ = jax.tree_util.tree_map(lambda x: x[0], d)
+    reward_info = d_["reward_info"]
 
-    # Create standard plots with 4th subplot for trajectory
-    fig1, axes1, fig2, axes2 = create_data_plots(d_, config["ENV"], n_rows_fig1=4)
+    fig1, axes1, fig2, axes2 = create_data_plots(d_, reward_info, is_her=is_her)
 
-    # Formatting: no titles, use ylabels instead
-    axes1[0].set_title("")
-    axes1[0].set_ylabel("task vector")
-    axes1[0].set_xlabel("")
-    axes1[0].set_xticks([])
-
-    axes1[1].set_title("")
-    axes1[1].set_ylabel("achievements")
-    axes1[1].set_xlabel("")
-    axes1[1].set_xticks([])
-
-    axes1[2].set_title("")
-
-    # Populate 4th subplot with trajectory arrows
+    # Trajectory in its own figure
     timesteps: TimeStep = d_["timesteps"]
     actions = d_["actions"]
     maze_height, maze_width, _ = timesteps.state.grid[0].shape
@@ -627,6 +683,7 @@ def jaxmaze_learner_log_fn(
     initial_state = index(timesteps.state, 0)
     img = render_fn(initial_state)
 
+    fig3, ax3 = plt.subplots(1, 1, figsize=(6, 6))
     renderer.place_arrows_on_image(
       img,
       episode_positions,
@@ -634,68 +691,61 @@ def jaxmaze_learner_log_fn(
       maze_height,
       maze_width,
       arrow_scale=5,
-      ax=axes1[3],
+      ax=ax3,
     )
-    axes1[3].axis("off")
-
-    fig1.tight_layout()
+    ax3.axis("off")
+    fig3.tight_layout()
 
     if wandb.run is not wandb.sdk.lib.disabled.RunDisabled:
-      wandb.log({
-        "learner_example/reward_computation": wandb.Image(fig1),
-        "learner_example/training_metrics": wandb.Image(fig2),
-      })
+      wandb.log(
+        {
+          f"learner_example/{setting}/reward_computation": wandb.Image(fig1),
+          f"learner_example/{setting}/training_metrics": wandb.Image(fig2),
+          f"learner_example/{setting}/trajectory": wandb.Image(fig3),
+        }
+      )
     plt.close(fig1)
     plt.close(fig2)
+    plt.close(fig3)
 
   # this will be the value after update is applied
   n_updates = data["n_updates"] + 1
   is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
 
+  def plot_both(d):
+    plot_individual(d["online"], "online")
+    plot_individual(d["her"], "her")
+
   jax.lax.cond(
     is_log_time,
-    lambda d: jax.debug.callback(callback, d["online"]),
+    lambda d: jax.debug.callback(plot_both, d),
     lambda d: None,
     data,
   )
 
 
 def crafax_learner_log_fn(data: dict, config: dict):
-  def callback(d):
-    # Extract the relevant data
-    # only use data from batch dim = 0
-    # [T, B, ...] --> # [T, ...]
-    d_ = jax.tree_util.tree_map(lambda x: x[:, 0], d)
+  def plot_individual(d, setting: str):
+    is_her = (setting == "her")
+    # [B, T, ...] --> [T, ...]
+    d_ = jax.tree_util.tree_map(lambda x: x[0], d)
+    reward_info = d_["reward_info"]
 
-    # Create standard plots
-    fig1, axes1, fig2, axes2 = create_data_plots(d_, config["ENV"])
+    fig1, axes1, fig2, axes2 = create_data_plots(d_, reward_info, is_her=is_her)
 
-    # Extract data for trajectory plotting
-    rewards = d_["timesteps"].reward
-    actions = d_["actions"]
-
-    ##############################
-    # plot images of env
-    ##############################
-    # timestep = jax.tree_util.tree_map(lambda x: jnp.array(x), d_['timesteps'])
+    # Trajectory: craftax pixel rendering
     timesteps: TimeStep = d_["timesteps"]
-
-    # ------------
-    # get images
-    # ------------
+    rewards = timesteps.reward
+    actions = d_["actions"]
 
     obs_images = []
     max_len = min(config.get("MAX_EPISODE_LOG_LEN", 40), len(rewards))
     for idx in range(max_len):
-
-      def index(y):
-        return jax.tree_util.tree_map(lambda x: x[idx], y)
-
-      obs_image = craftax_render_fn(index(d_["timesteps"].state.env_state))
+      def index(y, i=idx):
+        return jax.tree_util.tree_map(lambda x: x[i], y)
+      obs_image = craftax_render_fn(index(timesteps.state.env_state))
       obs_images.append(obs_image)
-    # ------------
-    # plot
-    # ------------
+
     actions_taken = [Action(a).name for a in actions]
 
     def panel_title_fn(timesteps, i):
@@ -706,7 +756,6 @@ def crafax_learner_log_fn(data: dict, config: dict):
       title += (
         f"\nr={timesteps.reward[i + 1]:.2f}, $\\gamma={timesteps.discount[i + 1]}$"
       )
-
       if hasattr(timesteps.observation, "achievements"):
         achieved = timesteps.observation.achievements[i + 1]
         if achieved.sum() > 1e-5:
@@ -723,34 +772,44 @@ def crafax_learner_log_fn(data: dict, config: dict):
         title += f"\nstart={start_location}\ngoal={goal}\ngoal={goal_name}"
       return title
 
-    fig = plot_frames(
+    fig3 = plot_frames(
       timesteps=timesteps,
       frames=obs_images,
       panel_title_fn=panel_title_fn,
       ncols=6,
     )
+
     if wandb.run is not wandb.sdk.lib.disabled.RunDisabled:
-      wandb.log({
-        "learner_example/reward_computation": wandb.Image(fig1),
-        "learner_example/training_metrics": wandb.Image(fig2),
-        "learner_example/trajectory": wandb.Image(fig),
-      })
+      wandb.log(
+        {
+          f"learner_example/{setting}/reward_computation": wandb.Image(fig1),
+          f"learner_example/{setting}/training_metrics": wandb.Image(fig2),
+          f"learner_example/{setting}/trajectory": wandb.Image(fig3),
+        }
+      )
     plt.close(fig1)
     plt.close(fig2)
-    plt.close(fig)
+    plt.close(fig3)
+
+  def plot_both(d):
+    plot_individual(d["online"], "online")
+    plot_individual(d["her"], "her")
 
   # this will be the value after update is applied
   n_updates = data["n_updates"] + 1
   is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
 
   jax.lax.cond(
-    is_log_time, lambda d: jax.debug.callback(callback, d), lambda d: None, data
+    is_log_time,
+    lambda d: jax.debug.callback(plot_both, d),
+    lambda d: None,
+    data,
   )
 
 
-class DuellingMLP(nn.Module):
+class DuellingDotMLP(nn.Module):
   hidden_dim: int
-  out_dim: int = 0
+  num_actions: int = 0
   num_layers: int = 1
   norm_type: str = "none"
   activation: str = "relu"
@@ -758,28 +817,31 @@ class DuellingMLP(nn.Module):
   use_bias: bool = False
 
   @nn.compact
-  def __call__(self, x, train: bool = False):
+  def __call__(self, x, task, train: bool = False):
+    task_dim = task.shape[-1]
     value_mlp = base.MLP(
       hidden_dim=self.hidden_dim,
       num_layers=self.num_layers,
       use_bias=self.use_bias,
-      out_dim=1,
+      out_dim=task_dim,
     )
     advantage_mlp = base.MLP(
       hidden_dim=self.hidden_dim,
       num_layers=self.num_layers,
       use_bias=self.use_bias,
-      out_dim=self.out_dim,
+      out_dim=self.num_actions * task_dim,
     )
-    assert self.out_dim > 0, "must have at least one action"
+    assert self.num_actions > 0, "must have at least one action"
 
-    value = value_mlp(x)  # [B, 1]
-    advantages = advantage_mlp(x)  # [B, A]
+    value = value_mlp(x)  # [C]
+    advantages = advantage_mlp(x)  # [A*C]
+    advantages = advantages.reshape(self.num_actions, task_dim)  # [A, C]
 
-    # Advantages have zero mean.
-    advantages -= jnp.mean(advantages, axis=-1, keepdims=True)  # [B, A]
+    # Advantages have zero mean across actions.
+    advantages -= jnp.mean(advantages, axis=0, keepdims=True)  # [A, C]
 
-    q_values = value + advantages  # [B, A]
+    sf = value[None, :] + advantages  # [A, C]
+    q_values = (sf * task[None, :]).sum(-1)  # [A]
 
     return q_values
 
@@ -792,7 +854,7 @@ class DuellingMLP(nn.Module):
 class TaskEncoder(nn.Module):
   """Task encoder for regular craftax setting"""
 
-  vocab_size: int = 128
+  vocab_size: int = 512
 
   @nn.compact
   def __call__(self, goal: GoalPosition):
@@ -803,7 +865,8 @@ class TaskEncoder(nn.Module):
 
     # position is categorical
     # [2, D]
-    position = jax.vmap(flax.linen.Embed(self.vocab_size, 128))(goal.position)
+    position = jax.vmap(
+      flax.linen.Embed(self.vocab_size, 128))(goal.position)
     return jnp.concatenate((task, position.reshape(-1)))
 
 
@@ -834,13 +897,13 @@ def make_craftax_agent(
       action_dim=env.action_space(env_params).n,
     ),
     rnn=rnn,
-    q_fn=DuellingMLP(
+    q_fn=DuellingDotMLP(
       hidden_dim=config.get("Q_HIDDEN_DIM", 512),
       num_layers=config.get("NUM_Q_LAYERS", 2),
-      out_dim=env.action_space(env_params).n,
+      num_actions=env.action_space(env_params).n,
       use_bias=config.get("USE_BIAS", True),
     ),
-    task_encoder=TaskEncoder(),
+    task_encoder=TaskEncoder(1_000),
     goal_from_timestep=partial(goal_from_env_timestep, env=config["ENV"]),
   )
 
@@ -874,12 +937,12 @@ def make_multigoal_craftax_agent(
       use_bias=config.get("USE_BIAS", True),
       action_dim=env.action_space(env_params).n,
     ),
-    task_encoder=TaskEncoder(),
+    task_encoder=TaskEncoder(1_000),
     rnn=rnn,
-    q_fn=DuellingMLP(
+    q_fn=DuellingDotMLP(
       hidden_dim=config.get("Q_HIDDEN_DIM", 512),
       num_layers=config.get("NUM_Q_LAYERS", 2),
-      out_dim=env.action_space(env_params).n,
+      num_actions=env.action_space(env_params).n,
       use_bias=config.get("USE_BIAS", True),
     ),
     goal_from_timestep=partial(goal_from_env_timestep, env=config["ENV"]),
@@ -921,13 +984,13 @@ def make_jaxmaze_agent(
       norm_type=config.get("NORM_TYPE", "none"),
     ),
     rnn=rnn,
-    q_fn=DuellingMLP(
+    q_fn=DuellingDotMLP(
       hidden_dim=config.get("Q_HIDDEN_DIM", 512),
       num_layers=config.get("NUM_Q_LAYERS", 1),
-      out_dim=env.num_actions(env_params),
-      use_bias=config.get("USE_BIAS", True),
+      num_actions=env.num_actions(env_params),
+      use_bias=config.get("USE_BIAS", False),
     ),
-    task_encoder=TaskEncoder(10_000),
+    task_encoder=TaskEncoder(100),
     goal_from_timestep=partial(goal_from_env_timestep, env="jaxmaze"),
   )
 

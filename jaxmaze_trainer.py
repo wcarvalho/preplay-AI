@@ -2,11 +2,11 @@
 
 TESTING:
 HYDRA_FULL_ERROR=1 \
-JAX_DEBUG_NANS=True \
 JAX_DISABLE_JIT=1 \
+JAX_DEBUG_NANS=True \
 RL_RESULTS_DIR=/tmp/rl_results \
 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue jaxmaze_trainer.py \
-  app.debug=False \
+  app.debug=True \
   app.wandb=True \
   app.search=her2
 
@@ -14,7 +14,7 @@ RUNNING ON SLURM:
 RL_RESULTS_DIR=/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results \
 JAX_PLATFORMS=cpu python jaxmaze_trainer.py \
   app.parallel=slurm \
-  app.search=her
+  app.search=her2
 """
 
 from typing import Any, Callable, Dict, Union, Optional, Tuple
@@ -38,13 +38,13 @@ from flax.traverse_util import flatten_dict, unflatten_dict
 
 import numpy as np
 
-#os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "true"
-#os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".90"  # Use 90% of the A100 VRAM
-#os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "true"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".90"  # Use 90% of the A100 VRAM
+os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
 
-## Use TF32 for matmuls (significant speedup on A100)
-#os.environ["XLA_FLAGS"] = "--xla_gpu_enable_latency_hiding_scheduler=true"
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+# Use TF32 for matmuls (significant speedup on A100)
+os.environ["XLA_FLAGS"] = "--xla_gpu_enable_latency_hiding_scheduler=true"
+# os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 
 from jaxneurorl.agents import value_based_basics as vbb
@@ -55,7 +55,6 @@ import qlearning_jaxmaze
 import usfa_jaxmaze
 import multitask_preplay_jaxmaze
 import her
-import base_algorithm
 import jaxmaze_observer as humansf_observers
 from jaxmaze.human_dyna import experiments as jaxmaze_experiments
 
@@ -377,7 +376,20 @@ def run_single(config: dict, save_path: str = None):
       all_tasks=all_tasks,
     )
   elif alg_name == "her":
-    train_fn = base_algorithm.make_train(
+    base_name = config.get("base", "vbb")
+    if base_name == "vbb":
+      base_maker = vbb
+    elif base_name == "base":
+      import base_algorithm
+
+      base_maker = base_algorithm
+    elif base_name == "base2":
+      import base_algorithm2
+
+      base_maker = base_algorithm2
+    else:
+      raise NotImplementedError(config["base"])
+    train_fn = base_maker.make_train(
       config=config,
       env=env,
       save_path=save_path,
@@ -426,9 +438,9 @@ def sweep(search: str = ""):
       "parameters": {
         "SEED": {"values": list(range(1))},
         "env.exp": {"values": ["exp4"]},
-        #"STEP_COST": {"values": [1e-4]},
+        # "STEP_COST": {"values": [1e-4]},
         # "FLOAT_OBS": {"values": [True]},
-        #"AGENT_RNN_DIM": {"values": [1024]},
+        # "AGENT_RNN_DIM": {"values": [1024]},
       },
       "overrides": ["alg=ql", "rlenv=jaxmaze", "user=wilka"],
       "group": "ql-12-test",
@@ -514,12 +526,12 @@ def sweep(search: str = ""):
         "SEED": {"values": [2]},
         "env.exp": {"values": ["exp4"]},
         "NUM_HER_GOALS": {"values": [1]},
-        "GOAL_BETA": {"values": [1.0, .1, 10.]},
-        "HER_COEFF": {"values": [1, .1, .01]},
-        #"LEARNER_EXTRA_LOG_PERIOD": {"values": [100]},
+        "GOAL_BETA": {"values": [1.0, 0.1, 10.0]},
+        "HER_COEFF": {"values": [1, 0.1, 0.01]},
+        # "LEARNER_EXTRA_LOG_PERIOD": {"values": [100]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-exp-4",
+      "group": "her-exp-5",
     }
   elif search == "her2":
     sweep_config = {
@@ -530,15 +542,16 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["her"]},
         "SEED": {"values": [2]},
-        "env.exp": {"values": ["her_test"]},
+        "env.exp": {"values": ["her_test", "exp4"]},
         "NUM_HER_GOALS": {"values": [1]},
         "HER_COEFF": {"values": [1.0, 0.0]},
-        #"GOAL_BETA": {"values": [1.0, .1, 10.]},
-        #"HER_COEFF": {"values": [1, .1, .01]},
-        #"LEARNER_EXTRA_LOG_PERIOD": {"values": [100]},
+        "base": {"values": ["vbb"]},
+        # "GOAL_BETA": {"values": [1.0, .1, 10.]},
+        # "HER_COEFF": {"values": [1, .1, .01]},
+        # "LEARNER_EXTRA_LOG_PERIOD": {"values": [100]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-sanity-6",
+      "group": "her-sanity-fast-OS-settings-10",
     }
   # elif search == "dynaq_shared":
   #  sweep_config = {

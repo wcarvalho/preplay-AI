@@ -10,10 +10,8 @@
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Create virtual environment and install dependencies
+ uv venv --clear --python 3.12
 uv sync
-
-# For CUDA 12
-uv sync --extra gpu
 ```
 
 ### Running scripts

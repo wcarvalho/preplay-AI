@@ -3291,8 +3291,8 @@ dependencies = [
     { name = "gymnax" },
     { name = "hydra-core" },
     { name = "ipdb" },
-    { name = "jax", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "jax", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "jax", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12"], marker = "python_full_version < '3.11'" },
+    { name = "jax", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12"], marker = "python_full_version >= '3.11'" },
     { name = "jaxlib", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "jaxlib", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "jaxmaze" },
@@ -3317,16 +3317,8 @@ dependencies = [
 [package.optional-dependencies]
 dev = [
     { name = "ipywidgets" },
-    { name = "polars" },
-]
-gpu = [
-    { name = "jax", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12"], marker = "python_full_version < '3.11'" },
-    { name = "jax", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12"], marker = "python_full_version >= '3.11'" },
-    { name = "jaxlib", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "jaxlib", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-]
-jupyter = [
     { name = "jupyter" },
+    { name = "polars" },
 ]
 
 [package.dev-dependencies]
@@ -3344,13 +3336,11 @@ requires-dist = [
     { name = "hydra-core" },
     { name = "ipdb" },
     { name = "ipywidgets", marker = "extra == 'dev'" },
-    { name = "jax", specifier = ">=0.4.20" },
-    { name = "jax", extras = ["cuda12"], marker = "extra == 'gpu'", specifier = ">=0.4.20" },
+    { name = "jax", extras = ["cuda12"], specifier = ">=0.4.20" },
     { name = "jaxlib", specifier = ">=0.4.20" },
-    { name = "jaxlib", marker = "extra == 'gpu'", specifier = ">=0.4.20" },
     { name = "jaxmaze", editable = "libraries/jaxmaze" },
     { name = "jaxneurorl", editable = "libraries/jaxneurorl" },
-    { name = "jupyter", marker = "extra == 'jupyter'" },
+    { name = "jupyter", marker = "extra == 'dev'" },
     { name = "mctx", specifier = ">=0.0.5" },
     { name = "numpy" },
     { name = "omegaconf" },
@@ -3364,7 +3354,7 @@ requires-dist = [
     { name = "typing-extensions", specifier = ">=4.11.0" },
     { name = "wandb" },
 ]
-provides-extras = ["gpu", "jupyter", "dev"]
+provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "ruff" }]

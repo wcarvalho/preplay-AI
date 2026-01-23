@@ -9,7 +9,7 @@ authors = [
 ]
 dependencies = [
     # JAX ecosystem
-    "jax>=0.4.20",
+    "jax[cuda12]>=0.4.20",
     "jaxlib>=0.4.20",
     "flax>=0.8.4",
     "optax>=0.2.1",
@@ -39,14 +39,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gpu = [
-    "jax[cuda12]>=0.4.20",
-    "jaxlib>=0.4.20"
-]
-jupyter = [
-    "jupyter",
-]
 dev = [
+    "jupyter",
     "ipywidgets",
     "polars",
 ]
@@ -63,6 +57,9 @@ indent-style = "space"
 dev = [
     "ruff",
 ]
+
+[tool.uv]
+find-links = ["https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"]
 
 [tool.uv.sources]
 jaxneurorl = { path = "libraries/jaxneurorl", editable = true }
