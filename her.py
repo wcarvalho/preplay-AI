@@ -37,8 +37,6 @@ import base_algorithm as base
 make_optimizer = base.make_optimizer
 make_actor = base.make_actor
 
-MAX_REWARD = 1.0
-
 Agent = nn.Module
 Params = flax.core.FrozenDict
 
@@ -432,8 +430,8 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     )
 
   def online_reward_fn(timesteps):
-    task_vector = task_vector_fn(timesteps)
-    achievements = achievement_fn(timesteps)
+    task_vector = task_vector_fn(timesteps).astype(jnp.float32)
+    achievements = achievement_fn(timesteps).astype(jnp.float32)
     goal_reward = (task_vector * achievements).sum(-1)
 
     return 0.5 * goal_reward
@@ -491,8 +489,17 @@ def jaxmaze_learner_log_fn(
     # only use data from batch dim = 0
     # [T, B, ...] --> # [T, ...]
     d_ = jax.tree_util.tree_map(lambda x: x[:, 0], d)
+
+    # Get task_vector and achievements for reward debugging
+    task_vector_fn, achievement_fn, _ = ENVIRONMENT_TO_GOAL_FNS[config["ENV"]]
+    timesteps = d_["timesteps"]
+    task_vector = task_vector_fn(timesteps)  # [T, D] - binary vectors
+    achievements = achievement_fn(timesteps)  # [T, D] - binary vectors
+    data_rewards = d_["timesteps"].reward
+    computed_rewards = task_vector*achievements.sum(-1)
+
+
     discounts = d_["timesteps"].discount
-    rewards = d_["timesteps"].reward
     actions = d_["actions"]
     q_values = d_["q_values"]
     q_target = d_["q_target"]
@@ -500,11 +507,6 @@ def jaxmaze_learner_log_fn(
     td_errors = d_["td_errors"]
     q_loss = d_["q_loss"]
 
-    # Get task_vector and achievements for reward debugging
-    task_vector_fn, achievement_fn, _ = ENVIRONMENT_TO_GOAL_FNS[config["ENV"]]
-    timesteps = d_["timesteps"]
-    task_vector = task_vector_fn(timesteps)  # [T, D] - binary vectors
-    achievements = achievement_fn(timesteps)  # [T, D] - binary vectors
 
     # Figure dimensions
     width = 0.3
@@ -542,7 +544,8 @@ def jaxmaze_learner_log_fn(
     format(ax1b)
 
     # Rewards only
-    ax1c.plot(rewards, label="Rewards")
+    ax1c.plot(data_rewards, label="Environment Rewards")
+    ax1c.plot(computed_rewards, label="Computed Rewards")
     ax1c.set_title("Rewards")
     ax1c.legend()
     format(ax1c)
