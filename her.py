@@ -325,8 +325,13 @@ class HerLossFn(base.RecurrentLossFn):
     ##################
     key_grad = jax.random.split(key_grad, B + 1)
     # 1. sample fake goals from trajectory using data.timestep
-    # [N, B, D]
-    new_goals = jax.vmap(self.sample_goals, (1, 0), 1)(data.timestep, key_grad[1:])
+
+    # [N, B, D], [N, B]
+    new_goals, goal_indices = jax.vmap(
+      self.sample_goals, (1, 0), 1)(
+        data.timestep,  # [T, B]
+        key_grad[1:] # [B, 2],
+        )
 
     # 2. Compute Q-values for new goals
     def her_loss_fn(
@@ -334,14 +339,14 @@ class HerLossFn(base.RecurrentLossFn):
         jnp.ndarray,
         struct.PyTreeNode,
       ],
+      goal_index,
       sub_key_grad,
       timestep,
       actions,
-      loss_mask,
       online_preds,
       target_preds,
     ):
-      """new_goal is [D], sub_key_grad is [2], loss_mask is [T]"""
+      """new_goal is [D], goal_index is scalar, sub_key_grad is [2], ..."""
 
       sub_key_grad, sub_key_grad_ = jax.random.split(sub_key_grad)
       length = len(data.action)
@@ -350,14 +355,19 @@ class HerLossFn(base.RecurrentLossFn):
       expand_over_time = lambda x: jnp.tile(x[None], [length, 1])
       expanded_new_goal = jax.tree.map(expand_over_time, new_goal)
 
-      # [T, ...], [2], [T, D]
-      inputs = (timestep, sub_key_grad_, expanded_new_goal)
-
       apply_q = functools.partial(self.network.apply, method=self.network.apply_q)
       online_preds = apply_q(params, online_preds.rnn_states, expanded_new_goal)
       target_preds = apply_q(target_params, target_preds.rnn_states, expanded_new_goal)
 
       her_reward_info = self.her_reward_fn(timestep, new_goal)
+
+      # Compute per-goal episode mask
+      episode_ids = jnp.cumsum(make_float(timestep.first()), axis=0) - 1  # [T]
+      goal_episode_id = jax.lax.dynamic_index_in_dim(
+        episode_ids, goal_index, keepdims=False)  # scalar
+      episode_mask = (episode_ids == goal_episode_id).astype(jnp.float32)  # [T]
+      loss_mask = episode_mask * is_truncated(timestep)  # [T]
+
       td_error, batch_loss, metrics, log_info = self.loss_fn(
         timestep=timestep,
         online_preds=online_preds,
@@ -369,10 +379,12 @@ class HerLossFn(base.RecurrentLossFn):
         loss_mask=loss_mask,
       )
       log_info["reward_info"] = her_reward_info  # [T, ...]
+      log_info["goal_index"] = goal_index
+      log_info["goal_episode_id"] = goal_episode_id
       return td_error, batch_loss, metrics, log_info
 
-    her_loss_fn = jax.vmap(her_loss_fn, (0, 0, None, None, None, None, None))
-    her_loss_fn = jax.vmap(her_loss_fn, 1, 0)
+    her_loss_fn = jax.vmap(her_loss_fn, (0, 0, 0, None, None, None, None))  # N
+    her_loss_fn = jax.vmap(her_loss_fn, 1, 0)  # B
 
     key_grad = jax.random.split(key_grad[0], self.ngoals * B).reshape(
       self.ngoals, B, -1
@@ -381,10 +393,10 @@ class HerLossFn(base.RecurrentLossFn):
     # [B, N, T], [B, N], [B, N, T], [B, N, T, D]
     _, her_loss, her_metrics, her_log_info = her_loss_fn(
       new_goals,  # [N, B, D]
+      goal_indices,  # [N, B]
       key_grad,  # [N, B, 2]
       data.timestep,  # [T, B, D]
       data.action,  # [T, B]
-      episode_finished_mask(data.timestep),  # [T, B]
       online_preds,  # [T, B, D]
       target_preds,  # [T, B, D]
     )
@@ -442,17 +454,18 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     )
     reward = jax.tree.map(jax.lax.stop_gradient, reward)
 
+
     T = goal_achievements.shape[0]
-    goal_task_vector_tiled = jnp.tile(goal_task_vector[None], [T, 1])  # [T, D]
-    position_tiled = jnp.tile(position[None], [T, 1])  # [T, 2]
+    goal_task_vector = jnp.tile(goal_task_vector[None], [T, 1])  # [T, D]
+    position = jnp.tile(position[None], [T, 1])  # [T, 2]
 
     return {
       'reward': reward,
       'goal_reward': goal_reward,
-      'goal_task_vector': goal_task_vector_tiled,
+      'goal_task_vector': goal_task_vector,
       'goal_achievements': goal_achievements,
       'position_reward': position_reward,
-      'position_task_vector': position_tiled,
+      'position_task_vector': position,
       'position_achievement': position_achievement,
     }
 
@@ -470,7 +483,7 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     position_achieved = jnp.ones_like(goal_achieved)
 
     # T
-    logits = config["GOAL_BETA"] * goal_achieved + position_achieved
+    logits = goal_achieved + config["POSITION_BETA"] * position_achieved
     probabilities = jax.nn.softmax(logits)
 
     # N
@@ -492,7 +505,7 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
       jax.lax.stop_gradient(features_at_indices),
       # reserve 0 for empty position
       jax.lax.stop_gradient(positions_at_indices) + 1,
-    )
+    ), indices
 
 
   return functools.partial(
@@ -520,13 +533,14 @@ def craftax_render_fn(state):
   return image / 255.0
 
 
-def create_data_plots(d_, reward_info, is_her=False):
+def create_data_plots(d_, reward_info, is_her=False, subfig=None, goal_index=-1):
   """Create reward computation and training metrics plots.
 
   Args:
     d_: Dictionary with processed data (batch dimension already removed)
     reward_info: Dictionary with reward computation info (all values [T, ...])
     is_her: If True, plot both goal and position columns (2-col layout)
+    subfig: Optional matplotlib SubFigure to plot into. If None, creates a new figure.
 
   Returns:
     (fig1, axes1, fig2, axes2): The two figures and their axes arrays.
@@ -545,81 +559,105 @@ def create_data_plots(d_, reward_info, is_her=False):
   nT = len(data_rewards)
   height = 3
   fig_width = max(2, int(width * nT))
-
-  # Helper function for formatting axes
-  def format_ax(ax):
-    ax.set_xlabel("Time")
-    ax.grid(True)
-    ax.set_xticks(range(0, len(data_rewards), 1))
-
   ##############################
   # Plot 1: Reward Computation
   ##############################
   n_rows = 3
   n_cols = 2 if is_her else 1
-  fig1, axes1 = plt.subplots(
-    n_rows, n_cols, figsize=(fig_width * n_cols, height * n_rows)
-  )
+  if subfig is not None:
+    fig1 = subfig
+    axes1 = subfig.subplots(n_rows, n_cols, sharex='col', gridspec_kw={'wspace': 0.3})
+  else:
+    fig1, axes1 = plt.subplots(
+      n_rows, n_cols, figsize=(fig_width * n_cols, height * n_rows),
+      sharex='col', gridspec_kw={'wspace': 0.3},
+    )
   if n_cols == 1:
     axes1 = axes1[:, None]  # make 2D for uniform indexing
+
+  loss_mask = d_.get("loss_mask")
 
   # Column 0: goal reward info
   ax = axes1[0, 0]
   ax.plot(reward_info['goal_reward'], label="Goal Reward")
+  if loss_mask is not None:
+    ax.plot(loss_mask, label="Loss Mask", alpha=0.5, linestyle="--")
   ax.set_title("Goal Reward")
   ax.legend()
-  format_ax(ax)
+  ax.grid(True)
+  ax.set_xticks(range(nT))
 
   ax = axes1[1, 0]
-  ax.imshow(
-    reward_info['goal_task_vector'].T, aspect="auto", cmap="viridis",
-    interpolation="nearest"
-  )
+  goal_tv = reward_info['goal_task_vector'].T  # [D, T]
+  ax.imshow(goal_tv, aspect="auto", cmap="viridis", interpolation="nearest")
   ax.set_title("Goal Task Vector")
   ax.set_ylabel("Dims")
-  format_ax(ax)
+  ax.set_yticks(range(goal_tv.shape[0]))
+  ax.set_xticks(range(nT))
+  ax.grid(True, axis='x', alpha=0.3, color='white')
 
   ax = axes1[2, 0]
-  ax.imshow(
-    reward_info['goal_achievements'].T, aspect="auto", cmap="viridis",
-    interpolation="nearest"
-  )
+  goal_ach = reward_info['goal_achievements'].T  # [D, T]
+  ax.imshow(goal_ach, aspect="auto", cmap="viridis", interpolation="nearest")
   ax.set_title("Goal Achievements")
   ax.set_ylabel("Dims")
-  format_ax(ax)
+  ax.set_yticks(range(goal_ach.shape[0]))
+  ax.set_xticks(range(nT))
+  ax.grid(True, axis='x', alpha=0.3, color='white')
+  ax.set_xlabel("Time")
 
   if is_her:
     # Column 1: position reward info
     ax = axes1[0, 1]
     ax.plot(reward_info['position_reward'], label="Position Reward")
+    if loss_mask is not None:
+      ax.plot(loss_mask, label="Loss Mask", alpha=0.5, linestyle="--")
     ax.set_title("Position Reward")
     ax.legend()
-    format_ax(ax)
+    ax.grid(True)
+    ax.set_xticks(range(nT))
 
+    # Position Task Vector - show integer values as text
     ax = axes1[1, 1]
-    ax.imshow(
-      reward_info['position_task_vector'].T, aspect="auto", cmap="viridis",
-      interpolation="nearest"
-    )
+    pos_tv = reward_info['position_task_vector']  # [T, 2]
+    ax.set_ylim(-0.5, 1.5)
+    ax.set_yticks([0, 1])
+    ax.set_xlim(-0.5, nT - 0.5)
+    for t in range(len(pos_tv)):
+      for d in range(pos_tv.shape[1]):
+        ax.text(t, d, str(int(pos_tv[t, d])), ha='center', va='center', fontsize=14)
     ax.set_title("Position Task Vector")
     ax.set_ylabel("Dims")
-    format_ax(ax)
+    ax.set_xticks(range(nT))
+    ax.grid(True, axis='x', alpha=0.3)
 
+    # Position Achievement - show integer values as text
     ax = axes1[2, 1]
-    ax.imshow(
-      reward_info['position_achievement'].T, aspect="auto", cmap="viridis",
-      interpolation="nearest"
-    )
+    pos_ach = reward_info['position_achievement']  # [T, 2]
+    ax.set_ylim(-0.5, 1.5)
+    ax.set_yticks([0, 1])
+    ax.set_xlim(-0.5, nT - 0.5)
+    for t in range(len(pos_ach)):
+      for d in range(pos_ach.shape[1]):
+        ax.text(t, d, str(int(pos_ach[t, d])), ha='center', va='center', fontsize=14)
     ax.set_title("Position Achievement")
     ax.set_ylabel("Dims")
-    format_ax(ax)
+    ax.set_xticks(range(nT))
+    ax.grid(True, axis='x', alpha=0.3)
+    ax.set_xlabel("Time")
 
-  fig1.tight_layout()
+  # Add vertical line at goal index (top row only)
+  if goal_index >= 0:
+    for col in range(n_cols):
+      axes1[0, col].axvline(goal_index, color='red', linestyle='--', alpha=0.7, label="Goal idx")
+
+  if subfig is None:
+    fig1.tight_layout()
 
   ##############################
   # Plot 2: Training Metrics
   ##############################
-  fig2, axes2 = plt.subplots(3, 1, figsize=(fig_width, height * 3))
+  fig2, axes2 = plt.subplots(3, 1, figsize=(fig_width, height * 3), sharex=True)
   ax2a, ax2b, ax2c = axes2[0], axes2[1], axes2[2]
 
   # Rewards, Q-values, Q-targets
@@ -628,20 +666,26 @@ def create_data_plots(d_, reward_info, is_her=False):
   ax2a.plot(q_target, label="Q-Targets")
   ax2a.set_title("Rewards and Q-Values")
   ax2a.legend()
-  format_ax(ax2a)
+  ax2a.grid(True)
+  ax2a.set_xticks(range(nT))
 
   # TD errors
   ax2b.plot(td_errors)
   ax2b.set_title("TD Errors")
-  format_ax(ax2b)
+  ax2b.grid(True)
+  ax2b.set_xticks(range(nT))
 
   # Episode markers
   is_last = d_["timesteps"].last()
   ax2c.plot(discounts, label="Discounts")
   ax2c.plot(is_last, label="is_last")
+  if loss_mask is not None:
+    ax2c.plot(loss_mask, label="Loss Mask", alpha=0.5, linestyle="--")
   ax2c.set_title("Episode Markers")
   ax2c.legend()
-  format_ax(ax2c)
+  ax2c.grid(True)
+  ax2c.set_xticks(range(nT))
+  ax2c.set_xlabel("Time")
 
   fig2.tight_layout()
 
@@ -657,56 +701,79 @@ def jaxmaze_learner_log_fn(
   get_task_name: Callable = lambda t: "Task",
 ):
   def plot_individual(d, setting: str):
+    from math import ceil
+
     is_her = (setting == "her")
     # [B, T, ...] --> [T, ...]
     d_ = jax.tree_util.tree_map(lambda x: x[0], d)
     reward_info = d_["reward_info"]
 
-    fig1, axes1, fig2, axes2 = create_data_plots(d_, reward_info, is_her=is_her)
-
-    # Trajectory in its own figure
+    # Compute image sequence info first for layout
     timesteps: TimeStep = d_["timesteps"]
-    actions = d_["actions"]
+    nT = len(timesteps.reward)
+    n_episode_steps = min(nT, config.get("MAX_EPISODE_LOG_LEN", 40))
+
+    ncols_img = 5
+    n_image_rows = ceil(n_episode_steps / ncols_img)
+
+    # Create combined figure with subfigures
+    n_cols = 2 if is_her else 1
+    width = 0.3
+    height = 2
+    fig_width = max(2, int(width * nT))
+
+    # Use maze dimensions to compute tight image cell sizes
     maze_height, maze_width, _ = timesteps.state.grid[0].shape
+    img_cell_height = maze_height / 10.0  # scale down for figure inches
+    img_cell_width = maze_width / 10.0
+    row_height_img = img_cell_height * 2
+    top_height = height * 3
+    bottom_height = row_height_img * n_image_rows
 
-    non_terminal = timesteps.discount
-    is_last = timesteps.last()
-    term_cumsum = jnp.cumsum(is_last, -1)
-    in_episode = (term_cumsum + non_terminal) < 2
+    fig_combined = plt.figure(figsize=(int(fig_width * n_cols * 3/4), top_height + bottom_height))
+    subfigs = fig_combined.subfigures(2, 1, height_ratios=[top_height, bottom_height], hspace=0.02)
 
-    episode_actions = actions[in_episode][:-1]
-    episode_positions = jax.tree_util.tree_map(
-      lambda x: x[in_episode][:-1], timesteps.state.agent_pos
+    # Top: reward computation plots
+    goal_index = int(d_.get("goal_index", -1))
+    _, axes1, fig2, axes2 = create_data_plots(d_, reward_info, is_her=is_her, subfig=subfigs[0], goal_index=goal_index)
+
+    # Bottom: image sequence (tight spacing based on maze dimensions)
+    axes_img = subfigs[1].subplots(
+      n_image_rows, ncols_img,
+      gridspec_kw={'hspace': 0.3, 'wspace': 0.05}
     )
+    if n_image_rows == 1:
+      axes_img = axes_img[None, :]  # ensure 2D
+    for idx in range(n_episode_steps):
+      row, col = divmod(idx, ncols_img)
+      ax = axes_img[row, col]
+      state_at_t = jax.tree_util.tree_map(lambda x: x[idx], timesteps.state)
+      img = render_fn(state_at_t)
+      ax.imshow(img)
+      suffix = ""
+      if idx == 0:
+        suffix += " - FIRST"
+      if idx == goal_index:
+        suffix += " - GOAL"
+      ax.set_title(f"t={idx}{suffix}", fontsize=8)
+      ax.axis("off")
+    # Hide unused subplots
+    for idx in range(n_episode_steps, n_image_rows * ncols_img):
+      row, col = divmod(idx, ncols_img)
+      axes_img[row, col].axis("off")
 
-    index = lambda t, idx: jax.tree_util.tree_map(lambda x: x[idx], t)
-    initial_state = index(timesteps.state, 0)
-    img = render_fn(initial_state)
-
-    fig3, ax3 = plt.subplots(1, 1, figsize=(6, 6))
-    renderer.place_arrows_on_image(
-      img,
-      episode_positions,
-      episode_actions,
-      maze_height,
-      maze_width,
-      arrow_scale=5,
-      ax=ax3,
-    )
-    ax3.axis("off")
-    fig3.tight_layout()
+    subfigs[1].subplots_adjust(hspace=0.05, wspace=0.05)
+    fig_combined.tight_layout(pad=0.5)
 
     if wandb.run is not wandb.sdk.lib.disabled.RunDisabled:
       wandb.log(
         {
-          f"learner_example/{setting}/reward_computation": wandb.Image(fig1),
+          f"learner_example/{setting}/reward_computation": wandb.Image(fig_combined),
           f"learner_example/{setting}/training_metrics": wandb.Image(fig2),
-          f"learner_example/{setting}/trajectory": wandb.Image(fig3),
         }
       )
-    plt.close(fig1)
+    plt.close(fig_combined)
     plt.close(fig2)
-    plt.close(fig3)
 
   # this will be the value after update is applied
   n_updates = data["n_updates"] + 1
@@ -726,70 +793,80 @@ def jaxmaze_learner_log_fn(
 
 def crafax_learner_log_fn(data: dict, config: dict):
   def plot_individual(d, setting: str):
+    from math import ceil
+
     is_her = (setting == "her")
     # [B, T, ...] --> [T, ...]
     d_ = jax.tree_util.tree_map(lambda x: x[0], d)
     reward_info = d_["reward_info"]
 
-    fig1, axes1, fig2, axes2 = create_data_plots(d_, reward_info, is_her=is_her)
-
-    # Trajectory: craftax pixel rendering
+    # Compute image sequence info first for layout
     timesteps: TimeStep = d_["timesteps"]
-    rewards = timesteps.reward
+    nT = len(timesteps.reward)
+    n_episode_steps = min(nT, config.get("MAX_EPISODE_LOG_LEN", 40))
     actions = d_["actions"]
-
-    obs_images = []
-    max_len = min(config.get("MAX_EPISODE_LOG_LEN", 40), len(rewards))
-    for idx in range(max_len):
-      def index(y, i=idx):
-        return jax.tree_util.tree_map(lambda x: x[i], y)
-      obs_image = craftax_render_fn(index(timesteps.state.env_state))
-      obs_images.append(obs_image)
-
     actions_taken = [Action(a).name for a in actions]
 
-    def panel_title_fn(timesteps, i):
-      title = f"t={i}"
-      title += f"\n{actions_taken[i]}"
-      if i >= len(timesteps.reward) - 1:
-        return title
-      title += (
-        f"\nr={timesteps.reward[i + 1]:.2f}, $\\gamma={timesteps.discount[i + 1]}$"
-      )
-      if hasattr(timesteps.observation, "achievements"):
-        achieved = timesteps.observation.achievements[i + 1]
-        if achieved.sum() > 1e-5:
-          achievement_idx = achieved.argmax()
-          try:
-            achievement = Achievement(achievement_idx).name
-            title += f"\n{achievement}"
-          except ValueError:
-            title += f"\nHealth?"
-      elif hasattr(timesteps.state, "current_goal"):
-        start_location = timesteps.state.start_position
-        goal = timesteps.state.current_goal
-        goal_name = Achievement(goal).name
-        title += f"\nstart={start_location}\ngoal={goal}\ngoal={goal_name}"
-      return title
+    ncols_img = 5
+    n_image_rows = ceil(n_episode_steps / ncols_img)
 
-    fig3 = plot_frames(
-      timesteps=timesteps,
-      frames=obs_images,
-      panel_title_fn=panel_title_fn,
-      ncols=6,
+    # Create combined figure with subfigures
+    n_cols = 2 if is_her else 1
+    width = 0.3
+    height = 2
+    fig_width = max(2, int(width * nT))
+
+    # Use rendered image dimensions to compute tight cell sizes
+    img_cell_height = BLOCK_PIXEL_SIZE_IMG * 9 / 80.0  # approximate craftax grid height
+    row_height_img = img_cell_height * 2
+    top_height = height * 3
+    bottom_height = row_height_img * n_image_rows
+
+    fig_combined = plt.figure(figsize=(int(fig_width * n_cols * 3/4), top_height + bottom_height))
+    subfigs = fig_combined.subfigures(2, 1, height_ratios=[top_height, bottom_height], hspace=0.02)
+
+    # Top: reward computation plots
+    goal_index = int(d_.get("goal_index", -1))
+    _, axes1, fig2, axes2 = create_data_plots(d_, reward_info, is_her=is_her, subfig=subfigs[0], goal_index=goal_index)
+
+    # Bottom: image sequence (tight spacing)
+    axes_img = subfigs[1].subplots(
+      n_image_rows, ncols_img,
+      gridspec_kw={'hspace': 0.3, 'wspace': 0.05}
     )
+    if n_image_rows == 1:
+      axes_img = axes_img[None, :]  # ensure 2D
+    for idx in range(n_episode_steps):
+      row, col = divmod(idx, ncols_img)
+      ax = axes_img[row, col]
+      state_at_t = jax.tree_util.tree_map(lambda x: x[idx], timesteps.state.env_state)
+      img = craftax_render_fn(state_at_t)
+      ax.imshow(img)
+      suffix = ""
+      if idx == 0:
+        suffix += " - FIRST"
+      if idx == goal_index:
+        suffix += " - GOAL"
+      title = f"t={idx}{suffix}\n{actions_taken[idx]}"
+      ax.set_title(title, fontsize=7)
+      ax.axis("off")
+    # Hide unused subplots
+    for idx in range(n_episode_steps, n_image_rows * ncols_img):
+      row, col = divmod(idx, ncols_img)
+      axes_img[row, col].axis("off")
+
+    subfigs[1].subplots_adjust(hspace=0.05, wspace=0.05)
+    fig_combined.tight_layout(pad=0.5)
 
     if wandb.run is not wandb.sdk.lib.disabled.RunDisabled:
       wandb.log(
         {
-          f"learner_example/{setting}/reward_computation": wandb.Image(fig1),
+          f"learner_example/{setting}/reward_computation": wandb.Image(fig_combined),
           f"learner_example/{setting}/training_metrics": wandb.Image(fig2),
-          f"learner_example/{setting}/trajectory": wandb.Image(fig3),
         }
       )
-    plt.close(fig1)
+    plt.close(fig_combined)
     plt.close(fig2)
-    plt.close(fig3)
 
   def plot_both(d):
     #plot_individual(d["online"], "online")
