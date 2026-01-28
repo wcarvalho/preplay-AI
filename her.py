@@ -303,7 +303,7 @@ class HerLossFn(base.RecurrentLossFn):
       online_preds,
       target_preds,
       data.action,
-      online_reward_info['reward'],
+      online_reward_info["reward"],
       make_float(data.timestep.last()),
       data.timestep.discount,
       loss_mask,
@@ -327,11 +327,10 @@ class HerLossFn(base.RecurrentLossFn):
     # 1. sample fake goals from trajectory using data.timestep
 
     # [N, B, D], [N, B]
-    new_goals, goal_indices = jax.vmap(
-      self.sample_goals, (1, 0), 1)(
-        data.timestep,  # [T, B]
-        key_grad[1:] # [B, 2],
-        )
+    new_goals, goal_indices = jax.vmap(self.sample_goals, (1, 0), 1)(
+      data.timestep,  # [T, B]
+      key_grad[1:],  # [B, 2],
+    )
 
     # 2. Compute Q-values for new goals
     def her_loss_fn(
@@ -364,7 +363,8 @@ class HerLossFn(base.RecurrentLossFn):
       # Compute per-goal episode mask
       episode_ids = jnp.cumsum(make_float(timestep.first()), axis=0) - 1  # [T]
       goal_episode_id = jax.lax.dynamic_index_in_dim(
-        episode_ids, goal_index, keepdims=False)  # scalar
+        episode_ids, goal_index, keepdims=False
+      )  # scalar
       episode_mask = (episode_ids == goal_episode_id).astype(jnp.float32)  # [T]
       loss_mask = episode_mask * is_truncated(timestep)  # [T]
 
@@ -373,7 +373,7 @@ class HerLossFn(base.RecurrentLossFn):
         online_preds=online_preds,
         target_preds=target_preds,
         actions=actions,
-        rewards=her_reward_info['reward'],
+        rewards=her_reward_info["reward"],
         is_last=make_float(timestep.last()),
         non_terminal=timestep.discount,
         loss_mask=loss_mask,
@@ -405,7 +405,9 @@ class HerLossFn(base.RecurrentLossFn):
     all_metrics.update({f"{k}/her": v for k, v in her_metrics.items()})
     all_log_info["her"] = jax.tree.map(
       # only first goal
-      lambda x:x[:, 0], her_log_info)
+      lambda x: x[:, 0],
+      her_log_info,
+    )
     if self.logger.learner_log_extra is not None:
       self.logger.learner_log_extra(all_log_info)
 
@@ -416,7 +418,6 @@ class HerLossFn(base.RecurrentLossFn):
 # Environment Specific
 ############################################
 def make_loss_fn_class(config) -> base.RecurrentLossFn:
-
   def online_reward_fn(timesteps):
     task_vector_fn, achievement_fn, position_fn = ENVIRONMENT_TO_GOAL_FNS[config["ENV"]]
     task_vector = task_vector_fn(timesteps).astype(jnp.float32)
@@ -426,10 +427,10 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     reward = 0.5 * goal_reward
     reward = jax.tree.map(jax.lax.stop_gradient, reward)
     return {
-      'reward': reward,
-      'goal_reward': goal_reward,
-      'goal_task_vector': task_vector,
-      'goal_achievements': achievements,
+      "reward": reward,
+      "goal_reward": goal_reward,
+      "goal_task_vector": task_vector,
+      "goal_achievements": achievements,
     }
 
   def her_reward_fn(timesteps, new_goal):
@@ -441,32 +442,28 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     goal_reward = (goal_task_vector[None] * goal_achievements).sum(-1)  # [T]
 
     # position reward
-    position = new_goal.position  # [2]
+    position = new_goal.position - 1  # [2]
     position_achievement = position_fn(timesteps)  # [T, 2]
     position_reward = jax.vmap(jnp.equal, (None, 0))(position, position_achievement)
     position_reward = position_reward.all(-1).astype(jnp.float32)
 
     assert goal_reward.ndim == 1
     assert position_reward.ndim == 1
-    reward = (
-      0.5 * position_reward +
-      0.5 * goal_reward
-    )
+    reward = 0.5 * position_reward + 0.5 * goal_reward
     reward = jax.tree.map(jax.lax.stop_gradient, reward)
-
 
     T = goal_achievements.shape[0]
     goal_task_vector = jnp.tile(goal_task_vector[None], [T, 1])  # [T, D]
     position = jnp.tile(position[None], [T, 1])  # [T, 2]
 
     return {
-      'reward': reward,
-      'goal_reward': goal_reward,
-      'goal_task_vector': goal_task_vector,
-      'goal_achievements': goal_achievements,
-      'position_reward': position_reward,
-      'position_task_vector': position,
-      'position_achievement': position_achievement,
+      "reward": reward,
+      "goal_reward": goal_reward,
+      "goal_task_vector": goal_task_vector,
+      "goal_achievements": goal_achievements,
+      "position_reward": position_reward,
+      "position_task_vector": position,
+      "position_achievement": position_achievement,
     }
 
   def sample_goals(timesteps, rng):
@@ -483,8 +480,8 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     position_achieved = jnp.ones_like(goal_achieved)
 
     # T
-    logits = goal_achieved + config["POSITION_BETA"] * position_achieved
-    probabilities = jax.nn.softmax(logits)
+    logits = config["GOAL_BETA"] * goal_achieved + position_achieved
+    probabilities = logits / (logits.sum(-1) + 1e-5)
 
     # N
     indices = Categorical(probs=probabilities).sample(
@@ -506,7 +503,6 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
       # reserve 0 for empty position
       jax.lax.stop_gradient(positions_at_indices) + 1,
     ), indices
-
 
   return functools.partial(
     HerLossFn,
@@ -566,11 +562,14 @@ def create_data_plots(d_, reward_info, is_her=False, subfig=None, goal_index=-1)
   n_cols = 2 if is_her else 1
   if subfig is not None:
     fig1 = subfig
-    axes1 = subfig.subplots(n_rows, n_cols, sharex='col', gridspec_kw={'wspace': 0.3})
+    axes1 = subfig.subplots(n_rows, n_cols, sharex="col", gridspec_kw={"wspace": 0.3})
   else:
     fig1, axes1 = plt.subplots(
-      n_rows, n_cols, figsize=(fig_width * n_cols, height * n_rows),
-      sharex='col', gridspec_kw={'wspace': 0.3},
+      n_rows,
+      n_cols,
+      figsize=(fig_width * n_cols, height * n_rows),
+      sharex="col",
+      gridspec_kw={"wspace": 0.3},
     )
   if n_cols == 1:
     axes1 = axes1[:, None]  # make 2D for uniform indexing
@@ -579,7 +578,7 @@ def create_data_plots(d_, reward_info, is_her=False, subfig=None, goal_index=-1)
 
   # Column 0: goal reward info
   ax = axes1[0, 0]
-  ax.plot(reward_info['goal_reward'], label="Goal Reward")
+  ax.plot(reward_info["goal_reward"], label="Goal Reward")
   if loss_mask is not None:
     ax.plot(loss_mask, label="Loss Mask", alpha=0.5, linestyle="--")
   ax.set_title("Goal Reward")
@@ -588,28 +587,28 @@ def create_data_plots(d_, reward_info, is_her=False, subfig=None, goal_index=-1)
   ax.set_xticks(range(nT))
 
   ax = axes1[1, 0]
-  goal_tv = reward_info['goal_task_vector'].T  # [D, T]
+  goal_tv = reward_info["goal_task_vector"].T  # [D, T]
   ax.imshow(goal_tv, aspect="auto", cmap="viridis", interpolation="nearest")
   ax.set_title("Goal Task Vector")
   ax.set_ylabel("Dims")
   ax.set_yticks(range(goal_tv.shape[0]))
   ax.set_xticks(range(nT))
-  ax.grid(True, axis='x', alpha=0.3, color='white')
+  ax.grid(True, axis="x", alpha=0.3, color="white")
 
   ax = axes1[2, 0]
-  goal_ach = reward_info['goal_achievements'].T  # [D, T]
+  goal_ach = reward_info["goal_achievements"].T  # [D, T]
   ax.imshow(goal_ach, aspect="auto", cmap="viridis", interpolation="nearest")
   ax.set_title("Goal Achievements")
   ax.set_ylabel("Dims")
   ax.set_yticks(range(goal_ach.shape[0]))
   ax.set_xticks(range(nT))
-  ax.grid(True, axis='x', alpha=0.3, color='white')
+  ax.grid(True, axis="x", alpha=0.3, color="white")
   ax.set_xlabel("Time")
 
   if is_her:
     # Column 1: position reward info
     ax = axes1[0, 1]
-    ax.plot(reward_info['position_reward'], label="Position Reward")
+    ax.plot(reward_info["position_reward"], label="Position Reward")
     if loss_mask is not None:
       ax.plot(loss_mask, label="Loss Mask", alpha=0.5, linestyle="--")
     ax.set_title("Position Reward")
@@ -619,37 +618,39 @@ def create_data_plots(d_, reward_info, is_her=False, subfig=None, goal_index=-1)
 
     # Position Task Vector - show integer values as text
     ax = axes1[1, 1]
-    pos_tv = reward_info['position_task_vector']  # [T, 2]
+    pos_tv = reward_info["position_task_vector"]  # [T, 2]
     ax.set_ylim(-0.5, 1.5)
     ax.set_yticks([0, 1])
     ax.set_xlim(-0.5, nT - 0.5)
     for t in range(len(pos_tv)):
       for d in range(pos_tv.shape[1]):
-        ax.text(t, d, str(int(pos_tv[t, d])), ha='center', va='center', fontsize=14)
+        ax.text(t, d, str(int(pos_tv[t, d])), ha="center", va="center", fontsize=14)
     ax.set_title("Position Task Vector")
     ax.set_ylabel("Dims")
     ax.set_xticks(range(nT))
-    ax.grid(True, axis='x', alpha=0.3)
+    ax.grid(True, axis="x", alpha=0.3)
 
     # Position Achievement - show integer values as text
     ax = axes1[2, 1]
-    pos_ach = reward_info['position_achievement']  # [T, 2]
+    pos_ach = reward_info["position_achievement"]  # [T, 2]
     ax.set_ylim(-0.5, 1.5)
     ax.set_yticks([0, 1])
     ax.set_xlim(-0.5, nT - 0.5)
     for t in range(len(pos_ach)):
       for d in range(pos_ach.shape[1]):
-        ax.text(t, d, str(int(pos_ach[t, d])), ha='center', va='center', fontsize=14)
+        ax.text(t, d, str(int(pos_ach[t, d])), ha="center", va="center", fontsize=14)
     ax.set_title("Position Achievement")
     ax.set_ylabel("Dims")
     ax.set_xticks(range(nT))
-    ax.grid(True, axis='x', alpha=0.3)
+    ax.grid(True, axis="x", alpha=0.3)
     ax.set_xlabel("Time")
 
   # Add vertical line at goal index (top row only)
   if goal_index >= 0:
     for col in range(n_cols):
-      axes1[0, col].axvline(goal_index, color='red', linestyle='--', alpha=0.7, label="Goal idx")
+      axes1[0, col].axvline(
+        goal_index, color="red", linestyle="--", alpha=0.7, label="Goal idx"
+      )
 
   if subfig is None:
     fig1.tight_layout()
@@ -661,7 +662,7 @@ def create_data_plots(d_, reward_info, is_her=False, subfig=None, goal_index=-1)
   ax2a, ax2b, ax2c = axes2[0], axes2[1], axes2[2]
 
   # Rewards, Q-values, Q-targets
-  ax2a.plot(reward_info['goal_reward'], label="Goal Reward")
+  ax2a.plot(reward_info["goal_reward"], label="Goal Reward")
   ax2a.plot(q_values_taken, label="Q-Values")
   ax2a.plot(q_target, label="Q-Targets")
   ax2a.set_title("Rewards and Q-Values")
@@ -703,7 +704,7 @@ def jaxmaze_learner_log_fn(
   def plot_individual(d, setting: str):
     from math import ceil
 
-    is_her = (setting == "her")
+    is_her = setting == "her"
     # [B, T, ...] --> [T, ...]
     d_ = jax.tree_util.tree_map(lambda x: x[0], d)
     reward_info = d_["reward_info"]
@@ -730,20 +731,29 @@ def jaxmaze_learner_log_fn(
     top_height = height * 3
     bottom_height = row_height_img * n_image_rows
 
-    fig_combined = plt.figure(figsize=(int(fig_width * n_cols * 3/4), top_height + bottom_height))
-    subfigs = fig_combined.subfigures(2, 1, height_ratios=[top_height, bottom_height], hspace=0.02)
+    fig_combined = plt.figure(
+      figsize=(int(fig_width * n_cols * 3 / 4), top_height + bottom_height)
+    )
+    subfigs = fig_combined.subfigures(
+      2, 1, height_ratios=[top_height, bottom_height], hspace=0.02
+    )
 
     # Top: reward computation plots
     goal_index = int(d_.get("goal_index", -1))
-    _, axes1, fig2, axes2 = create_data_plots(d_, reward_info, is_her=is_her, subfig=subfigs[0], goal_index=goal_index)
+    _, axes1, fig2, axes2 = create_data_plots(
+      d_, reward_info, is_her=is_her, subfig=subfigs[0], goal_index=goal_index
+    )
 
     # Bottom: image sequence (tight spacing based on maze dimensions)
     axes_img = subfigs[1].subplots(
-      n_image_rows, ncols_img,
-      gridspec_kw={'hspace': 0.3, 'wspace': 0.05}
+      n_image_rows, ncols_img, gridspec_kw={"hspace": 0.3, "wspace": 0.05}
     )
     if n_image_rows == 1:
       axes_img = axes_img[None, :]  # ensure 2D
+    # Get reward arrays for coloring (only for HER)
+    position_reward = reward_info.get("position_reward", None)
+    goal_reward = reward_info.get("goal_reward", None)
+
     for idx in range(n_episode_steps):
       row, col = divmod(idx, ncols_img)
       ax = axes_img[row, col]
@@ -755,6 +765,26 @@ def jaxmaze_learner_log_fn(
         suffix += " - FIRST"
       if idx == goal_index:
         suffix += " - GOAL"
+
+      # Add colored boxes based on rewards
+      if is_her and position_reward is not None and goal_reward is not None:
+        pos_r = float(position_reward[idx])
+        goal_r = float(goal_reward[idx])
+        if pos_r > 0 and goal_r > 0:
+          # Neon green if both rewards > 0
+          for spine in ax.spines.values():
+            spine.set_visible(True)
+            spine.set_edgecolor("#39FF14")  # neon green
+            spine.set_linewidth(3)
+          suffix += "\nBOTH"
+        elif pos_r > 0:
+          # Red if only position reward > 0
+          for spine in ax.spines.values():
+            spine.set_visible(True)
+            spine.set_edgecolor("red")
+            spine.set_linewidth(3)
+          suffix += "\nPOS"
+
       ax.set_title(f"t={idx}{suffix}", fontsize=8)
       ax.axis("off")
     # Hide unused subplots
@@ -780,7 +810,7 @@ def jaxmaze_learner_log_fn(
   is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
 
   def plot_both(d):
-    #plot_individual(d["online"], "online")
+    # plot_individual(d["online"], "online")
     plot_individual(d["her"], "her")
 
   jax.lax.cond(
@@ -795,7 +825,7 @@ def crafax_learner_log_fn(data: dict, config: dict):
   def plot_individual(d, setting: str):
     from math import ceil
 
-    is_her = (setting == "her")
+    is_her = setting == "her"
     # [B, T, ...] --> [T, ...]
     d_ = jax.tree_util.tree_map(lambda x: x[0], d)
     reward_info = d_["reward_info"]
@@ -822,17 +852,22 @@ def crafax_learner_log_fn(data: dict, config: dict):
     top_height = height * 3
     bottom_height = row_height_img * n_image_rows
 
-    fig_combined = plt.figure(figsize=(int(fig_width * n_cols * 3/4), top_height + bottom_height))
-    subfigs = fig_combined.subfigures(2, 1, height_ratios=[top_height, bottom_height], hspace=0.02)
+    fig_combined = plt.figure(
+      figsize=(int(fig_width * n_cols * 3 / 4), top_height + bottom_height)
+    )
+    subfigs = fig_combined.subfigures(
+      2, 1, height_ratios=[top_height, bottom_height], hspace=0.02
+    )
 
     # Top: reward computation plots
     goal_index = int(d_.get("goal_index", -1))
-    _, axes1, fig2, axes2 = create_data_plots(d_, reward_info, is_her=is_her, subfig=subfigs[0], goal_index=goal_index)
+    _, axes1, fig2, axes2 = create_data_plots(
+      d_, reward_info, is_her=is_her, subfig=subfigs[0], goal_index=goal_index
+    )
 
     # Bottom: image sequence (tight spacing)
     axes_img = subfigs[1].subplots(
-      n_image_rows, ncols_img,
-      gridspec_kw={'hspace': 0.3, 'wspace': 0.05}
+      n_image_rows, ncols_img, gridspec_kw={"hspace": 0.3, "wspace": 0.05}
     )
     if n_image_rows == 1:
       axes_img = axes_img[None, :]  # ensure 2D
@@ -869,7 +904,7 @@ def crafax_learner_log_fn(data: dict, config: dict):
     plt.close(fig2)
 
   def plot_both(d):
-    #plot_individual(d["online"], "online")
+    # plot_individual(d["online"], "online")
     plot_individual(d["her"], "her")
 
   # this will be the value after update is applied
@@ -942,16 +977,14 @@ class TaskEncoder(nn.Module):
 
     # position is categorical
     # [2, D]
-    position = jax.vmap(
-      flax.linen.Embed(self.vocab_size, 128))(goal.position)
+    position = jax.vmap(flax.linen.Embed(self.vocab_size, 128))(goal.position)
     return jnp.concatenate((task, position.reshape(-1)))
 
 
 def goal_from_env_timestep(t: TimeStep, env: str):
   task_vector_fn, _, position_fn = ENVIRONMENT_TO_GOAL_FNS[env]
   return GoalPosition(
-    task_vector_fn(t).astype(jnp.float32),
-    jnp.zeros_like(position_fn(t))
+    task_vector_fn(t).astype(jnp.float32), jnp.zeros_like(position_fn(t))
   )
 
 

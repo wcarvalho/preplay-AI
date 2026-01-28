@@ -525,7 +525,7 @@ def sweep(search: str = ""):
         "SEED": {"values": [2]},
         "env.exp": {"values": ["her_test"]},
         "NUM_HER_GOALS": {"values": [1, 10]},
-        "POSITION_BETA": {"values": [1.0, 0.0001]},
+        "GOAL_BETA": {"values": [1.0, 10.0]},
         "HER_COEFF": {"values": [0.1, 0.01]},
         "LEARNER_EXTRA_LOG_PERIOD": {"values": [25]},
       },
