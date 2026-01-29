@@ -29,6 +29,7 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 import rlax
 import wandb
 from flax import struct
@@ -326,8 +327,8 @@ class HerLossFn(base.RecurrentLossFn):
     key_grad = jax.random.split(key_grad, B + 1)
     # 1. sample fake goals from trajectory using data.timestep
 
-    # [N, B, D], [N, B]
-    new_goals, goal_indices = jax.vmap(self.sample_goals, (1, 0), 1)(
+    # [N, B, D], [T, B], [N, B]
+    new_goals, logits, goal_indices = jax.vmap(self.sample_goals, (1, 0), 1)(
       data.timestep,  # [T, B]
       key_grad[1:],  # [B, 2],
     )
@@ -342,6 +343,7 @@ class HerLossFn(base.RecurrentLossFn):
       sub_key_grad,
       timestep,
       actions,
+      goal_logits,
       online_preds,
       target_preds,
     ):
@@ -378,12 +380,16 @@ class HerLossFn(base.RecurrentLossFn):
         non_terminal=timestep.discount,
         loss_mask=loss_mask,
       )
+      mask_no_achevement_loss = (goal_logits.sum() < 1e-5).astype(batch_loss.dtype)
+      td_error = mask_no_achevement_loss * td_error
+      batch_loss = mask_no_achevement_loss * batch_loss
+
       log_info["reward_info"] = her_reward_info  # [T, ...]
       log_info["goal_index"] = goal_index
       log_info["goal_episode_id"] = goal_episode_id
       return td_error, batch_loss, metrics, log_info
 
-    her_loss_fn = jax.vmap(her_loss_fn, (0, 0, 0, None, None, None, None))  # N
+    her_loss_fn = jax.vmap(her_loss_fn, (0, 0, 0, None, None, None, None, None))  # N
     her_loss_fn = jax.vmap(her_loss_fn, 1, 0)  # B
 
     key_grad = jax.random.split(key_grad[0], self.ngoals * B).reshape(
@@ -397,6 +403,7 @@ class HerLossFn(base.RecurrentLossFn):
       key_grad,  # [N, B, 2]
       data.timestep,  # [T, B, D]
       data.action,  # [T, B]
+      logits,  # [T, B]
       online_preds,  # [T, B, D]
       target_preds,  # [T, B, D]
     )
@@ -424,7 +431,7 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     achievements = achievement_fn(timesteps).astype(jnp.float32)
     goal_reward = (task_vector * achievements).sum(-1)
 
-    reward = 0.5 * goal_reward
+    reward = goal_reward
     reward = jax.tree.map(jax.lax.stop_gradient, reward)
     return {
       "reward": reward,
@@ -449,7 +456,12 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
 
     assert goal_reward.ndim == 1
     assert position_reward.ndim == 1
-    reward = 0.5 * position_reward + 0.5 * goal_reward
+    if config["POSITION_GOALS"]:
+      reward = 0.5 * position_reward + 0.5 * goal_reward
+    else:
+      position_reward = position_reward * 0.0
+      reward = goal_reward
+
     reward = jax.tree.map(jax.lax.stop_gradient, reward)
 
     T = goal_achievements.shape[0]
@@ -480,7 +492,10 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     position_achieved = jnp.ones_like(goal_achieved)
 
     # T
-    logits = config["GOAL_BETA"] * goal_achieved + position_achieved
+    if config["POSITION_GOALS"]:
+      logits = config["GOAL_BETA"] * goal_achieved + position_achieved
+    else:
+      logits = goal_achieved
     probabilities = logits / (logits.sum(-1) + 1e-5)
 
     # N
@@ -498,11 +513,15 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     positions_at_indices = index(position_fn(timesteps), indices)
     assert positions_at_indices.shape[0] == features_at_indices.shape[0]
     assert positions_at_indices.shape[1] == 2
-    return GoalPosition(
+    goal = GoalPosition(
       jax.lax.stop_gradient(features_at_indices),
       # reserve 0 for empty position
-      jax.lax.stop_gradient(positions_at_indices) + 1,
-    ), indices
+      (jax.lax.stop_gradient(positions_at_indices) + 1)
+      * float(config["POSITION_GOALS"]),
+    )
+
+    # [N, D], [T], [N]
+    return goal, logits, indices
 
   return functools.partial(
     HerLossFn,
@@ -676,6 +695,16 @@ def create_data_plots(d_, reward_info, is_her=False, subfig=None, goal_index=-1)
   ax2b.grid(True)
   ax2b.set_xticks(range(nT))
 
+  # Add red vertical lines at loss_mask boundaries
+  if loss_mask is not None:
+    mask_indices = jnp.where(loss_mask == 1)[0]
+    if len(mask_indices) > 0:
+      left_boundary = int(mask_indices[0])
+      right_boundary = int(mask_indices[-1])
+      for ax in [ax2a, ax2b]:
+        ax.axvline(left_boundary, color="red", linestyle="--", alpha=0.7, linewidth=2)
+        ax.axvline(right_boundary, color="red", linestyle="--", alpha=0.7, linewidth=2)
+
   # Episode markers
   is_last = d_["timesteps"].last()
   ax2c.plot(discounts, label="Discounts")
@@ -750,9 +779,6 @@ def jaxmaze_learner_log_fn(
     )
     if n_image_rows == 1:
       axes_img = axes_img[None, :]  # ensure 2D
-    # Get reward arrays for coloring (only for HER)
-    position_reward = reward_info.get("position_reward", None)
-    goal_reward = reward_info.get("goal_reward", None)
 
     for idx in range(n_episode_steps):
       row, col = divmod(idx, ncols_img)
@@ -760,32 +786,37 @@ def jaxmaze_learner_log_fn(
       state_at_t = jax.tree_util.tree_map(lambda x: x[idx], timesteps.state)
       img = render_fn(state_at_t)
       ax.imshow(img)
-      suffix = ""
+      # Add black border around first timestep
       if idx == 0:
-        suffix += " - FIRST"
-      if idx == goal_index:
-        suffix += " - GOAL"
+        rect = Rectangle(
+          (0, 0),
+          img.shape[1],
+          img.shape[0],
+          linewidth=10,
+          edgecolor="black",
+          facecolor="none",
+        )
+        ax.add_patch(rect)
 
-      # Add colored boxes based on rewards
-      if is_her and position_reward is not None and goal_reward is not None:
-        pos_r = float(position_reward[idx])
-        goal_r = float(goal_reward[idx])
-        if pos_r > 0 and goal_r > 0:
-          # Neon green if both rewards > 0
-          for spine in ax.spines.values():
-            spine.set_visible(True)
-            spine.set_edgecolor("#39FF14")  # neon green
-            spine.set_linewidth(3)
-          suffix += "\nBOTH"
-        elif pos_r > 0:
-          # Red if only position reward > 0
-          for spine in ax.spines.values():
-            spine.set_visible(True)
-            spine.set_edgecolor("red")
-            spine.set_linewidth(3)
-          suffix += "\nPOS"
+      # Add colored borders based on reward and state_features
+      reward = float(timesteps.reward[idx])
+      features = timesteps.observation.state_features[idx]
+      has_reward = reward > 0
+      has_features = features.sum() > 0
 
-      ax.set_title(f"t={idx}{suffix}", fontsize=8)
+      if has_reward or has_features:
+        color = "red" if has_reward else "blue"
+        rect = Rectangle(
+          (0, 0),
+          img.shape[1],
+          img.shape[0],
+          linewidth=6,
+          edgecolor=color,
+          facecolor="none",
+        )
+        ax.add_patch(rect)
+
+      ax.set_title(f"t={idx}", fontsize=8)
       ax.axis("off")
     # Hide unused subplots
     for idx in range(n_episode_steps, n_image_rows * ncols_img):
@@ -877,13 +908,38 @@ def crafax_learner_log_fn(data: dict, config: dict):
       state_at_t = jax.tree_util.tree_map(lambda x: x[idx], timesteps.state.env_state)
       img = craftax_render_fn(state_at_t)
       ax.imshow(img)
-      suffix = ""
+
+      # Add black border around first timestep
       if idx == 0:
-        suffix += " - FIRST"
-      if idx == goal_index:
-        suffix += " - GOAL"
-      title = f"t={idx}{suffix}\n{actions_taken[idx]}"
-      ax.set_title(title, fontsize=7)
+        rect = Rectangle(
+          (0, 0),
+          img.shape[1],
+          img.shape[0],
+          linewidth=10,
+          edgecolor="black",
+          facecolor="none",
+        )
+        ax.add_patch(rect)
+
+      # Add colored borders based on reward and state_features
+      reward = float(timesteps.reward[idx])
+      features = timesteps.observation.state_features[idx]
+      has_reward = reward > 0
+      has_features = features.sum() > 0
+
+      if has_reward or has_features:
+        color = "red" if has_reward else "blue"
+        rect = Rectangle(
+          (0, 0),
+          img.shape[1],
+          img.shape[0],
+          linewidth=6,
+          edgecolor=color,
+          facecolor="none",
+        )
+        ax.add_patch(rect)
+
+      ax.set_title(f"t={idx}\n{actions_taken[idx]}", fontsize=7)
       ax.axis("off")
     # Hide unused subplots
     for idx in range(n_episode_steps, n_image_rows * ncols_img):
