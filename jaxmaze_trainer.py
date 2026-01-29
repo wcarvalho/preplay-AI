@@ -530,7 +530,7 @@ def sweep(search: str = ""):
         "LEARNER_EXTRA_LOG_PERIOD": {"values": [25]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-exp-position-10",
+      "group": "her-exp-position-11",
     }
   elif search == "her2":
     sweep_config = {
