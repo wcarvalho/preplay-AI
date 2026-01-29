@@ -827,10 +827,7 @@ def jaxmaze_learner_log_fn(
       has_reward = reward > 0
       has_features = features.sum() > 0
 
-      if rewards_mismatch:
-        color = "yellow"
-        add_border = True
-      elif has_reward:
+      if has_reward:
         color = "red"
         add_border = True
       elif has_features:
@@ -875,7 +872,7 @@ def jaxmaze_learner_log_fn(
   is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
 
   def plot_both(d):
-    # plot_individual(d["online"], "online")
+    plot_individual(d["online"], "online")
     plot_individual(d["her"], "her")
 
   jax.lax.cond(
