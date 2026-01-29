@@ -201,6 +201,7 @@ class HerLossFn(base.RecurrentLossFn):
   sample_goals: Callable[[base.TimeStep, jax.random.PRNGKey], jax.Array] = None
   online_reward_fn: Callable[[base.TimeStep], jax.Array] = None
   her_reward_fn: Callable[[base.TimeStep, Goal], jax.Array] = None
+  terminate_on_reward: bool = False
 
   def loss_fn(
     self,
@@ -368,7 +369,21 @@ class HerLossFn(base.RecurrentLossFn):
         episode_ids, goal_index, keepdims=False
       )  # scalar
       episode_mask = (episode_ids == goal_episode_id).astype(jnp.float32)  # [T]
+
+      # If terminate_on_reward: mask out timesteps AFTER goal_index
+      if self.terminate_on_reward:
+        time_indices = jnp.arange(len(timestep.reward))
+        terminate_mask = (time_indices <= goal_index).astype(jnp.float32)
+        episode_mask = episode_mask * terminate_mask
+
       loss_mask = episode_mask * is_truncated(timestep)  # [T]
+
+      # Create modified discount that's 0 at goal_index (episode terminates there)
+      if self.terminate_on_reward:
+        goal_mask = jax.nn.one_hot(goal_index, len(timestep.discount))
+        modified_discount = timestep.discount * (1.0 - goal_mask)
+      else:
+        modified_discount = timestep.discount
 
       td_error, batch_loss, metrics, log_info = self.loss_fn(
         timestep=timestep,
@@ -377,7 +392,7 @@ class HerLossFn(base.RecurrentLossFn):
         actions=actions,
         rewards=her_reward_info["reward"],
         is_last=make_float(timestep.last()),
-        non_terminal=timestep.discount,
+        non_terminal=modified_discount,
         loss_mask=loss_mask,
       )
       mask_no_achevement_loss = (goal_logits.sum() < 1e-5).astype(batch_loss.dtype)
@@ -539,6 +554,7 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     sample_goals=sample_goals,
     online_reward_fn=online_reward_fn,
     her_reward_fn=her_reward_fn,
+    terminate_on_reward=config.get("TERMINATE_ON_REWARD", False),
   )
 
 
