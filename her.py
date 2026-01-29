@@ -787,7 +787,7 @@ def jaxmaze_learner_log_fn(
       img = render_fn(state_at_t)
       ax.imshow(img)
       # Add black border around first timestep
-      if idx == 0:
+      if timesteps.first()[idx]:
         rect = Rectangle(
           (0, 0),
           img.shape[1],
@@ -910,7 +910,7 @@ def crafax_learner_log_fn(data: dict, config: dict):
       ax.imshow(img)
 
       # Add black border around first timestep
-      if idx == 0:
+      if timesteps.first()[idx]:
         rect = Rectangle(
           (0, 0),
           img.shape[1],
