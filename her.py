@@ -395,9 +395,12 @@ class HerLossFn(base.RecurrentLossFn):
         non_terminal=modified_discount,
         loss_mask=loss_mask,
       )
-      mask_no_achevement_loss = (goal_logits.sum() < 1e-5).astype(batch_loss.dtype)
-      td_error = mask_no_achevement_loss * td_error
-      batch_loss = mask_no_achevement_loss * batch_loss
+      achieved_something = (goal_logits.sum() > 1e-5).astype(batch_loss.dtype)
+      td_error = achieved_something * td_error
+      batch_loss = achieved_something * batch_loss
+
+      metrics = jax.tree.map(lambda x:x*achieved_something, metrics)
+      metrics['achieved_something'] = achieved_something
 
       log_info["reward_info"] = her_reward_info  # [T, ...]
       log_info["goal_index"] = goal_index
@@ -1025,6 +1028,35 @@ class DuellingDotMLP(nn.Module):
     advantages -= jnp.mean(advantages, axis=0, keepdims=True)  # [A, C]
 
     sf = value[None, :] + advantages  # [A, C]
+    q_values = (sf * task[None, :]).sum(-1)  # [A]
+
+    return q_values
+
+
+class DotMLP(nn.Module):
+  hidden_dim: int
+  num_actions: int = 0
+  num_layers: int = 1
+  norm_type: str = "none"
+  activation: str = "relu"
+  activate_final: bool = True
+  use_bias: bool = False
+
+  @nn.compact
+  def __call__(self, x, task, train: bool = False):
+    task_dim = task.shape[-1]
+    mlp = base.MLP(
+        hidden_dim=self.hidden_dim,
+        num_layers=self.num_layers,
+        use_bias=self.use_bias,
+        out_dim=self.num_actions * task_dim,
+    )
+    assert self.num_actions > 0, "must have at least one action"
+
+
+    advantages = mlp(x)  # [A*C]
+    sf = sf.reshape(self.num_actions, task_dim)  # [A, C]
+
     q_values = (sf * task[None, :]).sum(-1)  # [A]
 
     return q_values

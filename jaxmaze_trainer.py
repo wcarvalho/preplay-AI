@@ -543,7 +543,7 @@ def sweep(search: str = ""):
         "SEED": {"values": [2]},
         "env.exp": {"values": ["her_test", "exp4"]},
         "NUM_HER_GOALS": {"values": [1]},
-        "HER_COEFF": {"values": [1.0, 0.0]},
+        "HER_COEFF": {"values": [1, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5]},
         "base": {"values": ["base2"]},
         # "POSITION_BETA": {"values": [1.0, .1, 10.]},
         # "HER_COEFF": {"values": [1, .1, .01]},
