@@ -316,7 +316,7 @@ class HerLossFn(base.RecurrentLossFn):
     log_info["reward_info"] = jax.tree.map(swap, online_reward_info)
 
     # first label online loss with online
-    all_metrics.update({f"{k}/online": v for k, v in metrics.items()})
+    all_metrics.update({f"0.online/{k}": v for k, v in metrics.items()})
     all_log_info["online"] = log_info
 
     if self.her_coeff < 1e-5:
@@ -409,7 +409,7 @@ class HerLossFn(base.RecurrentLossFn):
     )
 
     loss = loss + self.her_coeff * her_loss.mean(1)
-    all_metrics.update({f"{k}/her": v for k, v in her_metrics.items()})
+    all_metrics.update({f"1.her/{k}": v for k, v in her_metrics.items()})
     all_log_info["her"] = jax.tree.map(
       # only first goal
       lambda x: x[:, 0],
@@ -457,7 +457,7 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     assert goal_reward.ndim == 1
     assert position_reward.ndim == 1
     if config["POSITION_GOALS"]:
-      reward = 0.5 * position_reward + 0.5 * goal_reward
+      reward = 0.2 * position_reward + 0.8 * goal_reward
     else:
       position_reward = position_reward * 0.0
       reward = goal_reward
@@ -513,11 +513,14 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     positions_at_indices = index(position_fn(timesteps), indices)
     assert positions_at_indices.shape[0] == features_at_indices.shape[0]
     assert positions_at_indices.shape[1] == 2
+    if config["POSITION_GOALS"]:
+      # reserve 0 for empty position
+      position_goal = jax.lax.stop_gradient(positions_at_indices) + 1
+    else:
+      position_goal = jnp.zeros_like(positions_at_indices)
     goal = GoalPosition(
       jax.lax.stop_gradient(features_at_indices),
-      # reserve 0 for empty position
-      (jax.lax.stop_gradient(positions_at_indices) + 1)
-      * float(config["POSITION_GOALS"]),
+      position_goal,
     )
 
     # [N, D], [T], [N]
@@ -800,12 +803,27 @@ def jaxmaze_learner_log_fn(
 
       # Add colored borders based on reward and state_features
       reward = float(timesteps.reward[idx])
+      her_reward = float(reward_info["reward"][idx])
       features = timesteps.observation.state_features[idx]
+
+      # Determine border color (YELLOW for mismatch is highest priority)
+      rewards_mismatch = abs(reward - her_reward) > 1e-5
       has_reward = reward > 0
       has_features = features.sum() > 0
 
-      if has_reward or has_features:
-        color = "red" if has_reward else "blue"
+      if rewards_mismatch:
+        color = "yellow"
+        add_border = True
+      elif has_reward:
+        color = "red"
+        add_border = True
+      elif has_features:
+        color = "blue"
+        add_border = True
+      else:
+        add_border = False
+
+      if add_border:
         rect = Rectangle(
           (0, 0),
           img.shape[1],
@@ -816,7 +834,7 @@ def jaxmaze_learner_log_fn(
         )
         ax.add_patch(rect)
 
-      ax.set_title(f"t={idx}", fontsize=8)
+      ax.set_title(f"t={idx}, r_t={reward:.1f}, r_h={her_reward:.1f}", fontsize=7)
       ax.axis("off")
     # Hide unused subplots
     for idx in range(n_episode_steps, n_image_rows * ncols_img):
@@ -923,12 +941,27 @@ def crafax_learner_log_fn(data: dict, config: dict):
 
       # Add colored borders based on reward and state_features
       reward = float(timesteps.reward[idx])
+      her_reward = float(reward_info["reward"][idx])
       features = timesteps.observation.state_features[idx]
+
+      # Determine border color (YELLOW for mismatch is highest priority)
+      rewards_mismatch = abs(reward - her_reward) > 1e-5
       has_reward = reward > 0
       has_features = features.sum() > 0
 
-      if has_reward or has_features:
-        color = "red" if has_reward else "blue"
+      if rewards_mismatch:
+        color = "yellow"
+        add_border = True
+      elif has_reward:
+        color = "red"
+        add_border = True
+      elif has_features:
+        color = "blue"
+        add_border = True
+      else:
+        add_border = False
+
+      if add_border:
         rect = Rectangle(
           (0, 0),
           img.shape[1],
@@ -939,7 +972,7 @@ def crafax_learner_log_fn(data: dict, config: dict):
         )
         ax.add_patch(rect)
 
-      ax.set_title(f"t={idx}\n{actions_taken[idx]}", fontsize=7)
+      ax.set_title(f"t={idx}, r_t={reward:.1f}, r_h={her_reward:.1f}\n{actions_taken[idx]}", fontsize=7)
       ax.axis("off")
     # Hide unused subplots
     for idx in range(n_episode_steps, n_image_rows * ncols_img):
@@ -987,6 +1020,7 @@ class DuellingDotMLP(nn.Module):
   @nn.compact
   def __call__(self, x, task, train: bool = False):
     task_dim = task.shape[-1]
+    x = jnp.concatenate((x, task), axis=-1)
     value_mlp = base.MLP(
       hidden_dim=self.hidden_dim,
       num_layers=self.num_layers,
