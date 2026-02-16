@@ -522,18 +522,14 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["her"]},
-        "SEED": {"values": [2, 3]},
-        #"env.exp": {"values": ["her_test", "her_test_big"]},
-        "env.exp": {"values": ["her_test"]},
-        #"env.exp": {"values": ["her_test_big"]},
+        "SEED": {"values": [1, 2, 3]},
+        "env.exp": {"values": ["her_test_big", 'exp4']},
         "NUM_HER_GOALS": {"values": [1]},
-        "TERMINATE_ON_REWARD": {"values": [True]},
-        "POSITION_GOALS": {"values": [False]},
-        "HER_COEFF": {"values": [1, .1]},
+        "HER_COEFF": {"values": [1, 1e-1, 0.]},
         "LEARNER_EXTRA_LOG_PERIOD": {"values": [50]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-exp-no-position-4",
+      "group": "her-exp-7",
     }
   elif search == "her2":
     sweep_config = {
