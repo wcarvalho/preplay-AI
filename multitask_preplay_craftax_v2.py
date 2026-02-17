@@ -394,6 +394,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
   simulation_length: int = 5
   online_coeff: float = 1.0
   dyna_coeff: float = 1.0
+  all_goals_coeff: float = 1.0
   max_priority_weight: float = 0.9
   importance_sampling_exponent: float = 0.6
   num_offtask_goals: int = 5
@@ -551,6 +552,96 @@ class DynaLossFn(vbb.RecurrentLossFn):
       all_metrics.update({f"{k}/dyna": v for k, v in dyna_metrics.items()})
 
       all_log_info["dyna"] = dyna_log_info
+
+    elif self.all_goals_coeff > 0.0:
+      def all_goals_loss_single(timestep_b, action_b, h_on_b, h_tar_b, loss_mask_b, key):
+        # timestep_b: [T, ...], action_b: [T], h_on_b/h_tar_b: tree of [...], loss_mask_b: [T]
+        N = self.num_offtask_goals
+
+        # Sample goals from achievable set
+        goals, achievable, any_achievable = self.sample_goals(timestep_b, key, N)
+        # goals: [N, G]
+        import ipdb; ipdb.set_trace()
+        # Repeat RNN states for N goals
+        h_on_repeated = repeat(h_on_b, N)  # [N, D]
+        h_tar_repeated = repeat(h_tar_b, N)  # [N, D]
+
+        # Broadcast timesteps, actions, loss_mask to [T, N, ...]
+        timestep_broadcast = jax.tree.map(
+          lambda x: jnp.broadcast_to(x[:, None, ...], (x.shape[0], N) + x.shape[1:]),
+          timestep_b,
+        )
+        action_broadcast = jnp.broadcast_to(
+          action_b[:, None], (action_b.shape[0], N)
+        )
+        loss_mask_broadcast = jnp.broadcast_to(
+          loss_mask_b[:, None], (loss_mask_b.shape[0], N)
+        )
+
+        # Compute goal-conditioned Q-values (online)
+        key, key_ = jax.random.split(key)
+        online_preds_g = apply_rnn_and_q(
+          h_tm1=h_on_repeated,
+          timesteps=timestep_broadcast,
+          task=goals,
+          rng=key_,
+          network=self.network,
+          params=params,
+          q_fn=self.network.subtask_q_fn,
+        )
+
+        # Compute goal-conditioned Q-values (target)
+        key, key_ = jax.random.split(key)
+        target_preds_g = apply_rnn_and_q(
+          h_tm1=h_tar_repeated,
+          timesteps=timestep_broadcast,
+          task=goals,
+          rng=key_,
+          network=self.network,
+          params=target_params,
+          q_fn=self.network.subtask_q_fn,
+        )
+
+        # Compute goal-specific rewards: [N, T] → [T, N]
+        goal_rewards = jax.vmap(
+          lambda g: self.compute_rewards(timestep_b, g)
+        )(goals)
+        goal_rewards = goal_rewards.T
+
+        # Compute TD loss
+        ag_td_error, ag_batch_loss, ag_metrics, ag_log_info = self.loss_fn(
+          timestep=timestep_broadcast,
+          online_preds=online_preds_g,
+          target_preds=target_preds_g,
+          actions=action_broadcast,
+          rewards=goal_rewards / MAX_REWARD,
+          is_last=make_float(timestep_broadcast.last()),
+          non_terminal=timestep_broadcast.discount,
+          loss_mask=loss_mask_broadcast,
+        )
+        # ag_td_error: [T-1, N], ag_batch_loss: [N]
+
+        # Average over goals
+        ag_td_error = ag_td_error.mean(1)  # [T-1]
+        ag_batch_loss_mean = ag_batch_loss.mean()  # scalar
+
+        return ag_td_error, ag_batch_loss_mean, ag_metrics, ag_log_info
+
+      # Vmap over batch
+      all_goals_fn = jax.vmap(all_goals_loss_single, (1, 1, 0, 0, 1, 0), 0)
+      _, all_goals_batch_loss, all_goals_metrics, _ = all_goals_fn(
+        data.timestep,
+        data.action,
+        online_state,
+        target_state,
+        loss_mask,
+        jax.random.split(key_grad, B),
+      )
+      batch_loss += self.all_goals_coeff * all_goals_batch_loss
+      all_metrics.update({f"{k}/all_goals": v for k, v in all_goals_metrics.items()})
+    else:
+      td_error = jnp.zeros_like(loss_mask)
+      batch_loss = td_error.sum(0)  # time axis
 
     if self.logger.learner_log_extra is not None:
       self.logger.learner_log_extra(all_log_info)
@@ -1060,6 +1151,7 @@ def make_loss_fn_class(config, **kwargs) -> DynaLossFn:
     offtask_coeff=config.get("SUBTASK_COEFF", 1.0),
     mainq_coeff=config.get("MAINQ_COEFF", 1.0),
     combine_real_sim=config.get("COMBINE_REAL_SIM", False),
+    all_goals_coeff=config.get("ALL_GOALS_COEFF", 0.0),
     **kwargs,
   )
 

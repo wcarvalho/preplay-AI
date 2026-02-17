@@ -1391,9 +1391,7 @@ def make_train(
           idx = int(n_updates // one_tenth)
           save_training_state(params, config, save_path, config["ALG"], idx, n_updates)
 
-        should_save = jnp.logical_or(
-          train_state.n_updates == 0, train_state.n_updates % one_tenth == 0
-        )
+        should_save = (train_state.n_updates % one_tenth == 0) & (train_state.n_updates > 0)
 
         jax.lax.cond(
           should_save,
@@ -1417,6 +1415,13 @@ def make_train(
       agent_state=init_agent_state,
       rng=_rng,
     )
+
+    # Save initial parameters once before the training loop
+    if save_path is not None:
+      jax.debug.callback(
+        save_training_state,
+        train_state.params, config, save_path, config["ALG"], 0, 0,
+      )
 
     runner_state, _ = jax.lax.scan(
       _train_step, runner_state, None, config["NUM_UPDATES"]

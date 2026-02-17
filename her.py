@@ -447,6 +447,7 @@ class HerLossFn(base.RecurrentLossFn):
 ############################################
 # Environment Specific
 ############################################
+
 def make_loss_fn_class(config) -> base.RecurrentLossFn:
   def online_reward_fn(timesteps):
     task_vector_fn, achievement_fn, position_fn = ENVIRONMENT_TO_GOAL_FNS[config["ENV"]]
@@ -1089,8 +1090,6 @@ class DotMLP(nn.Module):
     )
     assert self.num_actions > 0, "must have at least one action"
 
-
-    advantages = mlp(x)  # [A*C]
     sf = sf.reshape(self.num_actions, task_dim)  # [A, C]
 
     q_values = (sf * task[None, :]).sum(-1)  # [A]
