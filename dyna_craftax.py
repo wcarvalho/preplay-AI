@@ -80,11 +80,13 @@ def make_float(x):
 
 
 def concat_pytrees(tree1, tree2, **kwargs):
-  return jax.tree.map(lambda x, y: jnp.concatenate((x, y), **kwargs), tree1, tree2)
+  return jax.tree_util.tree_map(
+    lambda x, y: jnp.concatenate((x, y), **kwargs), tree1, tree2
+  )
 
 
 def add_time(v):
-  return jax.tree.map(lambda x: x[None], v)
+  return jax.tree_util.tree_map(lambda x: x[None], v)
 
 
 def concat_first_rest(first, rest):
@@ -99,7 +101,7 @@ def concat_start_sims(start, simulations):
   # need this since have 1 start path, but multiple simulations
   concat_ = lambda a, b: jnp.concatenate((a, b))
   concat_ = jax.vmap(concat_, (None, 1), 1)
-  return jax.tree.map(concat_, start, simulations)
+  return jax.tree_util.tree_map(concat_, start, simulations)
 
 
 def is_truncated(timestep):
@@ -470,7 +472,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
     if self.dyna_coeff > 0.0:
       # will use time-step + previous rnn-state to simulate
       # next state at each time-step and compute predictions
-      remove_last = lambda x: jax.tree.map(lambda y: y[:-1], x)
+      remove_last = lambda x: jax.tree_util.tree_map(lambda y: y[:-1], x)
       h_tm1_online = concat_first_rest(online_state, remove_last(online_preds.state))
       h_tm1_target = concat_first_rest(target_state, remove_last(target_preds.state))
       x_t = data.timestep
@@ -545,11 +547,11 @@ class DynaLossFn(vbb.RecurrentLossFn):
     # T' = T-window_size+1
     # K = window_size
     # [T, ...] --> [T', K, ...]
-    actions = jax.tree.map(roll, actions)
-    timesteps = jax.tree.map(roll, timesteps)
-    h_online = jax.tree.map(roll, h_online)
-    h_target = jax.tree.map(roll, h_target)
-    loss_mask = jax.tree.map(roll, loss_mask)
+    actions = jax.tree_util.tree_map(roll, actions)
+    timesteps = jax.tree_util.tree_map(roll, timesteps)
+    h_online = jax.tree_util.tree_map(roll, h_online)
+    h_target = jax.tree_util.tree_map(roll, h_target)
+    loss_mask = jax.tree_util.tree_map(roll, loss_mask)
 
     def dyna_loss_fn_(t, a, h_on, h_tar, l_mask, key):
       """
@@ -564,15 +566,15 @@ class DynaLossFn(vbb.RecurrentLossFn):
       key, key_ = jax.random.split(key)
       # [sim_length, num_sim, ...]
       next_t, sim_outputs_t = simulate(
-        h_tm1=jax.tree.map(lambda x: x[-1], h_on),
-        x_t=jax.tree.map(lambda x: x[-1], t),
+        h_tm1=jax.tree_util.tree_map(lambda x: x[-1], h_on),
+        x_t=jax.tree_util.tree_map(lambda x: x[-1], t),
         rng=key_,
       )
       if self.backtracking:
         # we replace last, because last action from data
         # is different than action from simulation
         # [window_size + sim_length, num_sims, ...]
-        all_but_last = lambda y: jax.tree.map(lambda x: x[:-1], y)
+        all_but_last = lambda y: jax.tree_util.tree_map(lambda x: x[:-1], y)
         all_t = concat_start_sims(all_but_last(t), next_t)
         all_a = concat_start_sims(all_but_last(a), sim_outputs_t.actions)
         # start at beginning of experience data
@@ -586,7 +588,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
       # NOTE: we're recomputing RNN but easier to read this way...
       # TODO: reuse RNN online param computations for speed (probably not worth it)
       key, key_ = jax.random.split(key)
-      h_htm1 = jax.tree.map(lambda x: x[start_index], h_on)
+      h_htm1 = jax.tree_util.tree_map(lambda x: x[start_index], h_on)
       h_htm1 = repeat(h_htm1, self.num_simulations)
       online_preds = apply_rnn_and_q(
         h_tm1=h_htm1,
@@ -599,7 +601,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
       )
 
       key, key_ = jax.random.split(key)
-      h_htm1 = jax.tree.map(lambda x: x[start_index], h_tar)
+      h_htm1 = jax.tree_util.tree_map(lambda x: x[start_index], h_tar)
       h_htm1 = repeat(h_htm1, self.num_simulations)
       target_preds = apply_rnn_and_q(
         h_tm1=h_htm1,
@@ -770,7 +772,7 @@ def learner_log_extra(
     obs_images = []
     max_len = min(config.get("MAX_EPISODE_LOG_LEN", 40), len(rewards))
     for idx in range(max_len):
-      index = lambda y: jax.tree.map(lambda x: x[idx], y)
+      index = lambda y: jax.tree_util.tree_map(lambda x: x[idx], y)
       obs_image = render_fn(index(timesteps.state.env_state))
       obs_images.append(obs_image)
 
@@ -780,7 +782,7 @@ def learner_log_extra(
     actions_taken = [Action(a).name for a in actions]
 
     def index(t, idx):
-      return jax.tree.map(lambda x: x[idx], t)
+      return jax.tree_util.tree_map(lambda x: x[idx], t)
 
     def panel_title_fn(timesteps, i):
       title = f"t={i}"
@@ -827,7 +829,7 @@ def learner_log_extra(
 
   if "dyna" in data:
     # [Batch, Env Time, Sim Time, Num Simuations]
-    dyna_data = jax.tree.map(lambda x: x[0, 0, :, 0], data["dyna"])
+    dyna_data = jax.tree_util.tree_map(lambda x: x[0, 0, :, 0], data["dyna"])
 
     jax.lax.cond(
       is_log_time,

@@ -533,7 +533,7 @@ class BasicObserverState:
 
 
 def get_first(b):
-  return jax.tree.map(lambda x: x[0], b)
+  return jax.tree_util.tree_map(lambda x: x[0], b)
 
 
 class BasicObserver(Observer):
@@ -686,7 +686,7 @@ def default_learner_logger(
     if wandb.run is not None:
       wandb.log(metrics)
 
-  learner_metrics = jax.tree.map(lambda x: x.mean(), learner_metrics)
+  learner_metrics = jax.tree_util.tree_map(lambda x: x.mean(), learner_metrics)
   jax.debug.callback(callback, train_state, learner_metrics)
 
 
@@ -773,7 +773,7 @@ def masked_mean(x, mask):
 
 
 def batch_to_sequence(values: jax.Array) -> jax.Array:
-  return jax.tree.map(
+  return jax.tree_util.tree_map(
     lambda x: jnp.transpose(x, axes=(1, 0, *range(2, len(x.shape)))), values
   )
 
@@ -806,18 +806,18 @@ class RecurrentLossFn:
     unroll = functools.partial(self.network.apply, method=self.network.unroll)
 
     online_state = batch.experience.extras.get("agent_state")
-    online_state = jax.tree.map(lambda x: x[:, 0], online_state)
+    online_state = jax.tree_util.tree_map(lambda x: x[:, 0], online_state)
     target_state = online_state
 
     data = batch_to_sequence(batch.experience)
 
     burn_in_length = self.burn_in_length
     if burn_in_length:
-      burn_data = jax.tree.map(lambda x: x[:burn_in_length], data)
+      burn_data = jax.tree_util.tree_map(lambda x: x[:burn_in_length], data)
       key_grad, rng_1, rng_2 = jax.random.split(key_grad, 3)
       _, online_state = unroll(params, online_state, burn_data.timestep, rng_1)
       _, target_state = unroll(target_params, target_state, burn_data.timestep, rng_2)
-      data = jax.tree.map(lambda seq: seq[burn_in_length:], data)
+      data = jax.tree_util.tree_map(lambda seq: seq[burn_in_length:], data)
 
     key_grad, rng_1, rng_2 = jax.random.split(key_grad, 3)
     online_preds, _ = unroll(params, online_state, data.timestep, rng_1)
@@ -1143,7 +1143,9 @@ def make_train(
     train_state = CustomTrainState.create(
       apply_fn=agent.apply,
       params=network_params,
-      target_network_params=jax.tree.map(lambda x: jnp.copy(x), network_params),
+      target_network_params=jax.tree_util.tree_map(
+        lambda x: jnp.copy(x), network_params
+      ),
       tx=tx,
       timesteps=0,
       n_updates=0,
@@ -1185,7 +1187,7 @@ def make_train(
       action=action,
       extras=FrozenDict(preds=init_preds, agent_state=init_agent_state),
     )
-    init_transition_example = jax.tree.map(lambda x: x[0], init_transition)
+    init_transition_example = jax.tree_util.tree_map(lambda x: x[0], init_transition)
 
     buffer_state = buffer.init(init_transition_example)
 
@@ -1224,7 +1226,7 @@ def make_train(
     dummy_rng = jax.random.PRNGKey(0)
 
     # Add dummy transitions so buffer can be sampled for shape inference
-    dummy_transitions = jax.tree.map(
+    dummy_transitions = jax.tree_util.tree_map(
       lambda x: jnp.repeat(x[:, None], sample_sequence_length, axis=1),
       init_transition,
     )
@@ -1251,7 +1253,7 @@ def make_train(
     loss_name = loss_fn.__class__.__name__
 
     # Create dummy traj_batch for initial carry (shape: TRAINING_INTERVAL, NUM_ENVS, ...)
-    dummy_traj_batch = jax.tree.map(
+    dummy_traj_batch = jax.tree_util.tree_map(
       lambda x: jnp.zeros((config["TRAINING_INTERVAL"],) + x.shape, dtype=x.dtype),
       init_transition,
     )

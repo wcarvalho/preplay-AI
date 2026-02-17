@@ -314,7 +314,7 @@ class HerLossFn(base.RecurrentLossFn):
     td_error = jnp.swapaxes(td_error, 0, 1)
 
     swap = lambda x: jnp.swapaxes(x, 0, 1)
-    log_info["reward_info"] = jax.tree.map(swap, online_reward_info)
+    log_info["reward_info"] = jax.tree_util.tree_map(swap, online_reward_info)
 
     # first label online loss with online
     all_metrics.update({f"0.online/{k}": v for k, v in metrics.items()})
@@ -355,7 +355,7 @@ class HerLossFn(base.RecurrentLossFn):
 
       # [D] --> [T, D]
       expand_over_time = lambda x: jnp.tile(x[None], [length, 1])
-      expanded_new_goal = jax.tree.map(expand_over_time, new_goal)
+      expanded_new_goal = jax.tree_util.tree_map(expand_over_time, new_goal)
 
       apply_q = functools.partial(self.network.apply, method=self.network.apply_q)
       online_preds = apply_q(params, online_preds.rnn_states, expanded_new_goal)
@@ -399,8 +399,8 @@ class HerLossFn(base.RecurrentLossFn):
       td_error = achieved_something * td_error
       batch_loss = achieved_something * batch_loss
 
-      metrics = jax.tree.map(lambda x:x*achieved_something, metrics)
-      metrics['achieved_something'] = achieved_something
+      metrics = jax.tree_util.tree_map(lambda x: x * achieved_something, metrics)
+      metrics["achieved_something"] = achieved_something
 
       log_info["reward_info"] = her_reward_info  # [T, ...]
       log_info["goal_index"] = goal_index
@@ -428,7 +428,7 @@ class HerLossFn(base.RecurrentLossFn):
 
     loss = loss + self.her_coeff * her_loss.mean(1)
     all_metrics.update({f"1.her/{k}": v for k, v in her_metrics.items()})
-    all_log_info["her"] = jax.tree.map(
+    all_log_info["her"] = jax.tree_util.tree_map(
       # only first goal
       lambda x: x[:, 0],
       her_log_info,
@@ -450,7 +450,7 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     goal_reward = (task_vector * achievements).sum(-1)
 
     reward = goal_reward
-    reward = jax.tree.map(jax.lax.stop_gradient, reward)
+    reward = jax.tree_util.tree_map(jax.lax.stop_gradient, reward)
     return {
       "reward": reward,
       "goal_reward": goal_reward,
@@ -480,7 +480,7 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
       position_reward = position_reward * 0.0
       reward = goal_reward
 
-    reward = jax.tree.map(jax.lax.stop_gradient, reward)
+    reward = jax.tree_util.tree_map(jax.lax.stop_gradient, reward)
 
     T = goal_achievements.shape[0]
     goal_task_vector = jnp.tile(goal_task_vector[None], [T, 1])  # [T, D]
@@ -988,7 +988,10 @@ def crafax_learner_log_fn(data: dict, config: dict):
         )
         ax.add_patch(rect)
 
-      ax.set_title(f"t={idx}, r_t={reward:.1f}, r_h={her_reward:.1f}\n{actions_taken[idx]}", fontsize=7)
+      ax.set_title(
+        f"t={idx}, r_t={reward:.1f}, r_h={her_reward:.1f}\n{actions_taken[idx]}",
+        fontsize=7,
+      )
       ax.axis("off")
     # Hide unused subplots
     for idx in range(n_episode_steps, n_image_rows * ncols_img):
@@ -1077,13 +1080,12 @@ class DotMLP(nn.Module):
   def __call__(self, x, task, train: bool = False):
     task_dim = task.shape[-1]
     mlp = base.MLP(
-        hidden_dim=self.hidden_dim,
-        num_layers=self.num_layers,
-        use_bias=self.use_bias,
-        out_dim=self.num_actions * task_dim,
+      hidden_dim=self.hidden_dim,
+      num_layers=self.num_layers,
+      use_bias=self.use_bias,
+      out_dim=self.num_actions * task_dim,
     )
     assert self.num_actions > 0, "must have at least one action"
-
 
     advantages = mlp(x)  # [A*C]
     sf = sf.reshape(self.num_actions, task_dim)  # [A, C]

@@ -236,11 +236,11 @@ class OptimisticResetVecEnvWrapper(object):
     )
     reset_indexes = reset_indexes.at[being_reset].set(jnp.arange(self.num_resets))
 
-    timestep_re = jax.tree.map(lambda x: x[reset_indexes], timestep_re)
+    timestep_re = jax.tree_util.tree_map(lambda x: x[reset_indexes], timestep_re)
 
     # Auto-reset environment based on termination
     def auto_reset(done, timestep_re, timestep_st):
-      return jax.tree.map(
+      return jax.tree_util.tree_map(
         lambda x, y: jax.lax.select(done, x, y), timestep_re, timestep_st
       )
 
@@ -270,7 +270,7 @@ def craftax_experience_logger(
   # [T, B]
   done = trajectory.timestep.last()
 
-  metrics = jax.tree.map(
+  metrics = jax.tree_util.tree_map(
     lambda x: (x * done).sum() / (1e-5 + done.sum()),
     infos,
   )
@@ -451,7 +451,7 @@ def run_single(config: dict, save_path: str = None):
 
   #  model_state = outs["runner_state"][0]
   #  # save only params of the firt run
-  #  params = jax.tree.map(lambda x: x[0], model_state.params)
+  #  params = jax.tree_util.tree_map(lambda x: x[0], model_state.params)
   #  os.makedirs(save_path, exist_ok=True)
 
   #  save_params(params, f"{save_path}/{alg_name}.safetensors")
