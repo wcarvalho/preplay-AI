@@ -1,6 +1,11 @@
 """
 Hindsight experience replay
 
+
+Things to remove:
+1. POSITION_GOALS <-- hard-code to always be False. remove GOAL_BETA
+2. TERMINATE_ON_REWARD <-- hard-code to always be False.
+
 This is a self-contained module that only depends on:
 1. base_algorithm.py (consolidated jaxneurorl components)
 2. networks.py (CraftaxObsEncoder, CraftaxMultiGoalObsEncoder)
@@ -442,6 +447,7 @@ class HerLossFn(base.RecurrentLossFn):
 ############################################
 # Environment Specific
 ############################################
+
 def make_loss_fn_class(config) -> base.RecurrentLossFn:
   def online_reward_fn(timesteps):
     task_vector_fn, achievement_fn, position_fn = ENVIRONMENT_TO_GOAL_FNS[config["ENV"]]
@@ -560,7 +566,7 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     sample_goals=sample_goals,
     online_reward_fn=online_reward_fn,
     her_reward_fn=her_reward_fn,
-    terminate_on_reward=config.get("TERMINATE_ON_REWARD", False),
+    terminate_on_reward=config.get("TERMINATE_ON_REWARD", True),
   )
 
 
@@ -875,7 +881,7 @@ def jaxmaze_learner_log_fn(
   is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
 
   def plot_both(d):
-    plot_individual(d["online"], "online")
+    #plot_individual(d["online"], "online")
     plot_individual(d["her"], "her")
 
   jax.lax.cond(
@@ -1087,7 +1093,6 @@ class DotMLP(nn.Module):
     )
     assert self.num_actions > 0, "must have at least one action"
 
-    advantages = mlp(x)  # [A*C]
     sf = sf.reshape(self.num_actions, task_dim)  # [A, C]
 
     q_values = (sf * task[None, :]).sum(-1)  # [A]

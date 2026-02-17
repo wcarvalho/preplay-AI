@@ -8,7 +8,7 @@ RL_RESULTS_DIR=/tmp/rl_results \
 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue jaxmaze_trainer.py \
   app.debug=True \
   app.wandb=True \
-  app.search=her2
+  app.search=her
 
 RUNNING ON SLURM:
 RL_RESULTS_DIR=/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results \
@@ -38,12 +38,11 @@ from flax.traverse_util import flatten_dict, unflatten_dict
 
 import numpy as np
 
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "true"
-os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".90"  # Use 90% of the A100 VRAM
-os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
-
-# Use TF32 for matmuls (significant speedup on A100)
-os.environ["XLA_FLAGS"] = "--xla_gpu_enable_latency_hiding_scheduler=true"
+if os.environ.get("JAX_PLATFORMS") != "cpu":
+    os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "true"
+    os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".95"  # Use 90% of the A100 VRAM
+    os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
+    #os.environ["XLA_FLAGS"] = "--xla_gpu_enable_latency_hiding_scheduler=true"
 
 
 from jaxneurorl.agents import value_based_basics as vbb
@@ -379,7 +378,7 @@ def run_single(config: dict, save_path: str = None):
     if base_name == "vbb":
       base_maker = vbb
     elif base_name == "base":
-      import base_algorithm
+      import archive.base_algorithm as base_algorithm
 
       base_maker = base_algorithm
     elif base_name == "base2":
@@ -437,9 +436,7 @@ def sweep(search: str = ""):
       "parameters": {
         "SEED": {"values": list(range(1))},
         "env.exp": {"values": ["exp4"]},
-        # "STEP_COST": {"values": [1e-4]},
-        # "FLOAT_OBS": {"values": [True]},
-        # "AGENT_RNN_DIM": {"values": [1024]},
+        "NUM_STARTING_LOCS": {"values": [40, 50]},
       },
       "overrides": ["alg=ql", "rlenv=jaxmaze", "user=wilka"],
       "group": "ql-12-test",
@@ -503,17 +500,16 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["preplay"]},
-        "SEED": {"values": list(range(3))},
+        "SEED": {"values": list(range(1))},
+        "NUM_STARTING_LOCS": {"values": [30, 40, 50]},
+        "GAMMA": {"values": [.99, .992]},
+        "ADD_GREEDY_EPSILON": {"values": [True, False]},
         "env.exp": {"values": ["exp4"]},
-        "MAINQ_COEFF": {"values": [1e-1, 1e-2]},
-        "OFFTASK_COEFF": {"values": [1e-1, 1e-2]},
-        # "GAMMA": {"values": [0.99, 0.991]},
-        "LR": {"values": [0.001, 0.0003]},
-        # "KNOWN_OFFTASK_GOAL": {"values": [False, True]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-eps-1",
+      "group": "preplay-easy-1",
     }
+
   elif search == "her":
     sweep_config = {
       "metric": {
@@ -522,18 +518,12 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["her"]},
-        "SEED": {"values": [2, 3]},
-        #"env.exp": {"values": ["her_test", "her_test_big"]},
-        "env.exp": {"values": ["her_test"]},
-        #"env.exp": {"values": ["her_test_big"]},
+        "SEED": {"values": [1, 2]},
+        "env.exp": {"values": ["her_test_big", 'exp4']},
         "NUM_HER_GOALS": {"values": [1]},
-        "TERMINATE_ON_REWARD": {"values": [True]},
-        "POSITION_GOALS": {"values": [False]},
-        "HER_COEFF": {"values": [1, .1]},
-        "LEARNER_EXTRA_LOG_PERIOD": {"values": [50]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-exp-no-position-4",
+      "group": "her-exp-9",
     }
   elif search == "her2":
     sweep_config = {
@@ -543,18 +533,14 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["her"]},
-        "SEED": {"values": [2]},
-        "env.exp": {"values": ["her_test", "exp4"]},
-        "NUM_HER_GOALS": {"values": [1]},
-        "HER_COEFF": {"values": [1, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5]},
-        "base": {"values": ["base2"]},
-        # "POSITION_BETA": {"values": [1.0, .1, 10.]},
-        # "HER_COEFF": {"values": [1, .1, .01]},
-        # "LEARNER_EXTRA_LOG_PERIOD": {"values": [100]},
+        "SEED": {"values": [1]},
+        "env.exp": {"values": ["her_test_big", 'exp4']},
+        "base": {"values": ['base', 'base2']},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-sanity-fast-OS-settings-11",
+      "group": "her-base-9",
     }
+
   # elif search == "dynaq_shared":
   #  sweep_config = {
   #    "metric": {
@@ -638,11 +624,14 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["preplay"]},
-        "SEED": {"values": list(range(1, 11))},
+        "SEED": {"values": list(range(1))},
+        "NUM_STARTING_LOCS": {"values": [30, 40, 50]},
+        "GAMMA": {"values": [.99, .992]},
+        "ADD_GREEDY_EPSILON": {"values": [True, False]},
         "env.exp": {"values": ["exp4"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-final-rotations-6",
+      "group": "preplay-final-rotations-10",
     }
 
   elif search == "preplay-ablation":

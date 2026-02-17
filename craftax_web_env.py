@@ -700,6 +700,7 @@ class MultiGoalObservation(struct.PyTreeNode):
   # goals: chex.Array
   state_features: chex.Array
   player_position: chex.Array
+  nearby_objects: chex.Array = None
   previous_action: int = None
 
 
@@ -767,8 +768,9 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
       )
       return jnp.zeros((len(achievement_state_features))).at[idx].set(visible)
 
-    visibility_state_features = jax.vmap(visibility_feature)(params.placed_goals)
-    visibility_state_features = visibility_state_features.sum(axis=0)
+    nearby_objects = jax.vmap(visibility_feature)(params.placed_goals)
+    # [N_goals, N_types] — each row is a one-hot if visible, zeros otherwise
+    visibility_state_features = nearby_objects.sum(axis=0)
 
     if self.static_env_params.landmark_features:
       state_features = jnp.concatenate(
@@ -797,6 +799,7 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
       train_tasks=train_tasks,
       state_features=state_features,
       player_position=state.player_position,
+      nearby_objects=nearby_objects,
     )
 
 

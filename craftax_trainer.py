@@ -21,20 +21,21 @@ from jax import config as jax_config
 
 jax_config.update("jax_default_matmul_precision", "bfloat16")
 os.environ.setdefault("NVIDIA_TF32_OVERRIDE", "1")
-if sys.platform == "linux":
-  os.environ.setdefault(
-    "XLA_FLAGS",
-    " ".join(
-      [
-        "--xla_gpu_enable_triton_softmax_fusion=true",  # Fuse softmax ops
-        "--xla_gpu_triton_gemm_any=true",  # Use Triton for more GEMMs
-        "--xla_gpu_enable_async_collectives=true",  # Async communication
-        "--xla_gpu_enable_latency_hiding_scheduler=true",  # Better scheduling
-      ]
-    ),
-  )
-os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "true")
-os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.95")
+if os.environ.get("JAX_PLATFORMS") != "cpu":
+  if sys.platform == "linux":
+    os.environ.setdefault(
+      "XLA_FLAGS",
+      " ".join(
+        [
+          "--xla_gpu_enable_triton_softmax_fusion=true",  # Fuse softmax ops
+          "--xla_gpu_triton_gemm_any=true",  # Use Triton for more GEMMs
+          "--xla_gpu_enable_async_collectives=true",  # Async communication
+          "--xla_gpu_enable_latency_hiding_scheduler=true",  # Better scheduling
+        ]
+      ),
+    )
+  os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "true")
+  os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.95")
 
 MAX_SCORE = 226.0
 
