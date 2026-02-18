@@ -56,9 +56,9 @@ RNNInput = base.RNNInput
 
 ENVIRONMENT_TO_GOAL_FNS = {
   "jaxmaze": (
-    lambda t: jax.lax.stop_gradient(t.observation.task_w),
-    lambda t: jax.lax.stop_gradient(t.observation.state_features),
-    lambda t: jax.lax.stop_gradient(t.observation.player_position),
+    lambda t: jax.lax.stop_gradient(t.observation.task_w),   # task vector
+    lambda t: jax.lax.stop_gradient(t.observation.state_features),  # state features
+    lambda t: jax.lax.stop_gradient(t.observation.player_position),  # player position
   ),
   "craftax-multigoal": (
     lambda t: jax.lax.stop_gradient(t.observation.task_w),
