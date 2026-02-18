@@ -552,13 +552,14 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["her"]},
-        "SEED": {"values": [2]},
+        "SEED": {"values": [1]},
         "env.exp": {"values": ["her_test_big"]},
-        "CQL_ALPHA": {"values": [1e-3, 1e-6, 0.0]},
-        "ALL_GOALS_LAMBDA": {"values": [0.0, .1, .2, .3]},
+        "CQL_ALPHA": {"values": [0.0]},
+        "ALL_GOALS_LAMBDA": {"values": [.3, .6, .9]},
+        "TD_LAMBDA": {"values": [.3, .6, .9]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-cql-4",
+      "group": "her-cql-5-debug",
     }
 
   # elif search == "dynaq_shared":
