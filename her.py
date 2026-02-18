@@ -1110,12 +1110,13 @@ def jaxmaze_learner_log_fn(
       ax.plot(q_values_taken, label="Q-Values")
       ax.plot(q_target, label="Q-Targets")
       if loss_mask is not None:
-        ax.plot(loss_mask * 0.5, label="Loss Mask", linestyle="--", color="red")
+        ax.plot(loss_mask * 0.5, label="Loss Mask", linestyle="--", color="black")
       if col_name == "her" and "goal_index" in cd:
         goal_index = int(cd["goal_index"])
         ax.axvline(goal_index, color="red", linestyle="--", alpha=0.7, label="Goal idx")
       ax.set_title(f"{col_name} — Rewards and Q-Values", fontsize=9)
-      ax.legend(fontsize=7)
+      if ci == 0:
+        ax.legend(fontsize=7)
       ax.grid(True)
       ax.set_xticks(range(nT))
 
@@ -1145,14 +1146,12 @@ def jaxmaze_learner_log_fn(
           markersize=8,
           label="Action=Top",
         )
-      loss_mask = cd.get("loss_mask")
-      if loss_mask is not None:
-        ax.plot(loss_mask * 0.5, label="Loss Mask", linestyle="--", color="red")
       if col_name == "her" and "goal_index" in cd:
         goal_index = int(cd["goal_index"])
         ax.axvline(goal_index, color="red", linestyle="--", alpha=0.7, label="Goal idx")
       ax.set_title(f"{col_name} — Top Q-values", fontsize=9)
-      ax.legend(fontsize=7)
+      if ci == 0:
+        ax.legend(fontsize=7)
       ax.grid(True)
       ax.set_xticks(range(nT))
 
