@@ -415,6 +415,8 @@ class HerLossFn(base.RecurrentLossFn):
           episode_mask = episode_mask * terminate_mask
 
         loss_mask = episode_mask * is_truncated(timestep)  # [T]
+        achieved_something = (goal_logits.sum() > 1e-5).astype(batch_loss.dtype)
+        loss_mask = loss_mask*achieved_something
 
         # Create modified discount that's 0 at goal_index (episode terminates there)
         if self.terminate_on_reward:
@@ -433,7 +435,6 @@ class HerLossFn(base.RecurrentLossFn):
           non_terminal=modified_discount,
           loss_mask=loss_mask,
         )
-        achieved_something = (goal_logits.sum() > 1e-5).astype(batch_loss.dtype)
         td_error = achieved_something * td_error
         batch_loss = achieved_something * batch_loss
 
@@ -610,9 +611,6 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     achievements = achievement_fn(timesteps)
     # T, if vector non-zero, achieved
     goal_achieved = achievements.sum(-1)
-
-    # all positions were achieved
-    position_achieved = jnp.ones_like(goal_achieved)
 
     # T
     if config["POSITION_GOALS"]:
