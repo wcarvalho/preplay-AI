@@ -280,7 +280,9 @@ class HerLossFn(base.RecurrentLossFn):
 
     q_softmax = jax.nn.softmax(online_preds.q_vals, axis=-1)
     max_entropy = jnp.log(online_preds.q_vals.shape[-1])
-    q_entropy = -jnp.sum(q_softmax * jnp.log(q_softmax + 1e-8), axis=-1) / max_entropy  # [T+1]
+    q_entropy = (
+      -jnp.sum(q_softmax * jnp.log(q_softmax + 1e-8), axis=-1) / max_entropy
+    )  # [T+1]
 
     metrics = {
       "0.q_loss": batch_loss.mean(),
@@ -416,7 +418,7 @@ class HerLossFn(base.RecurrentLossFn):
 
         loss_mask = episode_mask * is_truncated(timestep)  # [T]
         achieved_something = (goal_logits.sum() > 1e-5).astype(batch_loss.dtype)
-        loss_mask = loss_mask*achieved_something
+        loss_mask = loss_mask * achieved_something
 
         # Create modified discount that's 0 at goal_index (episode terminates there)
         if self.terminate_on_reward:
@@ -1200,9 +1202,10 @@ def jaxmaze_learner_log_fn(
         img, ep_positions, ep_actions, maze_height, maze_width, arrow_scale=5, ax=ax
       )
       total_reward = float(timesteps.reward[ep_start:ep_end].sum())
-      ax.set_title(
-        f"Ep {ep_idx} (t={ep_start}-{ep_end - 1}, r={total_reward:.1f})", fontsize=8
-      )
+      ep_timestep = jax.tree_util.tree_map(lambda x: x[ep_start], timesteps)
+      task_info = extract_task_info(ep_timestep)
+      goal_name = get_task_name(task_info)
+      ax.set_title(f"Ep {ep_idx} ({goal_name}, r={total_reward:.1f})", fontsize=8)
       ax.axis("off")
 
     # Hide unused trajectory subplots
