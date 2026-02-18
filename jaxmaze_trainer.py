@@ -517,8 +517,8 @@ def sweep(search: str = ""):
         },
         "parameters": {
             "ALG": {"values": ["preplay"]},
-            "SEED": {"values": list(range(1))},
-            "KNOWN_OFFTASK_GOAL": {"values": [False]},
+            "SEED": {"values": list(range(2))},
+            "KNOWN_OFFTASK_GOAL": {"values": [True, False]},
             "ALL_GOALS_COEF": {"values": [0.0, .1, 1.0]},
             "env.exp": {"values": ["exp4"]},
         },
