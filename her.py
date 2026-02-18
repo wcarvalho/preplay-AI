@@ -200,10 +200,12 @@ class HerLossFn(base.RecurrentLossFn):
 
   extract_q: Callable[[jax.Array], jax.Array] = lambda preds: preds.q_vals
   her_coeff: float = 1.0
+  all_goals_coeff: float = 1.0
   max_priority_weight: float = 0.9
   importance_sampling_exponent: float = 0.6
   ngoals: int = 10
-  sample_goals: Callable[[base.TimeStep, jax.random.PRNGKey], jax.Array] = None
+  sample_achieved_goals: Callable[[base.TimeStep, jax.random.PRNGKey], jax.Array] = None
+  sample_td_goals: Callable[[base.TimeStep, jax.random.PRNGKey], jax.Array] = None
   online_reward_fn: Callable[[base.TimeStep], jax.Array] = None
   her_reward_fn: Callable[[base.TimeStep, Goal], jax.Array] = None
   terminate_on_reward: bool = False
@@ -287,7 +289,7 @@ class HerLossFn(base.RecurrentLossFn):
   ):
     assert self.online_reward_fn is not None, f"Please provide `online_reward_fn`"
     assert self.her_reward_fn is not None, f"Please provide `her_reward_fn`"
-    assert self.sample_goals is not None, f"Please provide `sample_goals`"
+    assert self.sample_achieved_goals is not None, f"Please provide `sample_goals`"
 
     ##################
     # Q-learning loss on batch of data
@@ -325,119 +327,183 @@ class HerLossFn(base.RecurrentLossFn):
     all_metrics.update({f"0.online/{k}": v for k, v in metrics.items()})
     all_log_info["online"] = log_info
 
-    if self.her_coeff < 1e-5:
-      return td_error, loss, all_metrics
-    ##################
-    # Q-learning on fake goals
-    ##################
-    key_grad = jax.random.split(key_grad, B + 1)
-    # 1. sample fake goals from trajectory using data.timestep
+    if self.her_coeff > 0:
+      ##################
+      # Q-learning on fake goals
+      ##################
+      key_grad = jax.random.split(key_grad, B + 1)
+      # 1. sample fake goals from trajectory using data.timestep
 
-    # [N, B, D], [T, B], [N, B]
-    new_goals, logits, goal_indices = jax.vmap(self.sample_goals, (1, 0), 1)(
-      data.timestep,  # [T, B]
-      key_grad[1:],  # [B, 2],
-    )
-
-    # 2. Compute Q-values for new goals
-    def her_loss_fn(
-      new_goal: Union[
-        jnp.ndarray,
-        struct.PyTreeNode,
-      ],
-      goal_index,
-      sub_key_grad,
-      timestep,
-      actions,
-      goal_logits,
-      online_preds,
-      target_preds,
-    ):
-      """new_goal is [D], goal_index is scalar, sub_key_grad is [2], ..."""
-
-      sub_key_grad, sub_key_grad_ = jax.random.split(sub_key_grad)
-      length = len(data.action)
-
-      # [D] --> [T, D]
-      expand_over_time = lambda x: jnp.tile(x[None], [length, 1])
-      expanded_new_goal = jax.tree_util.tree_map(expand_over_time, new_goal)
-
-      apply_q = functools.partial(self.network.apply, method=self.network.apply_q)
-      online_preds = apply_q(params, online_preds.rnn_states, expanded_new_goal)
-      target_preds = apply_q(target_params, target_preds.rnn_states, expanded_new_goal)
-
-      her_reward_info = self.her_reward_fn(timestep, new_goal)
-
-      # Compute per-goal episode mask
-      episode_ids = jnp.cumsum(make_float(timestep.first()), axis=0) - 1  # [T]
-      goal_episode_id = jax.lax.dynamic_index_in_dim(
-        episode_ids, goal_index, keepdims=False
-      )  # scalar
-      episode_mask = (episode_ids == goal_episode_id).astype(jnp.float32)  # [T]
-
-      # If terminate_on_reward: mask out timesteps AFTER goal_index
-      if self.terminate_on_reward:
-        time_indices = jnp.arange(len(timestep.reward))
-        terminate_mask = (time_indices <= goal_index).astype(jnp.float32)
-        episode_mask = episode_mask * terminate_mask
-
-      loss_mask = episode_mask * is_truncated(timestep)  # [T]
-
-      # Create modified discount that's 0 at goal_index (episode terminates there)
-      if self.terminate_on_reward:
-        goal_mask = jax.nn.one_hot(goal_index, len(timestep.discount))
-        modified_discount = timestep.discount * (1.0 - goal_mask)
-      else:
-        modified_discount = timestep.discount
-
-      td_error, batch_loss, metrics, log_info = self.loss_fn(
-        timestep=timestep,
-        online_preds=online_preds,
-        target_preds=target_preds,
-        actions=actions,
-        rewards=her_reward_info["reward"],
-        is_last=make_float(timestep.last()),
-        non_terminal=modified_discount,
-        loss_mask=loss_mask,
+      # [N, B, D], [T, B], [N, B]
+      new_goals, logits, goal_indices = jax.vmap(self.sample_achieved_goals, (1, 0), 1)(
+        data.timestep,  # [T, B]
+        key_grad[1:],  # [B, 2],
       )
-      achieved_something = (goal_logits.sum() > 1e-5).astype(batch_loss.dtype)
-      td_error = achieved_something * td_error
-      batch_loss = achieved_something * batch_loss
 
-      metrics = jax.tree_util.tree_map(lambda x: x * achieved_something, metrics)
-      metrics["achieved_something"] = achieved_something
+      # 2. Compute Q-values for new goals
+      def her_loss_fn(
+        new_goal: Union[
+          jnp.ndarray,
+          struct.PyTreeNode,
+        ],
+        goal_index,
+        sub_key_grad,
+        timestep,
+        actions,
+        goal_logits,
+        online_preds,
+        target_preds,
+      ):
+        """new_goal is [D], goal_index is scalar, sub_key_grad is [2], ..."""
 
-      log_info["reward_info"] = her_reward_info  # [T, ...]
-      log_info["goal_index"] = goal_index
-      log_info["goal_episode_id"] = goal_episode_id
-      return td_error, batch_loss, metrics, log_info
+        sub_key_grad, sub_key_grad_ = jax.random.split(sub_key_grad)
+        length = len(data.action)
 
-    her_loss_fn = jax.vmap(her_loss_fn, (0, 0, 0, None, None, None, None, None))  # N
-    her_loss_fn = jax.vmap(her_loss_fn, 1, 0)  # B
+        # [D] --> [T, D]
+        expand_over_time = lambda x: jnp.tile(x[None], [length, 1])
+        expanded_new_goal = jax.tree_util.tree_map(expand_over_time, new_goal)
 
-    key_grad = jax.random.split(key_grad[0], self.ngoals * B).reshape(
-      self.ngoals, B, -1
-    )
+        apply_q = functools.partial(self.network.apply, method=self.network.apply_q)
+        online_preds = apply_q(params, online_preds.rnn_states, expanded_new_goal)
+        target_preds = apply_q(
+          target_params, target_preds.rnn_states, expanded_new_goal
+        )
 
-    # [B, N, T], [B, N], [B, N, T], [B, N, T, D]
-    _, her_loss, her_metrics, her_log_info = her_loss_fn(
-      new_goals,  # [N, B, D]
-      goal_indices,  # [N, B]
-      key_grad,  # [N, B, 2]
-      data.timestep,  # [T, B, D]
-      data.action,  # [T, B]
-      logits,  # [T, B]
-      online_preds,  # [T, B, D]
-      target_preds,  # [T, B, D]
-    )
+        her_reward_info = self.her_reward_fn(timestep, new_goal)
 
-    loss = loss + self.her_coeff * her_loss.mean(1)
-    all_metrics.update({f"1.her/{k}": v for k, v in her_metrics.items()})
-    all_log_info["her"] = jax.tree_util.tree_map(
-      # only first goal
-      lambda x: x[:, 0],
-      her_log_info,
-    )
+        # Compute per-goal episode mask
+        episode_ids = jnp.cumsum(make_float(timestep.first()), axis=0) - 1  # [T]
+        goal_episode_id = jax.lax.dynamic_index_in_dim(
+          episode_ids, goal_index, keepdims=False
+        )  # scalar
+        episode_mask = (episode_ids == goal_episode_id).astype(jnp.float32)  # [T]
+
+        # If terminate_on_reward: mask out timesteps AFTER goal_index
+        if self.terminate_on_reward:
+          time_indices = jnp.arange(len(timestep.reward))
+          terminate_mask = (time_indices <= goal_index).astype(jnp.float32)
+          episode_mask = episode_mask * terminate_mask
+
+        loss_mask = episode_mask * is_truncated(timestep)  # [T]
+
+        # Create modified discount that's 0 at goal_index (episode terminates there)
+        if self.terminate_on_reward:
+          goal_mask = jax.nn.one_hot(goal_index, len(timestep.discount))
+          modified_discount = timestep.discount * (1.0 - goal_mask)
+        else:
+          modified_discount = timestep.discount
+
+        td_error, batch_loss, metrics, log_info = self.loss_fn(
+          timestep=timestep,
+          online_preds=online_preds,
+          target_preds=target_preds,
+          actions=actions,
+          rewards=her_reward_info["reward"],
+          is_last=make_float(timestep.last()),
+          non_terminal=modified_discount,
+          loss_mask=loss_mask,
+        )
+        achieved_something = (goal_logits.sum() > 1e-5).astype(batch_loss.dtype)
+        td_error = achieved_something * td_error
+        batch_loss = achieved_something * batch_loss
+
+        metrics = jax.tree_util.tree_map(lambda x: x * achieved_something, metrics)
+        metrics["achieved_something"] = achieved_something
+
+        log_info["reward_info"] = her_reward_info  # [T, ...]
+        log_info["goal_index"] = goal_index
+        log_info["goal_episode_id"] = goal_episode_id
+        return td_error, batch_loss, metrics, log_info
+
+      her_loss_fn = jax.vmap(her_loss_fn, (0, 0, 0, None, None, None, None, None))  # N
+      her_loss_fn = jax.vmap(her_loss_fn, 1, 0)  # B
+
+      key_grad, key_grad_ = jax.random.split(key_grad[0])
+      key_grad_ = jax.random.split(key_grad_, self.ngoals * B).reshape(
+        self.ngoals, B, -1
+      )
+
+      # [B, N, T], [B, N], [B, N, T], [B, N, T, D]
+      _, her_loss, her_metrics, her_log_info = her_loss_fn(
+        new_goals,  # [N, B, D]
+        goal_indices,  # [N, B]
+        key_grad_,  # [N, B, 2]
+        data.timestep,  # [T, B, D]
+        data.action,  # [T, B]
+        logits,  # [T, B]
+        online_preds,  # [T, B, D]
+        target_preds,  # [T, B, D]
+      )
+
+      loss = loss + self.her_coeff * her_loss.mean(1)
+      all_metrics.update({f"1.her/{k}": v for k, v in her_metrics.items()})
+      all_log_info["her"] = jax.tree_util.tree_map(
+        # only first goal
+        lambda x: x[:, 0],
+        her_log_info,
+      )
+
+    if self.all_goals_coeff > 0.0:
+      # Get all possible goals (one-hot for each achievement type)
+      # Call once with first batch element since goals are batch-independent
+      key_grad, key_grad_ = jax.random.split(key_grad)
+
+      key_grad_ = jax.random.split(key_grad_, B + 1)
+      # GoalPosition with [N, B, D] and [N, B, 2]
+      all_goals = jax.vmap(self.sample_td_goals, (1, 0), 1)(
+          data.timestep, 
+          key_grad_)
+
+      def all_goals_loss_fn(
+        new_goal,
+        timestep,
+        actions,
+        online_preds,
+        target_preds,
+      ):
+        """new_goal: GoalPosition with scalar fields [D], timestep: [T, ...]"""
+        length = len(data.action)
+        expand = lambda x: jnp.tile(x[None], [length, 1])
+        expanded_goal = jax.tree_util.tree_map(expand, new_goal)
+
+        apply_q = functools.partial(self.network.apply, method=self.network.apply_q)
+        on_preds = apply_q(params, online_preds.rnn_states, expanded_goal)
+        tar_preds = apply_q(target_params, target_preds.rnn_states, expanded_goal)
+
+        reward_info = self.her_reward_fn(timestep, new_goal)
+
+        # Apply loss blindly — no achieved_something masking,
+        # no terminate_on_reward, no episode-based goal masking
+        ag_td_error, ag_batch_loss, ag_metrics, ag_log_info = self.loss_fn(
+          timestep=timestep,
+          online_preds=on_preds,
+          target_preds=tar_preds,
+          actions=actions,
+          rewards=reward_info["reward"],
+          is_last=make_float(timestep.last()),
+          non_terminal=timestep.discount,
+          loss_mask=is_truncated(timestep),
+        )
+        return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
+
+      # vmap over N goals, then over B batch
+      ag_fn = jax.vmap(all_goals_loss_fn, (0, None, None, None, None))  # N goals
+      ag_fn = jax.vmap(ag_fn, 1, 0)  # B batch (goals shared across batch)
+
+      # , [B, N]
+      _, ag_loss, ag_metrics, _ = ag_fn(
+        all_goals,  # GoalPosition [N, D]
+        data.timestep,  # [T, B, ...]
+        data.action,  # [T, B]
+        online_preds,  # tree with [T, B, ...]
+        target_preds,  # tree with [T, B, ...]
+      )
+      import ipdb
+      ipdb.set_trace()
+      # ag_loss: [B, N] -> mean over N goals
+      loss = loss + self.all_goals_coeff * ag_loss.mean(1)
+      all_metrics.update({f"2.all_goals/{k}": v for k, v in ag_metrics.items()})
+
     if self.logger.learner_log_extra is not None:
       self.logger.learner_log_extra(all_log_info)
 
@@ -502,7 +568,7 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
       "position_achievement": position_achievement,
     }
 
-  def sample_goals(timesteps, rng):
+  def sample_achieved_goals(timesteps, rng):
     """
     There is data at T time-points. We want to"""
     # T, C
@@ -520,9 +586,11 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
       logits = config["GOAL_BETA"] * goal_achieved + position_achieved
     else:
       logits = goal_achieved
-    probabilities = logits / (logits.sum(-1) + 1e-5)
+    logits = logits + 1e-5
+    probabilities = logits / logits.sum(-1) 
 
     # N
+    rng, rng_ = jax.random.split(rng)
     indices = Categorical(probs=probabilities).sample(
       seed=rng, sample_shape=(config["NUM_HER_GOALS"])
     )
@@ -550,6 +618,17 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     # [N, D], [T], [N]
     return goal, logits, indices
 
+  def get_all_goals(timesteps, rng):
+    _, achievement_fn, position_fn = ENVIRONMENT_TO_GOAL_FNS[config["ENV"]]
+    achievements = achievement_fn(timesteps)  # [T, D]
+    D = achievements.shape[-1]
+    # Each goal is a one-hot: pursue one achievement at a time
+    goal_features = jnp.eye(D)  # [N, D] where N=D
+    position_goal = jnp.zeros((D, 2))  # no position goals
+    return GoalPosition(
+      goal=goal_features,
+      position=position_goal.astype(position_fn(timesteps).dtype))
+
   return functools.partial(
     HerLossFn,
     discount=config["GAMMA"],
@@ -563,10 +642,12 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     step_cost=config.get("STEP_COST", 0.0),
     her_coeff=config.get("HER_COEFF", 0.001),
     ngoals=config.get("NUM_HER_GOALS", 10),
-    sample_goals=sample_goals,
+    sample_achieved_goals=sample_achieved_goals,
+    sample_td_goals=get_all_goals,
     online_reward_fn=online_reward_fn,
     her_reward_fn=her_reward_fn,
     terminate_on_reward=config.get("TERMINATE_ON_REWARD", True),
+    all_goals_coeff=config.get("ALL_GOALS_COEFF", 1.0),
   )
 
 
@@ -881,7 +962,7 @@ def jaxmaze_learner_log_fn(
   is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
 
   def plot_both(d):
-    #plot_individual(d["online"], "online")
+    # plot_individual(d["online"], "online")
     plot_individual(d["her"], "her")
 
   jax.lax.cond(
@@ -1156,7 +1237,7 @@ def make_craftax_agent(
       num_actions=env.action_space(env_params).n,
       use_bias=config.get("USE_BIAS", True),
     ),
-    task_encoder=TaskEncoder(1_000),
+    task_encoder=TaskEncoder(100),
     goal_from_timestep=partial(goal_from_env_timestep, env=config["ENV"]),
   )
 
@@ -1190,7 +1271,7 @@ def make_multigoal_craftax_agent(
       use_bias=config.get("USE_BIAS", True),
       action_dim=env.action_space(env_params).n,
     ),
-    task_encoder=TaskEncoder(1_000),
+    task_encoder=TaskEncoder(100),
     rnn=rnn,
     q_fn=DuellingDotMLP(
       hidden_dim=config.get("Q_HIDDEN_DIM", 512),

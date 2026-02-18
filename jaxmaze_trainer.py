@@ -7,8 +7,8 @@ JAX_DEBUG_NANS=True \
 RL_RESULTS_DIR=/tmp/rl_results \
 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue jaxmaze_trainer.py \
   app.debug=True \
-  app.wandb=True \
-  app.search=her
+  app.wandb=False \
+  app.search=preplay
 
 RUNNING ON SLURM:
 RL_RESULTS_DIR=/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results \
@@ -509,6 +509,22 @@ def sweep(search: str = ""):
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "preplay-easy-1",
     }
+  elif search == "preplay2":
+    sweep_config = {
+        "metric": {
+            "name": "evaluator_performance/0.0 avg_episode_return",
+            "goal": "maximize",
+        },
+        "parameters": {
+            "ALG": {"values": ["preplay"]},
+            "SEED": {"values": list(range(1))},
+            "KNOWN_OFFTASK_GOAL": {"values": [False]},
+            "ALL_GOALS_COEF": {"values": [0.0, .1, 1.0]},
+            "env.exp": {"values": ["exp4"]},
+        },
+        "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
+        "group": "preplay-td-1",
+    }
 
   elif search == "her":
     sweep_config = {
@@ -535,10 +551,10 @@ def sweep(search: str = ""):
         "ALG": {"values": ["her"]},
         "SEED": {"values": [1]},
         "env.exp": {"values": ["her_test_big", 'exp4']},
-        "base": {"values": ['base', 'base2']},
+        "ALL_GOALS_COEF": {"values": [0.0, .1, 1.0]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-base-9",
+      "group": "her-td-1",
     }
 
   # elif search == "dynaq_shared":

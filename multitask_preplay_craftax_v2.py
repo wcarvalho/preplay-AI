@@ -410,7 +410,8 @@ class DynaLossFn(vbb.RecurrentLossFn):
 
   dyna_policy: SimPolicy = None
   offtask_dyna_policy: SimPolicy = None
-  sample_goals: Callable = None
+  sample_preplay_goals: Callable = None
+  sample_td_goals: Callable = None
   compute_rewards: Callable = None
   get_main_goal: Callable = None
   make_init_goal_timestep: Callable = None
@@ -561,30 +562,31 @@ class DynaLossFn(vbb.RecurrentLossFn):
         N = self.num_offtask_goals
 
         # Sample goals from achievable set
-        goals, achievable, any_achievable = self.sample_goals(timestep_b, key, N)
+        goals, achievable, any_achievable = self.sample_td_goals(
+            timestep_b, key, N)
         # goals: [N, G]
         import ipdb; ipdb.set_trace()
         # Repeat RNN states for N goals
-        h_on_repeated = repeat(h_on_b, N)  # [N, D]
-        h_tar_repeated = repeat(h_tar_b, N)  # [N, D]
+        h_tm1_online_repeated = repeat(h_on_b, N)  # [N, D]
+        h_tm1_target_repeated = repeat(h_tar_b, N)  # [N, D]
 
         # Broadcast timesteps, actions, loss_mask to [T, N, ...]
-        timestep_broadcast = jax.tree.map(
+        timestep_repeated = jax.tree.map(
           lambda x: jnp.broadcast_to(x[:, None, ...], (x.shape[0], N) + x.shape[1:]),
           timestep_b,
         )
-        action_broadcast = jnp.broadcast_to(
+        action_repeated = jnp.broadcast_to(
           action_b[:, None], (action_b.shape[0], N)
         )
-        loss_mask_broadcast = jnp.broadcast_to(
+        loss_mask_repeated = jnp.broadcast_to(
           loss_mask_b[:, None], (loss_mask_b.shape[0], N)
         )
 
         # Compute goal-conditioned Q-values (online)
         key, key_ = jax.random.split(key)
         online_preds_g = apply_rnn_and_q(
-          h_tm1=h_on_repeated,
-          timesteps=timestep_broadcast,
+          h_tm1=h_tm1_online_repeated,
+          timesteps=timestep_repeated,
           task=goals,
           rng=key_,
           network=self.network,
@@ -595,8 +597,8 @@ class DynaLossFn(vbb.RecurrentLossFn):
         # Compute goal-conditioned Q-values (target)
         key, key_ = jax.random.split(key)
         target_preds_g = apply_rnn_and_q(
-          h_tm1=h_tar_repeated,
-          timesteps=timestep_broadcast,
+          h_tm1=h_tm1_target_repeated,
+          timesteps=timestep_repeated,
           task=goals,
           rng=key_,
           network=self.network,
@@ -612,14 +614,14 @@ class DynaLossFn(vbb.RecurrentLossFn):
 
         # Compute TD loss
         ag_td_error, ag_batch_loss, ag_metrics, ag_log_info = self.loss_fn(
-          timestep=timestep_broadcast,
+          timestep=timestep_repeated,
           online_preds=online_preds_g,
           target_preds=target_preds_g,
-          actions=action_broadcast,
+          actions=action_repeated,
           rewards=goal_rewards / MAX_REWARD,
-          is_last=make_float(timestep_broadcast.last()),
-          non_terminal=timestep_broadcast.discount,
-          loss_mask=loss_mask_broadcast,
+          is_last=make_float(timestep_repeated.last()),
+          non_terminal=timestep_repeated.discount,
+          loss_mask=loss_mask_repeated,
         )
         # ag_td_error: [T-1, N], ag_batch_loss: [N]
 
@@ -630,6 +632,8 @@ class DynaLossFn(vbb.RecurrentLossFn):
         return ag_td_error, ag_batch_loss_mean, ag_metrics, ag_log_info
 
       # Vmap over batch
+      import ipdb
+      ipdb.set_trace()
       all_goals_fn = jax.vmap(all_goals_loss_single, (1, 1, 0, 0, 1, 0), 0)
       _, all_goals_batch_loss, all_goals_metrics, _ = all_goals_fn(
         data.timestep,
@@ -1008,7 +1012,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
       #########################################
       # First compute off-task loss
       #########################################
-      goals, achievable, any_achievable = self.sample_goals(
+      goals, achievable, any_achievable = self.sample_preplay_goals(
         t, key, self.num_offtask_goals
       )
       ## sample goals available at last timestep in window
@@ -1153,7 +1157,7 @@ def make_loss_fn_class(config, **kwargs) -> DynaLossFn:
     offtask_coeff=config.get("SUBTASK_COEFF", 1.0),
     mainq_coeff=config.get("MAINQ_COEFF", 1.0),
     combine_real_sim=config.get("COMBINE_REAL_SIM", False),
-    all_goals_coeff=config.get("ALL_GOALS_COEFF", 0.0),
+    all_goals_coeff=config.get("ALL_GOALS_COEFF", 1.0),
     **kwargs,
   )
 
@@ -1810,7 +1814,7 @@ def make_train_craftax_singlegoal(**kwargs):
       q_values, eps, sim_rng
     )
 
-  def sample_goals(timestep, key, num_offtask_goals):
+  def sample_visible_goals(timestep, key, num_offtask_goals):
     # sample goals available at last timestep in window
     # [T, G]
     achievable = timestep.observation.achievable.astype(jnp.float32)
@@ -1866,7 +1870,8 @@ def make_train_craftax_singlegoal(**kwargs):
       make_loss_fn_class,
       dyna_policy=dyna_policy,
       offtask_dyna_policy=offtask_dyna_policy,
-      sample_goals=sample_goals,
+      sample_preplay_goals=sample_visible_goals,
+      sample_td_goals=sample_visible_goals,
       compute_rewards=compute_rewards,
       get_main_goal=get_main_goal,
     ),
@@ -2099,7 +2104,7 @@ def make_train_craftax_multigoal(**kwargs):
       q_values, eps, sim_rng
     )
 
-  def sample_goals(timestep, key, num_offtask_goals):
+  def sample_other_random_goals(timestep, key, num_offtask_goals):
     # [T, G] --> [G]
     current_goal = timestep.observation.task_w[0]
     other_goals = 1.0 - current_goal
@@ -2154,7 +2159,8 @@ def make_train_craftax_multigoal(**kwargs):
       make_loss_fn_class,
       dyna_policy=dyna_policy,
       offtask_dyna_policy=offtask_dyna_policy,
-      sample_goals=sample_goals,
+      sample_preplay_goals=sample_other_random_goals,
+      sample_td_goals=sample_other_random_goals,
       compute_rewards=compute_rewards,
       get_main_goal=get_main_goal,
       make_init_goal_timestep=make_init_goal_timestep,
@@ -2359,6 +2365,7 @@ def make_train_jaxmaze_multigoal(**kwargs):
   epsilon_setting = config["SIM_EPSILON_SETTING"]
   all_tasks = jnp.array(kwargs.pop("all_tasks"))  # [G, D]
   known_offtask_goal = config.get("KNOWN_OFFTASK_GOAL", True)
+  #known_offtask_goal = False
   num_offtask_goals = 1 if known_offtask_goal else all_tasks.shape[0]
   config["NUM_OFFTASK_GOALS"] = num_offtask_goals
 
@@ -2392,20 +2399,42 @@ def make_train_jaxmaze_multigoal(**kwargs):
       q_values, eps, sim_rng
     )
 
-  def sample_goals(timestep, key, num_offtask_goals):
+  def sample_nontask_visible_goals(timestep, key, num_offtask_goals):
+    is_object_nearby = timestep.observation.nearby_objects[-1].astype(jnp.int32) # [4]
+    task_object = timestep.observation.task_w[-1].astype(jnp.int32)
+
+    achievable = nn.relu((is_object_nearby - task_object).astype(jnp.float32))
+    achievable = achievable + 1e-5
+    
+    probabilities = achievable / achievable.sum(-1)
+    key, key_ = jax.random.split(key)
+    goals = distrax.Categorical(probs=probabilities).sample(
+        seed=key, sample_shape=(num_offtask_goals)
+    )
+    num_classes = len(is_object_nearby)
+    goals = jax.nn.one_hot(
+      goals,
+      num_classes=num_classes,
+      dtype=timestep.observation.task_w.dtype)
+    any_achievable = achievable.sum() > 0.1
+    return goals, achievable, any_achievable
+
+
+  def sample_nontask_random_goals(timestep, key, num_offtask_goals):
     # [T, G] --> [G]
     # goal_probs = jnp.ones(len(all_tasks)) / len(all_tasks)
     # assume you know offtask goal
     if known_offtask_goal:
       # first time-step, 1 goal
-      goals = timestep.state.offtask_w[0][None]
+      goals = timestep.state.offtask_w[0][None] # [1, G]
     else:
-      goals = all_tasks
+      goals = all_tasks.astype(timestep.state.offtask_w.dtype)  # [4, G]
     achievable = jnp.ones(len(goals))
     any_achievable = achievable.sum() > 0.1
 
     return goals, achievable, any_achievable
 
+  
   def compute_rewards(timesteps, goal_onehot):
     # [T, K, D]
     state_features = timesteps.state.task_state.features.astype(jnp.float32)
@@ -2428,7 +2457,7 @@ def make_train_jaxmaze_multigoal(**kwargs):
     task_object = task_object.astype(jnp.int32)
     new_state = timestep.state.replace(
       step_num=jnp.zeros_like(timestep.state.step_num),
-      task_w=goal,
+      task_w=goal.astype(timestep.state.task_w.dtype),
       task_object=task_object,  # only used for logging
     )
     new_observation = env.make_observation(new_state, timestep.observation.prev_action)
@@ -2451,7 +2480,8 @@ def make_train_jaxmaze_multigoal(**kwargs):
       make_loss_fn_class,
       dyna_policy=dyna_policy,
       offtask_dyna_policy=offtask_dyna_policy,
-      sample_goals=sample_goals,
+      sample_preplay_goals=sample_nontask_visible_goals,
+      sample_td_goals=sample_nontask_random_goals,
       compute_rewards=compute_rewards,
       get_main_goal=get_main_goal,
       make_init_goal_timestep=make_init_goal_timestep,
