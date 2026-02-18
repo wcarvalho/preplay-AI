@@ -12,18 +12,21 @@ MSG="$1"
 git submodule foreach '
   echo "==> Processing $name"
 
-  # If in detached HEAD, checkout main and merge the detached commit
-  if ! git symbolic-ref -q HEAD > /dev/null 2>&1; then
-    DETACHED_SHA=$(git rev-parse HEAD)
-    echo "  Detached HEAD at $DETACHED_SHA, checking out main and merging..."
-    git checkout main
-    git merge --no-edit "$DETACHED_SHA"
-  fi
-
+  # Commit any changes first
   git add -A
   git diff --cached --quiet && echo "  Nothing to commit" || {
     git commit -m "'"$MSG"'"
   }
+
+  # If in detached HEAD, merge into main via temp branch
+  if ! git symbolic-ref -q HEAD > /dev/null 2>&1; then
+    TEMP_BRANCH="temp-update-$(date +%s)"
+    echo "  Detached HEAD, creating temp branch and merging into main..."
+    git checkout -b "$TEMP_BRANCH"
+    git checkout main
+    git merge --no-edit "$TEMP_BRANCH"
+    git branch -d "$TEMP_BRANCH"
+  fi
   git push
 '
 

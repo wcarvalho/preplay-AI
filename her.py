@@ -212,6 +212,7 @@ class HerLossFn(base.RecurrentLossFn):
   terminate_on_reward: bool = False
   cql_alpha: float = 0.0
   cql_temp: float = 1.0
+  all_goals_lambda: float = 0.3
 
   def loss_fn(
     self,
@@ -224,12 +225,14 @@ class HerLossFn(base.RecurrentLossFn):
     non_terminal,
     loss_mask,
     apply_cql=False,
+    lambda_override=None,
   ):
     rewards = make_float(rewards)
     rewards = rewards - self.step_cost
     is_last = make_float(is_last)
     discounts = make_float(non_terminal) * self.discount
-    lambda_ = jnp.ones_like(non_terminal) * self.lambda_
+    effective_lambda = self.lambda_ if lambda_override is None else lambda_override
+    lambda_ = jnp.ones_like(non_terminal) * effective_lambda
 
     # Get N-step transformed TD error and loss.
     # [T]
@@ -262,18 +265,22 @@ class HerLossFn(base.RecurrentLossFn):
     # CQL regularizer
     cql_loss_val = jnp.zeros((), dtype=batch_loss_mean.dtype)
     if apply_cql and self.cql_alpha > 0:
-        cql_per_t = compute_cql_loss(
-            online_preds.q_vals[:-1], actions[:-1], self.cql_temp
-        )  # [T]
-        cql_per_t = cql_per_t * loss_mask[:-1]
-        cql_loss_val = (cql_per_t * loss_mask[:-1]).sum(0) / (loss_mask[:-1].sum(0) + 1e-5)
-        cql_loss_val = self.cql_alpha * cql_loss_val
-        batch_loss_mean = batch_loss_mean + cql_loss_val
+      cql_per_t = compute_cql_loss(
+        online_preds.q_vals[:-1], actions[:-1], self.cql_temp
+      )  # [T]
+      cql_per_t = cql_per_t * loss_mask[:-1]
+      cql_loss_val = (cql_per_t * loss_mask[:-1]).sum(0) / (
+        loss_mask[:-1].sum(0) + 1e-5
+      )
+      cql_loss_val = self.cql_alpha * cql_loss_val
+      batch_loss_mean = batch_loss_mean + cql_loss_val
 
     sorted_q = jnp.sort(online_preds.q_vals, axis=-1)
     q_gap = sorted_q[..., -1] - sorted_q[..., -2]  # [T+1]
 
-    q_normalized = online_preds.q_vals / (online_preds.q_vals.sum(axis=-1, keepdims=True) + 1e-8)
+    q_normalized = online_preds.q_vals / (
+      online_preds.q_vals.sum(axis=-1, keepdims=True) + 1e-8
+    )
     q_entropy = -jnp.sum(q_normalized * jnp.log(q_normalized + 1e-8), axis=-1)  # [T+1]
 
     metrics = {
@@ -476,8 +483,8 @@ class HerLossFn(base.RecurrentLossFn):
 
       # GoalPosition with [N, B, D] and [N, B, 2]
       all_goals = jax.vmap(self.sample_td_goals, (1, 0), 1)(
-          data.timestep, 
-          key_grad_[1:])
+        data.timestep, key_grad_[1:]
+      )
 
       def all_goals_loss_fn(
         new_goal,
@@ -509,6 +516,7 @@ class HerLossFn(base.RecurrentLossFn):
           non_terminal=timestep.discount,
           loss_mask=is_truncated(timestep),
           apply_cql=True,
+          lambda_override=self.all_goals_lambda,
         )
         return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
 
@@ -538,6 +546,7 @@ class HerLossFn(base.RecurrentLossFn):
 ############################################
 # Environment Specific
 ############################################
+
 
 def make_loss_fn_class(config) -> base.RecurrentLossFn:
   def online_reward_fn(timesteps):
@@ -572,7 +581,7 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     assert goal_reward.ndim == 1
     assert position_reward.ndim == 1
     if config["POSITION_GOALS"]:
-      reward = 0.2 * position_reward + 0.8 * goal_reward
+      reward = 0.5 * position_reward + 0.5 * goal_reward
     else:
       position_reward = position_reward * 0.0
       reward = goal_reward
@@ -608,17 +617,38 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
 
     # T
     if config["POSITION_GOALS"]:
-      logits = config["GOAL_BETA"] * goal_achieved + position_achieved
+      N = config["NUM_HER_GOALS"]
+      n_pos = N // 2
+      n_ach = N - n_pos
+
+      rng, rng1, rng2 = jax.random.split(rng, 3)
+
+      # position goals: uniform sampling
+      uniform_probs = jnp.ones(goal_achieved.shape[0]) / goal_achieved.shape[0]
+      pos_indices = Categorical(probs=uniform_probs).sample(
+        seed=rng1, sample_shape=(n_pos,)
+      )
+
+      # achievement goals: weighted by goal_achieved
+      ach_logits = goal_achieved + 1e-5
+      ach_probs = ach_logits / ach_logits.sum()
+      ach_indices = Categorical(probs=ach_probs).sample(
+        seed=rng2, sample_shape=(n_ach,)
+      )
+
+      indices = jnp.concatenate([pos_indices, ach_indices])
+      logits = ach_logits + uniform_probs
+      logits = logits / logits.sum(-1)
     else:
       logits = goal_achieved
-    logits_ = logits + 1e-5
-    probabilities = logits_ / logits_.sum(-1) 
+      logits_ = logits + 1e-5
+      probabilities = logits_ / logits_.sum(-1)
 
-    # N
-    rng, rng_ = jax.random.split(rng)
-    indices = Categorical(probs=probabilities).sample(
-      seed=rng, sample_shape=(config["NUM_HER_GOALS"])
-    )
+      # N
+      rng, rng_ = jax.random.split(rng)
+      indices = Categorical(probs=probabilities).sample(
+        seed=rng, sample_shape=(config["NUM_HER_GOALS"])
+      )
 
     index = lambda x, i: jax.lax.dynamic_index_in_dim(x, i, keepdims=False)
     index = jax.vmap(index, (None, 0), 0)
@@ -649,10 +679,14 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     D = achievements.shape[-1]
     # Each goal is a one-hot: pursue one achievement at a time
     goal_features = jnp.eye(D)  # [N, D] where N=D
-    position_goal = jnp.zeros((D, 2))  # no position goals
+    if config.get("POSITION_GOALS", False):
+      obj_pos = timesteps.observation.object_positions[0]  # [D, 2]
+      position_goal = obj_pos + 1  # reserve 0 for empty
+    else:
+      position_goal = jnp.zeros((D, 2))
     return GoalPosition(
-      goal=goal_features,
-      position=position_goal.astype(position_fn(timesteps).dtype))
+      goal=goal_features, position=position_goal.astype(position_fn(timesteps).dtype)
+    )
 
   return functools.partial(
     HerLossFn,
@@ -673,6 +707,7 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     her_reward_fn=her_reward_fn,
     terminate_on_reward=config.get("TERMINATE_ON_REWARD", True),
     all_goals_coeff=config.get("ALL_GOALS_COEFF", 1.0),
+    all_goals_lambda=config.get("ALL_GOALS_LAMBDA", 0.3),
     cql_alpha=config.get("CQL_ALPHA", 0.0),
     cql_temp=config.get("CQL_TEMP", 1.0),
   )
@@ -1231,11 +1266,14 @@ class TaskEncoder(nn.Module):
     return jnp.concatenate((task, position.reshape(-1)))
 
 
-def goal_from_env_timestep(t: TimeStep, env: str):
+def goal_from_env_timestep(t: TimeStep, env: str, position_goals: bool = False):
   task_vector_fn, _, position_fn = ENVIRONMENT_TO_GOAL_FNS[env]
-  return GoalPosition(
-    task_vector_fn(t).astype(jnp.float32), jnp.zeros_like(position_fn(t))
-  )
+  task_w = task_vector_fn(t).astype(jnp.float32)
+  if position_goals:
+    position = (task_w[..., None] * t.observation.object_positions).sum(-2) + 1
+  else:
+    position = jnp.zeros_like(position_fn(t))
+  return GoalPosition(task_w, position)
 
 
 def make_craftax_agent(
@@ -1265,7 +1303,11 @@ def make_craftax_agent(
       use_bias=config.get("USE_BIAS", True),
     ),
     task_encoder=TaskEncoder(100),
-    goal_from_timestep=partial(goal_from_env_timestep, env=config["ENV"]),
+    goal_from_timestep=partial(
+      goal_from_env_timestep,
+      env=config["ENV"],
+      position_goals=config.get("POSITION_GOALS", False),
+    ),
   )
 
   rng, _rng = jax.random.split(rng)
@@ -1306,7 +1348,11 @@ def make_multigoal_craftax_agent(
       num_actions=env.action_space(env_params).n,
       use_bias=config.get("USE_BIAS", True),
     ),
-    goal_from_timestep=partial(goal_from_env_timestep, env=config["ENV"]),
+    goal_from_timestep=partial(
+      goal_from_env_timestep,
+      env=config["ENV"],
+      position_goals=config.get("POSITION_GOALS", False),
+    ),
   )
   rng, _rng = jax.random.split(rng)
   network_params = agent.init(_rng, example_timestep, method=agent.initialize)
@@ -1352,7 +1398,11 @@ def make_jaxmaze_agent(
       use_bias=config.get("USE_BIAS", False),
     ),
     task_encoder=TaskEncoder(100),
-    goal_from_timestep=partial(goal_from_env_timestep, env="jaxmaze"),
+    goal_from_timestep=partial(
+      goal_from_env_timestep,
+      env="jaxmaze",
+      position_goals=config.get("POSITION_GOALS", False),
+    ),
   )
 
   rng, _rng = jax.random.split(rng)
