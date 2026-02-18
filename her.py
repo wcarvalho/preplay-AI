@@ -204,7 +204,7 @@ class HerLossFn(base.RecurrentLossFn):
   all_goals_coeff: float = 1.0
   max_priority_weight: float = 0.9
   importance_sampling_exponent: float = 0.6
-  ngoals: int = 10
+  ngoals: int = 1
   sample_achieved_goals: Callable[[base.TimeStep, jax.random.PRNGKey], jax.Array] = None
   sample_td_goals: Callable[[base.TimeStep, jax.random.PRNGKey], jax.Array] = None
   online_reward_fn: Callable[[base.TimeStep], jax.Array] = None
@@ -417,8 +417,13 @@ class HerLossFn(base.RecurrentLossFn):
           episode_mask = episode_mask * terminate_mask
 
         loss_mask = episode_mask * is_truncated(timestep)  # [T]
+<<<<<<< HEAD
         achieved_something = (goal_logits.sum() > 1e-5).astype(batch_loss.dtype)
         loss_mask = loss_mask * achieved_something
+=======
+        achieved_something = (goal_logits.sum() > 1e-5).astype(loss_mask.dtype)
+        loss_mask = loss_mask*achieved_something
+>>>>>>> 195223a10be4fe6e0ed127546609363b6974147d
 
         # Create modified discount that's 0 at goal_index (episode terminates there)
         if self.terminate_on_reward:
@@ -703,14 +708,15 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
       else rlax.IDENTITY_PAIR
     ),
     step_cost=config.get("STEP_COST", 0.0),
-    her_coeff=config.get("HER_COEFF", 0.001),
-    ngoals=config.get("NUM_HER_GOALS", 10),
+    her_coeff=config.get("HER_COEFF", 1.),
+    ngoals=config.get("NUM_HER_GOALS", 1),
     sample_achieved_goals=sample_achieved_goals,
     sample_td_goals=get_all_goals,
     online_reward_fn=online_reward_fn,
     her_reward_fn=her_reward_fn,
     terminate_on_reward=config.get("TERMINATE_ON_REWARD", True),
     all_goals_coeff=config.get("ALL_GOALS_COEFF", 1.0),
+    lambda_=config.get("TD_LAMBDA", 0.9),
     all_goals_lambda=config.get("ALL_GOALS_LAMBDA", 0.3),
     cql_alpha=config.get("CQL_ALPHA", 0.0),
     cql_temp=config.get("CQL_TEMP", 1.0),
