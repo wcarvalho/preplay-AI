@@ -1083,8 +1083,8 @@ def jaxmaze_learner_log_fn(
     n_episodes = len(episode_ranges)
     n_traj_rows = ceil(n_episodes / n_cols)
 
-    # Layout: 2 data rows + n_traj_rows trajectory rows
-    n_rows = 2 + n_traj_rows
+    # Layout: 3 data rows + n_traj_rows trajectory rows
+    n_rows = 3 + n_traj_rows
     fig, axes = plt.subplots(
       n_rows,
       n_cols,
@@ -1094,7 +1094,9 @@ def jaxmaze_learner_log_fn(
     if n_cols == 1:
       axes = axes[:, None]
 
-    # Row 0: Reward line plots
+    ##############################
+    # Row 0: Reward, Q-values, Q-targets
+    ##############################
     for ci, col_name in enumerate(col_names):
       ax = axes[0, ci]
       cd = col_data[col_name]
@@ -1102,19 +1104,65 @@ def jaxmaze_learner_log_fn(
       loss_mask = cd.get("loss_mask")
 
       ax.plot(reward_info["goal_reward"], label="Goal Reward")
+      # Q-values (action taken) and Q-targets
+      actions = cd["actions"]
+      q_values = cd["q_values"]
+      q_target = cd["q_target"]
+      q_values_taken = rlax.batched_index(q_values, actions)
+      ax.plot(q_values_taken, label="Q-Values")
+      ax.plot(q_target, label="Q-Targets")
       if loss_mask is not None:
         ax.plot(loss_mask * 0.5, label="Loss Mask", linestyle="--", color="red")
       if col_name == "her" and "goal_index" in cd:
         goal_index = int(cd["goal_index"])
         ax.axvline(goal_index, color="red", linestyle="--", alpha=0.7, label="Goal idx")
-      ax.set_title(f"{col_name} — Reward", fontsize=9)
+      ax.set_title(f"{col_name} — Rewards and Q-Values", fontsize=9)
       ax.legend(fontsize=7)
       ax.grid(True)
       ax.set_xticks(range(nT))
 
-    # Row 1: Combined heatmap (task_vector + achievements)
+    ##############################
+    # Row 1: Top and 2nd-top Q-values
+    ##############################
     for ci, col_name in enumerate(col_names):
       ax = axes[1, ci]
+      cd = col_data[col_name]
+      q_values = cd["q_values"]
+      sorted_q = jnp.sort(q_values, axis=-1)
+      top_q = sorted_q[..., -1]
+      second_q = sorted_q[..., -2]
+      ax.plot(top_q, label="Top Q")
+      ax.plot(second_q, label="2nd Q")
+      # Star where action Q-value matches top Q-value
+      actions = cd["actions"]
+      q_values_taken = rlax.batched_index(q_values, actions)
+      is_top = jnp.isclose(q_values_taken, top_q, atol=1e-5)
+      top_indices = jnp.where(is_top)[0]
+      if len(top_indices) > 0:
+        ax.plot(
+          top_indices,
+          top_q[top_indices],
+          "*",
+          color="gold",
+          markersize=8,
+          label="Action=Top",
+        )
+      loss_mask = cd.get("loss_mask")
+      if loss_mask is not None:
+        ax.plot(loss_mask * 0.5, label="Loss Mask", linestyle="--", color="red")
+      if col_name == "her" and "goal_index" in cd:
+        goal_index = int(cd["goal_index"])
+        ax.axvline(goal_index, color="red", linestyle="--", alpha=0.7, label="Goal idx")
+      ax.set_title(f"{col_name} — Top Q-values", fontsize=9)
+      ax.legend(fontsize=7)
+      ax.grid(True)
+      ax.set_xticks(range(nT))
+
+    ##############################
+    # Row 2: Combined heatmap (task_vector + achievements)
+    ##############################
+    for ci, col_name in enumerate(col_names):
+      ax = axes[2, ci]
       cd = col_data[col_name]
       reward_info = cd["reward_info"]
 
@@ -1133,9 +1181,11 @@ def jaxmaze_learner_log_fn(
         goal_index = int(cd["goal_index"])
         ax.axvline(goal_index, color="red", linestyle="--", alpha=0.7)
 
-    # Rows 2+: Trajectory renders with arrows
+    ##############################
+    # Rows 3+: Trajectory renders with arrows
+    ##############################
     for ep_idx, (ep_start, ep_end) in enumerate(episode_ranges):
-      row_idx = 2 + ep_idx // n_cols
+      row_idx = 3 + ep_idx // n_cols
       col_idx = ep_idx % n_cols
       ax = axes[row_idx, col_idx]
 
@@ -1162,7 +1212,7 @@ def jaxmaze_learner_log_fn(
     # Hide unused trajectory subplots
     total_traj_slots = n_traj_rows * n_cols
     for slot_idx in range(n_episodes, total_traj_slots):
-      row_idx = 2 + slot_idx // n_cols
+      row_idx = 3 + slot_idx // n_cols
       col_idx = slot_idx % n_cols
       axes[row_idx, col_idx].set_visible(False)
 
