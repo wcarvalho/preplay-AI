@@ -278,10 +278,9 @@ class HerLossFn(base.RecurrentLossFn):
     sorted_q = jnp.sort(online_preds.q_vals, axis=-1)
     q_gap = sorted_q[..., -1] - sorted_q[..., -2]  # [T+1]
 
-    q_normalized = online_preds.q_vals / (
-      online_preds.q_vals.sum(axis=-1, keepdims=True) + 1e-8
-    )
-    q_entropy = -jnp.sum(q_normalized * jnp.log(q_normalized + 1e-8), axis=-1)  # [T+1]
+    q_softmax = jax.nn.softmax(online_preds.q_vals, axis=-1)
+    max_entropy = jnp.log(online_preds.q_vals.shape[-1])
+    q_entropy = -jnp.sum(q_softmax * jnp.log(q_softmax + 1e-8), axis=-1) / max_entropy  # [T+1]
 
     metrics = {
       "0.q_loss": batch_loss.mean(),
