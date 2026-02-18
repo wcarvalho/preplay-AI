@@ -11,7 +11,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Create virtual environment and install dependencies
 uv venv --clear --python 3.12
-UV_LINK_MODE=copy uv sync
+uv sync
 ```
 
 ### Running scripts

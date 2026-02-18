@@ -518,12 +518,12 @@ def sweep(search: str = ""):
         "parameters": {
             "ALG": {"values": ["preplay"]},
             "SEED": {"values": list(range(2))},
-            "KNOWN_OFFTASK_GOAL": {"values": [True, False]},
-            "ALL_GOALS_COEF": {"values": [0.0, .1, 1.0]},
+            "KNOWN_OFFTASK_GOAL": {"values": [False, True]},
+            "ALL_GOALS_COEF": {"values": [1.0, .1, 0.0]},
             "env.exp": {"values": ["exp4"]},
         },
         "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-        "group": "preplay-td-1",
+        "group": "preplay-td-2",
     }
 
   elif search == "her":
@@ -551,10 +551,10 @@ def sweep(search: str = ""):
         "ALG": {"values": ["her"]},
         "SEED": {"values": [1]},
         "env.exp": {"values": ["her_test_big", 'exp4']},
-        "ALL_GOALS_COEF": {"values": [0.0, .1, 1.0]},
+        "ALL_GOALS_COEF": {"values": [1.0, .1, 0.0]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-td-1",
+      "group": "her-td-2",
     }
 
   # elif search == "dynaq_shared":

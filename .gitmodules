@@ -1,6 +1,8 @@
 [submodule "libraries/jaxneurorl"]
 	path = libraries/jaxneurorl
 	url = https://github.com/wcarvalho/jaxneurorl
+	branch = main
 [submodule "libraries/jaxmaze"]
 	path = libraries/jaxmaze
 	url = https://github.com/wcarvalho/JaxMaze.git
+	branch = main

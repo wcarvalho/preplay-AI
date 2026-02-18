@@ -449,10 +449,11 @@ class HerLossFn(base.RecurrentLossFn):
       key_grad, key_grad_ = jax.random.split(key_grad)
 
       key_grad_ = jax.random.split(key_grad_, B + 1)
+
       # GoalPosition with [N, B, D] and [N, B, 2]
       all_goals = jax.vmap(self.sample_td_goals, (1, 0), 1)(
           data.timestep, 
-          key_grad_)
+          key_grad_[1:])
 
       def all_goals_loss_fn(
         new_goal,
@@ -498,8 +499,7 @@ class HerLossFn(base.RecurrentLossFn):
         online_preds,  # tree with [T, B, ...]
         target_preds,  # tree with [T, B, ...]
       )
-      import ipdb
-      ipdb.set_trace()
+
       # ag_loss: [B, N] -> mean over N goals
       loss = loss + self.all_goals_coeff * ag_loss.mean(1)
       all_metrics.update({f"2.all_goals/{k}": v for k, v in ag_metrics.items()})
