@@ -9,8 +9,9 @@ authors = [
 ]
 dependencies = [
     # JAX ecosystem
-    "jax[cuda12]>=0.4.20",
-    "jaxlib>=0.4.20",
+    "jax[cuda12]==0.4.21; sys_platform == 'linux'",
+    "jax==0.4.21; sys_platform != 'linux'",
+    "jaxlib==0.4.21",
     "flax>=0.8.4",
     "optax>=0.2.1",
     "chex>=0.1.86",
@@ -27,8 +28,8 @@ dependencies = [
     "omegaconf",
     "wandb",
     # Compute utilities
-    "scipy>=1.12.0",
-    "numpy",
+    "scipy>=1.12.0,<1.13",
+    "numpy<2",
     # Serialization
     "safetensors",
     # Utilities
@@ -55,11 +56,16 @@ indent-style = "space"
 
 [dependency-groups]
 dev = [
+    "jupyter>=1.1.1",
     "ruff",
 ]
 
 [tool.uv]
 find-links = ["https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"]
+required-environments = [
+    "sys_platform == 'darwin'",
+    "sys_platform == 'linux'",
+]
 
 [tool.uv.sources]
 jaxneurorl = { path = "libraries/jaxneurorl", editable = true }
