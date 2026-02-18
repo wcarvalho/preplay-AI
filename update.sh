@@ -32,7 +32,7 @@ git submodule foreach '
 
 # Push main repo
 echo "==> Pushing main repo"
-git add -A
+git add -u
 git diff --cached --quiet && echo "Nothing to commit in main repo" || {
   git commit -m "$MSG"
 }
