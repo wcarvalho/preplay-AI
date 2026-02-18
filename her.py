@@ -56,7 +56,7 @@ RNNInput = base.RNNInput
 
 ENVIRONMENT_TO_GOAL_FNS = {
   "jaxmaze": (
-    lambda t: jax.lax.stop_gradient(t.observation.task_w),   # task vector
+    lambda t: jax.lax.stop_gradient(t.observation.task_w),  # task vector
     lambda t: jax.lax.stop_gradient(t.observation.state_features),  # state features
     lambda t: jax.lax.stop_gradient(t.observation.player_position),  # player position
   ),
@@ -518,6 +518,7 @@ class HerLossFn(base.RecurrentLossFn):
           apply_cql=True,
           lambda_override=self.all_goals_lambda,
         )
+        ag_log_info["reward_info"] = reward_info
         return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
 
       # vmap over N goals, then over B batch
@@ -525,14 +526,18 @@ class HerLossFn(base.RecurrentLossFn):
       ag_fn = jax.vmap(ag_fn, 1, 0)  # B batch (goals shared across batch)
 
       # , [B, N]
-      _, ag_loss, ag_metrics, _ = ag_fn(
+      _, ag_loss, ag_metrics, ag_log_info = ag_fn(
         all_goals,  # GoalPosition [N, D]
         data.timestep,  # [T, B, ...]
         data.action,  # [T, B]
         online_preds,  # tree with [T, B, ...]
         target_preds,  # tree with [T, B, ...]
       )
-
+      # only first goal
+      all_log_info["all_goals"] = jax.tree_util.tree_map(
+        lambda x: x[:, 2],
+        ag_log_info,
+      )
       # ag_loss: [B, N] -> mean over N goals
       loss = loss + self.all_goals_coeff * ag_loss.mean(1)
       all_metrics.update({f"2.all_goals/{k}": v for k, v in ag_metrics.items()})
@@ -893,7 +898,7 @@ def create_data_plots(d_, reward_info, is_her=False, subfig=None, goal_index=-1)
   return fig1, axes1, fig2, axes2
 
 
-def jaxmaze_learner_log_fn(
+def jaxmaze_learner_log_fn_old(
   data: dict,
   config: dict,
   action_names: dict,
@@ -1030,6 +1035,150 @@ def jaxmaze_learner_log_fn(
   jax.lax.cond(
     is_log_time,
     lambda d: jax.debug.callback(plot_both, d),
+    lambda d: None,
+    data,
+  )
+
+
+def jaxmaze_learner_log_fn(
+  data: dict,
+  config: dict,
+  action_names: dict,
+  render_fn: Callable,
+  extract_task_info: Callable[[TimeStep], flax.struct.PyTreeNode] = lambda t: t,
+  get_task_name: Callable = lambda t: "Task",
+):
+  from math import ceil
+
+  def plot_unified(d):
+    columns = ["online", "her", "all_goals"]
+    col_data = {}
+    for col_name in columns:
+      if col_name not in d:
+        continue
+      col_data[col_name] = jax.tree_util.tree_map(lambda x: x[0], d[col_name])
+
+    if not col_data:
+      return
+
+    n_cols = len(col_data)
+    col_names = list(col_data.keys())
+
+    # Use first available column to get dimensions
+    first_d = col_data[col_names[0]]
+    timesteps: TimeStep = first_d["timesteps"]
+    nT = len(timesteps.reward)
+    maze_height, maze_width, _ = timesteps.state.grid[0].shape
+
+    # Detect episodes in T dimension (batch=0)
+    is_first = timesteps.first()
+    episode_starts = list(jnp.where(is_first)[0])
+    if not episode_starts or episode_starts[0] != 0:
+      episode_starts = [0] + episode_starts
+    episode_ranges = []
+    for i, start in enumerate(episode_starts):
+      end = episode_starts[i + 1] if i + 1 < len(episode_starts) else nT
+      episode_ranges.append((int(start), int(end)))
+
+    n_episodes = len(episode_ranges)
+    n_traj_rows = ceil(n_episodes / n_cols)
+
+    # Layout: 2 data rows + n_traj_rows trajectory rows
+    n_rows = 2 + n_traj_rows
+    fig, axes = plt.subplots(
+      n_rows,
+      n_cols,
+      figsize=(5 * n_cols, 3 * n_rows),
+      gridspec_kw={"hspace": 0.4, "wspace": 0.3},
+    )
+    if n_cols == 1:
+      axes = axes[:, None]
+
+    # Row 0: Reward line plots
+    for ci, col_name in enumerate(col_names):
+      ax = axes[0, ci]
+      cd = col_data[col_name]
+      reward_info = cd["reward_info"]
+      loss_mask = cd.get("loss_mask")
+
+      ax.plot(reward_info["goal_reward"], label="Goal Reward")
+      if loss_mask is not None:
+        ax.plot(loss_mask * 0.5, label="Loss Mask", linestyle="--", color="red")
+      if col_name == "her" and "goal_index" in cd:
+        goal_index = int(cd["goal_index"])
+        ax.axvline(goal_index, color="red", linestyle="--", alpha=0.7, label="Goal idx")
+      ax.set_title(f"{col_name} — Reward", fontsize=9)
+      ax.legend(fontsize=7)
+      ax.grid(True)
+      ax.set_xticks(range(nT))
+
+    # Row 1: Combined heatmap (task_vector + achievements)
+    for ci, col_name in enumerate(col_names):
+      ax = axes[1, ci]
+      cd = col_data[col_name]
+      reward_info = cd["reward_info"]
+
+      goal_tv = reward_info["goal_task_vector"]  # [T, D]
+      goal_ach = reward_info["goal_achievements"]  # [T, D]
+      combined = (goal_tv + goal_ach).T  # [D, T]
+      ax.imshow(
+        combined, aspect="auto", cmap="viridis", interpolation="nearest", vmin=0, vmax=2
+      )
+      ax.set_title(f"{col_name} — Task+Ach", fontsize=9)
+      ax.set_ylabel("Dims")
+      ax.set_yticks(range(combined.shape[0]))
+      ax.set_xticks(range(nT))
+      ax.grid(True, axis="x", alpha=0.3, color="white")
+      if col_name == "her" and "goal_index" in cd:
+        goal_index = int(cd["goal_index"])
+        ax.axvline(goal_index, color="red", linestyle="--", alpha=0.7)
+
+    # Rows 2+: Trajectory renders with arrows
+    for ep_idx, (ep_start, ep_end) in enumerate(episode_ranges):
+      row_idx = 2 + ep_idx // n_cols
+      col_idx = ep_idx % n_cols
+      ax = axes[row_idx, col_idx]
+
+      # Render initial state as background
+      initial_state = jax.tree_util.tree_map(lambda x: x[ep_start], timesteps.state)
+      img = render_fn(initial_state)
+
+      # Extract episode positions and actions
+      ep_len = ep_end - ep_start
+      ep_positions = jax.tree_util.tree_map(
+        lambda x: x[ep_start : ep_end - 1], timesteps.state.agent_pos
+      )
+      ep_actions = first_d["actions"][ep_start : ep_end - 1]
+
+      renderer.place_arrows_on_image(
+        img, ep_positions, ep_actions, maze_height, maze_width, arrow_scale=5, ax=ax
+      )
+      total_reward = float(timesteps.reward[ep_start:ep_end].sum())
+      ax.set_title(
+        f"Ep {ep_idx} (t={ep_start}-{ep_end - 1}, r={total_reward:.1f})", fontsize=8
+      )
+      ax.axis("off")
+
+    # Hide unused trajectory subplots
+    total_traj_slots = n_traj_rows * n_cols
+    for slot_idx in range(n_episodes, total_traj_slots):
+      row_idx = 2 + slot_idx // n_cols
+      col_idx = slot_idx % n_cols
+      axes[row_idx, col_idx].set_visible(False)
+
+    fig.tight_layout()
+
+    if wandb.run is not wandb.sdk.lib.disabled.RunDisabled:
+      wandb.log({"learner_example/unified": wandb.Image(fig)})
+    plt.close(fig)
+
+  # this will be the value after update is applied
+  n_updates = data["n_updates"] + 1
+  is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
+
+  jax.lax.cond(
+    is_log_time,
+    lambda d: jax.debug.callback(plot_unified, d),
     lambda d: None,
     data,
   )
