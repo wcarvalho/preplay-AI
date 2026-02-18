@@ -41,6 +41,7 @@ from flax import struct
 from gymnax.environments import environment
 from base_algorithm2 import TimeStep
 import base_algorithm2 as base
+from jaxneurorl.losses import cql_loss as compute_cql_loss
 
 make_optimizer = base.make_optimizer
 make_actor = base.make_actor
@@ -209,6 +210,8 @@ class HerLossFn(base.RecurrentLossFn):
   online_reward_fn: Callable[[base.TimeStep], jax.Array] = None
   her_reward_fn: Callable[[base.TimeStep, Goal], jax.Array] = None
   terminate_on_reward: bool = False
+  cql_alpha: float = 0.0
+  cql_temp: float = 1.0
 
   def loss_fn(
     self,
@@ -220,6 +223,7 @@ class HerLossFn(base.RecurrentLossFn):
     is_last,
     non_terminal,
     loss_mask,
+    apply_cql=False,
   ):
     rewards = make_float(rewards)
     rewards = rewards - self.step_cost
@@ -255,12 +259,32 @@ class HerLossFn(base.RecurrentLossFn):
       loss_mask[:-1].sum(0) + 1e-5
     )
 
+    # CQL regularizer
+    cql_loss_val = jnp.zeros((), dtype=batch_loss_mean.dtype)
+    if apply_cql and self.cql_alpha > 0:
+        cql_per_t = compute_cql_loss(
+            online_preds.q_vals[:-1], actions[:-1], self.cql_temp
+        )  # [T]
+        cql_per_t = cql_per_t * loss_mask[:-1]
+        cql_loss_val = (cql_per_t * loss_mask[:-1]).sum(0) / (loss_mask[:-1].sum(0) + 1e-5)
+        cql_loss_val = self.cql_alpha * cql_loss_val
+        batch_loss_mean = batch_loss_mean + cql_loss_val
+
+    sorted_q = jnp.sort(online_preds.q_vals, axis=-1)
+    q_gap = sorted_q[..., -1] - sorted_q[..., -2]  # [T+1]
+
+    q_normalized = online_preds.q_vals / (online_preds.q_vals.sum(axis=-1, keepdims=True) + 1e-8)
+    q_entropy = -jnp.sum(q_normalized * jnp.log(q_normalized + 1e-8), axis=-1)  # [T+1]
+
     metrics = {
       "0.q_loss": batch_loss.mean(),
       "0.q_td": jnp.abs(batch_td_error).mean(),
       "1.reward": rewards[1:].mean(),
       "z.q_mean": online_preds.q_vals.mean(),
       "z.q_var": online_preds.q_vals.var(),
+      "z.q_top2_gap": q_gap.mean(),
+      "z.q_entropy": q_entropy.mean(),
+      "0.cql_loss": cql_loss_val.mean(),
     }
 
     log_info = {
@@ -484,6 +508,7 @@ class HerLossFn(base.RecurrentLossFn):
           is_last=make_float(timestep.last()),
           non_terminal=timestep.discount,
           loss_mask=is_truncated(timestep),
+          apply_cql=True,
         )
         return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
 
@@ -586,8 +611,8 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
       logits = config["GOAL_BETA"] * goal_achieved + position_achieved
     else:
       logits = goal_achieved
-    logits = logits + 1e-5
-    probabilities = logits / logits.sum(-1) 
+    logits_ = logits + 1e-5
+    probabilities = logits_ / logits_.sum(-1) 
 
     # N
     rng, rng_ = jax.random.split(rng)
@@ -648,6 +673,8 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     her_reward_fn=her_reward_fn,
     terminate_on_reward=config.get("TERMINATE_ON_REWARD", True),
     all_goals_coeff=config.get("ALL_GOALS_COEFF", 1.0),
+    cql_alpha=config.get("CQL_ALPHA", 0.0),
+    cql_temp=config.get("CQL_TEMP", 1.0),
   )
 
 

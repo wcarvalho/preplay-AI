@@ -408,6 +408,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
   backtracking: bool = True
   combine_real_sim: bool = False
 
+  sarsa_td: bool = False
   dyna_policy: SimPolicy = None
   offtask_dyna_policy: SimPolicy = None
   sample_preplay_goals: Callable = None
@@ -426,6 +427,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
     is_last,
     non_terminal,
     loss_mask,
+    sarsa: bool = False,
   ):
     rewards = make_float(rewards)
     rewards = rewards - self.step_cost
@@ -434,20 +436,37 @@ class DynaLossFn(vbb.RecurrentLossFn):
     lambda_ = jnp.ones_like(non_terminal) * self.lambda_
 
     # Get N-step transformed TD error and loss.
-    batch_td_error_fn = jax.vmap(losses.q_learning_lambda_td, in_axes=1, out_axes=1)
+    if sarsa:
+      batch_td_error_fn = jax.vmap(
+        losses.sarsa_lambda, in_axes=1, out_axes=1)
+      lambda_ = lambda_ * (1 - is_last)
+      q_t, target_q_t = batch_td_error_fn(
+        online_preds.q_vals[:-1],  # [T+1] --> [T]
+        actions[:-1],  # [T+1] --> [T]
+        rewards[1:],  # [T+1] --> [T]
+        discounts[1:],
+        target_preds.q_vals[1:],  # [T+1] --> [T]
+        actions[1:],  # [T+1] --> [T]
+        lambda_[1:],
+      )
+    else:
+      batch_td_error_fn = jax.vmap(
+        losses.q_learning_lambda_td, in_axes=1, out_axes=1)
+      # [T, B]
+      selector_actions = jnp.argmax(online_preds.q_vals, axis=-1)  
 
-    # [T, B]
-    selector_actions = jnp.argmax(online_preds.q_vals, axis=-1)  # [T+1, B]
-    q_t, target_q_t = batch_td_error_fn(
-      online_preds.q_vals[:-1],  # [T+1] --> [T]
-      actions[:-1],  # [T+1] --> [T]
-      target_preds.q_vals[1:],  # [T+1] --> [T]
-      selector_actions[1:],  # [T+1] --> [T]
-      rewards[1:],  # [T+1] --> [T]
-      discounts[1:],
-      is_last[1:],
-      lambda_[1:],
-    )  # [T+1] --> [T]
+      # [T+1, B]
+      q_t, target_q_t = batch_td_error_fn(
+        online_preds.q_vals[:-1],  # [T+1] --> [T]
+        actions[:-1],  # [T+1] --> [T]
+        target_preds.q_vals[1:],  # [T+1] --> [T]
+        selector_actions[1:],  # [T+1] --> [T]
+        rewards[1:],  # [T+1] --> [T]
+        discounts[1:],
+        is_last[1:],
+        lambda_[1:],
+      )
+
 
     # ensure target = 0 when episode terminates
     target_q_t = target_q_t * non_terminal[:-1]
@@ -556,16 +575,16 @@ class DynaLossFn(vbb.RecurrentLossFn):
 
       all_log_info["dyna"] = dyna_log_info
 
-    elif self.all_goals_coeff > 0.0:
+    if self.all_goals_coeff > 0.0:
       def all_goals_loss_single(timestep_b, action_b, h_on_b, h_tar_b, loss_mask_b, key):
         # timestep_b: [T, ...], action_b: [T], h_on_b/h_tar_b: tree of [...], loss_mask_b: [T]
         N = self.num_offtask_goals
 
         # Sample goals from achievable set
-        goals, achievable, any_achievable = self.sample_td_goals(
-            timestep_b, key, N)
         # goals: [N, G]
-        import ipdb; ipdb.set_trace()
+        goals, _, _ = self.sample_td_goals(
+            timestep_b, key, N)
+
         # Repeat RNN states for N goals
         h_tm1_online_repeated = repeat(h_on_b, N)  # [N, D]
         h_tm1_target_repeated = repeat(h_tar_b, N)  # [N, D]
@@ -607,10 +626,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
         )
 
         # Compute goal-specific rewards: [N, T] → [T, N]
-        goal_rewards = jax.vmap(
-          lambda g: self.compute_rewards(timestep_b, g)
-        )(goals)
-        goal_rewards = goal_rewards.T
+        goal_rewards = self.compute_rewards(timestep_repeated, goals)
 
         # Compute TD loss
         ag_td_error, ag_batch_loss, ag_metrics, ag_log_info = self.loss_fn(
@@ -622,18 +638,12 @@ class DynaLossFn(vbb.RecurrentLossFn):
           is_last=make_float(timestep_repeated.last()),
           non_terminal=timestep_repeated.discount,
           loss_mask=loss_mask_repeated,
+          sarsa=self.sarsa_td,
         )
         # ag_td_error: [T-1, N], ag_batch_loss: [N]
-
-        # Average over goals
-        ag_td_error = ag_td_error.mean(1)  # [T-1]
-        ag_batch_loss_mean = ag_batch_loss.mean()  # scalar
-
-        return ag_td_error, ag_batch_loss_mean, ag_metrics, ag_log_info
+        return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
 
       # Vmap over batch
-      import ipdb
-      ipdb.set_trace()
       all_goals_fn = jax.vmap(all_goals_loss_single, (1, 1, 0, 0, 1, 0), 0)
       _, all_goals_batch_loss, all_goals_metrics, _ = all_goals_fn(
         data.timestep,
@@ -643,11 +653,8 @@ class DynaLossFn(vbb.RecurrentLossFn):
         loss_mask,
         jax.random.split(key_grad, B),
       )
-      batch_loss += self.all_goals_coeff * all_goals_batch_loss
+      batch_loss += self.all_goals_coeff * all_goals_batch_loss.mean(1)
       all_metrics.update({f"{k}/all_goals": v for k, v in all_goals_metrics.items()})
-    else:
-      td_error = jnp.zeros_like(loss_mask)
-      batch_loss = td_error.sum(0)  # time axis
 
     if self.logger.learner_log_extra is not None:
       self.logger.learner_log_extra(all_log_info)
@@ -1158,6 +1165,7 @@ def make_loss_fn_class(config, **kwargs) -> DynaLossFn:
     mainq_coeff=config.get("MAINQ_COEFF", 1.0),
     combine_real_sim=config.get("COMBINE_REAL_SIM", False),
     all_goals_coeff=config.get("ALL_GOALS_COEFF", 1.0),
+    sarsa_td=config.get("SARSA_TD", False),
     **kwargs,
   )
 
@@ -2366,7 +2374,7 @@ def make_train_jaxmaze_multigoal(**kwargs):
   all_tasks = jnp.array(kwargs.pop("all_tasks"))  # [G, D]
   known_offtask_goal = config.get("KNOWN_OFFTASK_GOAL", True)
   #known_offtask_goal = False
-  num_offtask_goals = 1 if known_offtask_goal else all_tasks.shape[0]
+  num_offtask_goals = 1 if known_offtask_goal else config["NUM_OFFTASK_GOALS"]
   config["NUM_OFFTASK_GOALS"] = num_offtask_goals
 
   if epsilon_setting == 1:
@@ -2404,9 +2412,9 @@ def make_train_jaxmaze_multigoal(**kwargs):
     task_object = timestep.observation.task_w[-1].astype(jnp.int32)
 
     achievable = nn.relu((is_object_nearby - task_object).astype(jnp.float32))
-    achievable = achievable + 1e-5
+    achievable_ = achievable + 1e-5
     
-    probabilities = achievable / achievable.sum(-1)
+    probabilities = achievable_ / achievable_.sum(-1)
     key, key_ = jax.random.split(key)
     goals = distrax.Categorical(probs=probabilities).sample(
         seed=key, sample_shape=(num_offtask_goals)
@@ -2421,14 +2429,14 @@ def make_train_jaxmaze_multigoal(**kwargs):
 
 
   def sample_nontask_random_goals(timestep, key, num_offtask_goals):
-    # [T, G] --> [G]
-    # goal_probs = jnp.ones(len(all_tasks)) / len(all_tasks)
-    # assume you know offtask goal
     if known_offtask_goal:
       # first time-step, 1 goal
       goals = timestep.state.offtask_w[0][None] # [1, G]
     else:
-      goals = all_tasks.astype(timestep.state.offtask_w.dtype)  # [4, G]
+      key, key_ = jax.random.split(key)
+      idxs = jax.random.choice(key_, len(all_tasks), shape=(num_offtask_goals,), replace=False)
+      goals = jax.vmap(lambda i: jax.lax.dynamic_index_in_dim(all_tasks, i, keepdims=False))(idxs)
+      goals = goals.astype(timestep.state.offtask_w.dtype)  # [N, G]
     achievable = jnp.ones(len(goals))
     any_achievable = achievable.sum() > 0.1
 

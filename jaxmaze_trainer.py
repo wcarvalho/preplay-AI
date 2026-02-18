@@ -420,6 +420,8 @@ def run_single(config: dict, save_path: str = None):
     raise NotImplementedError(alg_name)
 
   start_time = time.time()
+  if config.get("base", "vbb") != "base":
+    train_fn = jax.jit(train_fn)
   outs = train_fn(rng)
   elapsed_time = time.time() - start_time
   print("Elapsed time: {:.2f} seconds".format(elapsed_time))
@@ -517,13 +519,14 @@ def sweep(search: str = ""):
         },
         "parameters": {
             "ALG": {"values": ["preplay"]},
-            "SEED": {"values": list(range(2))},
-            "KNOWN_OFFTASK_GOAL": {"values": [False, True]},
-            "ALL_GOALS_COEF": {"values": [1.0, .1, 0.0]},
+            "SEED": {"values": list(range(1))},
+            "KNOWN_OFFTASK_GOAL": {"values": [False]},
+            "TD_LAMBDA": {"values": [.3, .6, .9]},
+            "SARSA_TD": {"values": [True, False]},
             "env.exp": {"values": ["exp4"]},
         },
         "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-        "group": "preplay-td-2",
+        "group": "preplay-td-4-sarsa",
     }
 
   elif search == "her":
@@ -534,7 +537,7 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["her"]},
-        "SEED": {"values": [1, 2]},
+        "SEED": {"values": [1]},
         "env.exp": {"values": ["her_test_big", 'exp4']},
         "NUM_HER_GOALS": {"values": [1]},
       },
@@ -550,11 +553,12 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["her"]},
         "SEED": {"values": [1]},
-        "env.exp": {"values": ["her_test_big", 'exp4']},
-        "ALL_GOALS_COEF": {"values": [1.0, .1, 0.0]},
+        "env.exp": {"values": ["her_test_big"]},
+        "CQL_ALPHA": {"values": [1e-6, 1e-7, 1e-8]},
+        "TD_LAMBDA": {"values": [.3, .6, .9]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-td-2",
+      "group": "her-cql-2-3",
     }
 
   # elif search == "dynaq_shared":
