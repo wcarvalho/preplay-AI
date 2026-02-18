@@ -13,7 +13,7 @@ git submodule foreach '
   echo "==> Processing $name"
 
   # Commit any changes first
-  git add -A
+  git add -u
   git diff --cached --quiet && echo "  Nothing to commit" || {
     git commit -m "'"$MSG"'"
   }
