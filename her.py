@@ -616,6 +616,7 @@ class HerLossFnBatched:
       discounts[1:],
       is_last[1:],
       lambda_[1:],
+      tx_pair=self.tx_pair,
     )
 
     target_q_t = target_q_t * non_terminal[:-1]
@@ -627,7 +628,7 @@ class HerLossFnBatched:
       loss_mask[:-1].sum(0) + 1e-5
     )
 
-    return batch_td_error, batch_loss_mean
+    return batch_td_error, batch_loss_mean, batch_loss, target_q_t
 
   def __call__(
     self,
@@ -881,7 +882,9 @@ class HerLossFnBatched:
     lambdas_flat = _flatten_gb(all_lambdas)  # [G*B]
 
     # Single batched loss computation
-    all_td_errors, all_losses = jax.vmap(self._single_loss_fn)(
+    all_td_errors, all_losses, all_q_losses, all_q_targets = jax.vmap(
+      self._single_loss_fn
+    )(
       all_online_preds,  # [G*B, T, A]
       all_target_preds,  # [G*B, T, A]
       actions_flat,  # [G*B, T]
@@ -892,6 +895,7 @@ class HerLossFnBatched:
       lambdas_flat,  # [G*B]
     )
     # all_td_errors: [G*B, T-1], all_losses: [G*B]
+    # all_q_losses: [G*B, T-1], all_q_targets: [G*B, T-1]
 
     ##############################
     # 9. UNSTACK + AGGREGATE
@@ -933,45 +937,65 @@ class HerLossFnBatched:
     ##############################
     # 11. METRICS
     ##############################
-    online_q = all_online_preds.q_vals.reshape(G, B, T, -1)[0]  # [B, T, A]
-    sorted_q = jnp.sort(online_q, axis=-1)
-    q_gap = sorted_q[..., -1] - sorted_q[..., -2]
-    q_softmax = jax.nn.softmax(online_q, axis=-1)
-    max_entropy = jnp.log(online_q.shape[-1])
-    q_entropy = -jnp.sum(q_softmax * jnp.log(q_softmax + 1e-8), axis=-1) / max_entropy
+    q_vals_gbt = all_online_preds.q_vals.reshape(G, B, T, -1)
 
-    metrics = {
-      "0.online/0.q_loss": all_losses.reshape(G, B)[0].mean(),
-      "0.online/0.q_td": jnp.abs(td_errors_gb[0]).mean(),
-      "0.online/1.reward": all_rewards[0].mean(),
-      "0.online/z.q_mean": online_q.mean(),
-      "0.online/z.q_var": online_q.var(),
-      "0.online/z.q_top2_gap": q_gap.mean(),
-      "0.online/z.q_entropy": q_entropy.mean(),
-    }
+    def _group_metrics(g_start, g_end, prefix):
+      q = q_vals_gbt[g_start:g_end]  # [g, B, T, A]
+      td = td_errors_gb[g_start:g_end]  # [g, B, T-1]
+      r = all_rewards[g_start:g_end]  # [g, B, T]
+      l = losses_gb[g_start:g_end]  # [g, B]
+      sorted_q = jnp.sort(q, axis=-1)
+      q_gap = sorted_q[..., -1] - sorted_q[..., -2]
+      q_softmax = jax.nn.softmax(q, axis=-1)
+      max_entropy = jnp.log(q.shape[-1])
+      q_entropy = -jnp.sum(q_softmax * jnp.log(q_softmax + 1e-8), axis=-1) / max_entropy
+      return {
+        f"{prefix}/0.q_loss": l.mean(),
+        f"{prefix}/0.q_td": jnp.abs(td).mean(),
+        f"{prefix}/1.reward": r.mean(),
+        f"{prefix}/z.q_mean": q.mean(),
+        f"{prefix}/z.q_var": q.var(),
+        f"{prefix}/z.q_top2_gap": q_gap.mean(),
+        f"{prefix}/z.q_entropy": q_entropy.mean(),
+      }
+
+    metrics = _group_metrics(0, 1, "0.online")
 
     if self.her_coeff > 0:
-      metrics["1.her/0.q_loss"] = her_losses.mean()
+      her_m = _group_metrics(1, 1 + N, "1.her")
+      metrics.update(her_m)
       metrics["1.her/achieved_something"] = her_achieved.mean()
 
     if self.all_goals_coeff > 0:
-      metrics["2.all_goals/0.q_loss"] = ag_losses.mean()
+      ag_m = _group_metrics(1 + N, G, "2.all_goals")
+      metrics.update(ag_m)
 
     ##############################
     # 12. LOGGING
     ##############################
     if self.logger.learner_log_extra is not None:
-      # Reshape preds back for log slicing
-      q_vals_gbt = all_online_preds.q_vals.reshape(G, B, T, -1)
+      # Reshape for log slicing: keep B dimension so plot_unified's
+      # tree_map(lambda x: x[0], ...) can select batch element 0
       target_q_vals_gbt = all_target_preds.q_vals.reshape(G, B, T, -1)
+      q_losses_gbt = all_q_losses.reshape(G, B, -1)  # [G, B, T-1]
+      q_targets_gbt = all_q_targets.reshape(G, B, -1)  # [G, B, T-1]
+
+      # timesteps in B-first order: [B, T, ...]
+      timesteps_bt = jax.tree_util.tree_map(
+        lambda x: jnp.swapaxes(x, 0, 1), data.timestep
+      )
+      actions_bt = jnp.swapaxes(data.action, 0, 1)  # [B, T]
 
       def _make_log_info(g_idx):
-        """Extract log info for goal index g_idx, batch element 0."""
+        """Extract log info for goal index g_idx, keeping B dimension."""
         return {
-          "q_values": q_vals_gbt[g_idx, 0],  # [T, A]
-          "actions": data.action[:, 0],  # [T]
-          "loss_mask": all_masks[g_idx, 0],  # [T]
-          "td_errors": td_errors_gb[g_idx, 0],  # [T-1]
+          "q_values": q_vals_gbt[g_idx],  # [B, T, A]
+          "actions": actions_bt,  # [B, T]
+          "loss_mask": all_masks[g_idx],  # [B, T]
+          "td_errors": td_errors_gb[g_idx],  # [B, T-1]
+          "q_loss": q_losses_gbt[g_idx],  # [B, T-1]
+          "q_target": q_targets_gbt[g_idx],  # [B, T-1]
+          "timesteps": timesteps_bt,  # [B, T, ...]
         }
 
       def _her_reward_info_single(timestep_b, goal):
@@ -980,45 +1004,50 @@ class HerLossFnBatched:
       all_log_info = {
         "n_updates": steps,
       }
-      # Build minimal log info for learner_log_extra
+
+      # Online log info
       online_log = _make_log_info(0)
-      online_log["timesteps"] = jax.tree_util.tree_map(lambda x: x[:, 0], data.timestep)
+      # online reward_info: [T, B, ...] -> [B, T, ...] via vmap over B
       online_log["reward_info"] = jax.tree_util.tree_map(
-        lambda x: x[0] if x.ndim > 1 else x, online_reward_info
-      )
-      # q_target for online
-      online_sel = jnp.argmax(q_vals_gbt[0, 0], axis=-1)
-      online_log["q_target"] = rlax.batched_index(
-        target_q_vals_gbt[0, 0, 1:], online_sel[1:]
+        lambda x: jnp.swapaxes(x, 0, 1) if x.ndim > 1 else x, online_reward_info
       )
       all_log_info["online"] = online_log
 
       if self.her_coeff > 0 and N > 0:
         her_log = _make_log_info(1)  # first HER goal
-        her_log["timesteps"] = jax.tree_util.tree_map(lambda x: x[:, 0], data.timestep)
-        her_log["goal_index"] = her_goal_indices[0, 0]
+        her_log["goal_index"] = her_goal_indices[0]  # [B]
 
-        # her reward info for first goal, first batch
-        first_her_ts = jax.tree_util.tree_map(lambda x: x[:, 0], data.timestep)
-        first_her_goal = jax.tree_util.tree_map(lambda x: x[0, 0], her_goals)
-        her_log["reward_info"] = _her_reward_info_single(first_her_ts, first_her_goal)
-        her_sel = jnp.argmax(q_vals_gbt[1, 0], axis=-1)
-        her_log["q_target"] = rlax.batched_index(
-          target_q_vals_gbt[1, 0, 1:], her_sel[1:]
-        )
+        # Compute goal_episode_id for first HER goal: [B]
+        episode_ids_bt = jnp.swapaxes(
+          jnp.cumsum(make_float(data.timestep.first()), axis=0) - 1, 0, 1
+        )  # [B, T]
+        her_log["goal_episode_id"] = jax.vmap(
+          lambda eids, gi: jax.lax.dynamic_index_in_dim(eids, gi, keepdims=False)
+        )(episode_ids_bt, her_goal_indices[0])  # [B]
+
+        # her reward info for first goal, all batch: vmap over B
+        _reward_info_b = jax.vmap(_her_reward_info_single, (0, 0))
+        her_goals_first = jax.tree_util.tree_map(
+          lambda x: x[0], her_goals
+        )  # [B, GoalPos]
+        her_log["reward_info"] = _reward_info_b(
+          timesteps_bt, her_goals_first
+        )  # [B, T, ...]
         all_log_info["her"] = her_log
 
       if self.all_goals_coeff > 0 and D > 2:
-        ag_idx = 1 + N + min(2, D - 1)
+        ag_goal_idx = min(2, D - 1)
+        ag_idx = 1 + N + ag_goal_idx
         ag_log = _make_log_info(ag_idx)
-        ag_log["timesteps"] = jax.tree_util.tree_map(lambda x: x[:, 0], data.timestep)
-        first_ag_ts = jax.tree_util.tree_map(lambda x: x[:, 0], data.timestep)
-        first_ag_goal = jax.tree_util.tree_map(lambda x: x[min(2, D - 1), 0], td_goals)
-        ag_log["reward_info"] = _her_reward_info_single(first_ag_ts, first_ag_goal)
-        ag_sel = jnp.argmax(q_vals_gbt[ag_idx, 0], axis=-1)
-        ag_log["q_target"] = rlax.batched_index(
-          target_q_vals_gbt[ag_idx, 0, 1:], ag_sel[1:]
-        )
+
+        # all-goals reward info for selected goal, all batch: vmap over B
+        _reward_info_b = jax.vmap(_her_reward_info_single, (0, 0))
+        ag_goal_selected = jax.tree_util.tree_map(
+          lambda x: x[ag_goal_idx], td_goals
+        )  # [B, GoalPos]
+        ag_log["reward_info"] = _reward_info_b(
+          timesteps_bt, ag_goal_selected
+        )  # [B, T, ...]
         all_log_info["all_goals"] = ag_log
 
       self.logger.learner_log_extra(all_log_info)
