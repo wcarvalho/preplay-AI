@@ -4,7 +4,6 @@ Hindsight experience replay
 
 Things to remove:
 1. POSITION_GOALS <-- hard-code to always be False. remove GOAL_BETA
-2. TERMINATE_ON_REWARD <-- hard-code to always be False.
 
 This is a self-contained module that only depends on:
 1. base_algorithm.py (consolidated jaxneurorl components)
@@ -41,7 +40,6 @@ from flax import struct
 from gymnax.environments import environment
 from base_algorithm2 import TimeStep
 import base_algorithm2 as base
-from jaxneurorl.losses import cql_loss as compute_cql_loss
 
 make_optimizer = base.make_optimizer
 make_actor = base.make_actor
@@ -217,9 +215,6 @@ class HerLossFn(base.RecurrentLossFn):
   sample_td_goals: Callable[[base.TimeStep, jax.random.PRNGKey], jax.Array] = None
   online_reward_fn: Callable[[base.TimeStep], jax.Array] = None
   her_reward_fn: Callable[[base.TimeStep, Goal], jax.Array] = None
-  terminate_on_reward: bool = False
-  cql_alpha: float = 0.0
-  cql_temp: float = 1.0
   all_goals_lambda: float = 0.3
 
   def loss_fn(
@@ -232,7 +227,6 @@ class HerLossFn(base.RecurrentLossFn):
     is_last,
     non_terminal,
     loss_mask,
-    apply_cql=False,
     lambda_override=None,
   ):
     rewards = make_float(rewards)
@@ -270,19 +264,6 @@ class HerLossFn(base.RecurrentLossFn):
       loss_mask[:-1].sum(0) + 1e-5
     )
 
-    # CQL regularizer
-    cql_loss_val = jnp.zeros((), dtype=batch_loss_mean.dtype)
-    if apply_cql and self.cql_alpha > 0:
-      cql_per_t = compute_cql_loss(
-        online_preds.q_vals[:-1], actions[:-1], self.cql_temp
-      )  # [T]
-      cql_per_t = cql_per_t * loss_mask[:-1]
-      cql_loss_val = (cql_per_t * loss_mask[:-1]).sum(0) / (
-        loss_mask[:-1].sum(0) + 1e-5
-      )
-      cql_loss_val = self.cql_alpha * cql_loss_val
-      batch_loss_mean = batch_loss_mean + cql_loss_val
-
     sorted_q = jnp.sort(online_preds.q_vals, axis=-1)
     q_gap = sorted_q[..., -1] - sorted_q[..., -2]  # [T+1]
 
@@ -300,7 +281,6 @@ class HerLossFn(base.RecurrentLossFn):
       "z.q_var": online_preds.q_vals.var(),
       "z.q_top2_gap": q_gap.mean(),
       "z.q_entropy": q_entropy.mean(),
-      "0.cql_loss": cql_loss_val.mean(),
     }
 
     log_info = {
@@ -418,22 +398,11 @@ class HerLossFn(base.RecurrentLossFn):
         )  # scalar
         episode_mask = (episode_ids == goal_episode_id).astype(jnp.float32)  # [T]
 
-        # If terminate_on_reward: mask out timesteps AFTER goal_index
-        if self.terminate_on_reward:
-          time_indices = jnp.arange(len(timestep.reward))
-          terminate_mask = (time_indices <= goal_index).astype(jnp.float32)
-          episode_mask = episode_mask * terminate_mask
-
         loss_mask = episode_mask * is_truncated(timestep)  # [T]
         achieved_something = (goal_logits.sum() > 1e-5).astype(loss_mask.dtype)
-        loss_mask = loss_mask*achieved_something
+        loss_mask = loss_mask * achieved_something
 
-        # Create modified discount that's 0 at goal_index (episode terminates there)
-        if self.terminate_on_reward:
-          goal_mask = jax.nn.one_hot(goal_index, len(timestep.discount))
-          modified_discount = timestep.discount * (1.0 - goal_mask)
-        else:
-          modified_discount = timestep.discount
+        modified_discount = timestep.discount
 
         td_error, batch_loss, metrics, log_info = self.loss_fn(
           timestep=timestep,
@@ -515,7 +484,7 @@ class HerLossFn(base.RecurrentLossFn):
         reward_info = self.her_reward_fn(timestep, new_goal)
 
         # Apply loss blindly — no achieved_something masking,
-        # no terminate_on_reward, no episode-based goal masking
+        # no episode-based goal masking
         ag_td_error, ag_batch_loss, ag_metrics, ag_log_info = self.loss_fn(
           timestep=timestep,
           online_preds=on_preds,
@@ -525,7 +494,6 @@ class HerLossFn(base.RecurrentLossFn):
           is_last=make_float(timestep.last()),
           non_terminal=timestep.discount,
           loss_mask=is_truncated(timestep),
-          apply_cql=True,
           lambda_override=self.all_goals_lambda,
         )
         ag_log_info["reward_info"] = reward_info
@@ -582,7 +550,6 @@ class HerLossFnBatched:
   all_goals_coeff: float = 1.0
   ngoals: int = 1
   all_goals_lambda: float = 0.3
-  terminate_on_reward: bool = False
   sample_achieved_goals: Callable[[base.TimeStep, jax.random.PRNGKey], jax.Array] = None
   sample_td_goals: Callable[[base.TimeStep, jax.random.PRNGKey], jax.Array] = None
   online_reward_fn: Callable[[base.TimeStep], jax.Array] = None
@@ -616,6 +583,7 @@ class HerLossFnBatched:
       discounts[1:],
       is_last[1:],
       lambda_[1:],
+      tx_pair=self.tx_pair,
     )
 
     target_q_t = target_q_t * non_terminal[:-1]
@@ -627,7 +595,7 @@ class HerLossFnBatched:
       loss_mask[:-1].sum(0) + 1e-5
     )
 
-    return batch_td_error, batch_loss_mean
+    return batch_td_error, batch_loss_mean, batch_loss, target_q_t
 
   def __call__(
     self,
@@ -751,20 +719,11 @@ class HerLossFnBatched:
       goal_ep_id = jax.lax.dynamic_index_in_dim(episode_ids, goal_index, keepdims=False)
       ep_mask = (episode_ids == goal_ep_id).astype(jnp.float32)
 
-      if self.terminate_on_reward:
-        time_indices = jnp.arange(len(timestep_b.reward))
-        terminate_mask = (time_indices <= goal_index).astype(jnp.float32)
-        ep_mask = ep_mask * terminate_mask
-
       mask = ep_mask * base_mask_b
       achieved = (goal_logits.sum() > 1e-5).astype(mask.dtype)
       mask = mask * achieved
 
-      if self.terminate_on_reward:
-        goal_one_hot = jax.nn.one_hot(goal_index, len(base_discount_b))
-        discount = base_discount_b * (1.0 - goal_one_hot)
-      else:
-        discount = base_discount_b
+      discount = base_discount_b
 
       return mask, discount, achieved
 
@@ -881,7 +840,9 @@ class HerLossFnBatched:
     lambdas_flat = _flatten_gb(all_lambdas)  # [G*B]
 
     # Single batched loss computation
-    all_td_errors, all_losses = jax.vmap(self._single_loss_fn)(
+    all_td_errors, all_losses, all_q_losses, all_q_targets = jax.vmap(
+      self._single_loss_fn
+    )(
       all_online_preds,  # [G*B, T, A]
       all_target_preds,  # [G*B, T, A]
       actions_flat,  # [G*B, T]
@@ -892,6 +853,7 @@ class HerLossFnBatched:
       lambdas_flat,  # [G*B]
     )
     # all_td_errors: [G*B, T-1], all_losses: [G*B]
+    # all_q_losses: [G*B, T-1], all_q_targets: [G*B, T-1]
 
     ##############################
     # 9. UNSTACK + AGGREGATE
@@ -933,45 +895,65 @@ class HerLossFnBatched:
     ##############################
     # 11. METRICS
     ##############################
-    online_q = all_online_preds.q_vals.reshape(G, B, T, -1)[0]  # [B, T, A]
-    sorted_q = jnp.sort(online_q, axis=-1)
-    q_gap = sorted_q[..., -1] - sorted_q[..., -2]
-    q_softmax = jax.nn.softmax(online_q, axis=-1)
-    max_entropy = jnp.log(online_q.shape[-1])
-    q_entropy = -jnp.sum(q_softmax * jnp.log(q_softmax + 1e-8), axis=-1) / max_entropy
+    q_vals_gbt = all_online_preds.q_vals.reshape(G, B, T, -1)
 
-    metrics = {
-      "0.online/0.q_loss": all_losses.reshape(G, B)[0].mean(),
-      "0.online/0.q_td": jnp.abs(td_errors_gb[0]).mean(),
-      "0.online/1.reward": all_rewards[0].mean(),
-      "0.online/z.q_mean": online_q.mean(),
-      "0.online/z.q_var": online_q.var(),
-      "0.online/z.q_top2_gap": q_gap.mean(),
-      "0.online/z.q_entropy": q_entropy.mean(),
-    }
+    def _group_metrics(g_start, g_end, prefix):
+      q = q_vals_gbt[g_start:g_end]  # [g, B, T, A]
+      td = td_errors_gb[g_start:g_end]  # [g, B, T-1]
+      r = all_rewards[g_start:g_end]  # [g, B, T]
+      l = losses_gb[g_start:g_end]  # [g, B]
+      sorted_q = jnp.sort(q, axis=-1)
+      q_gap = sorted_q[..., -1] - sorted_q[..., -2]
+      q_softmax = jax.nn.softmax(q, axis=-1)
+      max_entropy = jnp.log(q.shape[-1])
+      q_entropy = -jnp.sum(q_softmax * jnp.log(q_softmax + 1e-8), axis=-1) / max_entropy
+      return {
+        f"{prefix}/0.q_loss": l.mean(),
+        f"{prefix}/0.q_td": jnp.abs(td).mean(),
+        f"{prefix}/1.reward": r.mean(),
+        f"{prefix}/z.q_mean": q.mean(),
+        f"{prefix}/z.q_var": q.var(),
+        f"{prefix}/z.q_top2_gap": q_gap.mean(),
+        f"{prefix}/z.q_entropy": q_entropy.mean(),
+      }
+
+    metrics = _group_metrics(0, 1, "0.online")
 
     if self.her_coeff > 0:
-      metrics["1.her/0.q_loss"] = her_losses.mean()
+      her_m = _group_metrics(1, 1 + N, "1.her")
+      metrics.update(her_m)
       metrics["1.her/achieved_something"] = her_achieved.mean()
 
     if self.all_goals_coeff > 0:
-      metrics["2.all_goals/0.q_loss"] = ag_losses.mean()
+      ag_m = _group_metrics(1 + N, G, "2.all_goals")
+      metrics.update(ag_m)
 
     ##############################
     # 12. LOGGING
     ##############################
     if self.logger.learner_log_extra is not None:
-      # Reshape preds back for log slicing
-      q_vals_gbt = all_online_preds.q_vals.reshape(G, B, T, -1)
+      # Reshape for log slicing: keep B dimension so plot_unified's
+      # tree_map(lambda x: x[0], ...) can select batch element 0
       target_q_vals_gbt = all_target_preds.q_vals.reshape(G, B, T, -1)
+      q_losses_gbt = all_q_losses.reshape(G, B, -1)  # [G, B, T-1]
+      q_targets_gbt = all_q_targets.reshape(G, B, -1)  # [G, B, T-1]
+
+      # timesteps in B-first order: [B, T, ...]
+      timesteps_bt = jax.tree_util.tree_map(
+        lambda x: jnp.swapaxes(x, 0, 1), data.timestep
+      )
+      actions_bt = jnp.swapaxes(data.action, 0, 1)  # [B, T]
 
       def _make_log_info(g_idx):
-        """Extract log info for goal index g_idx, batch element 0."""
+        """Extract log info for goal index g_idx, keeping B dimension."""
         return {
-          "q_values": q_vals_gbt[g_idx, 0],  # [T, A]
-          "actions": data.action[:, 0],  # [T]
-          "loss_mask": all_masks[g_idx, 0],  # [T]
-          "td_errors": td_errors_gb[g_idx, 0],  # [T-1]
+          "q_values": q_vals_gbt[g_idx],  # [B, T, A]
+          "actions": actions_bt,  # [B, T]
+          "loss_mask": all_masks[g_idx],  # [B, T]
+          "td_errors": td_errors_gb[g_idx],  # [B, T-1]
+          "q_loss": q_losses_gbt[g_idx],  # [B, T-1]
+          "q_target": q_targets_gbt[g_idx],  # [B, T-1]
+          "timesteps": timesteps_bt,  # [B, T, ...]
         }
 
       def _her_reward_info_single(timestep_b, goal):
@@ -980,45 +962,50 @@ class HerLossFnBatched:
       all_log_info = {
         "n_updates": steps,
       }
-      # Build minimal log info for learner_log_extra
+
+      # Online log info
       online_log = _make_log_info(0)
-      online_log["timesteps"] = jax.tree_util.tree_map(lambda x: x[:, 0], data.timestep)
+      # online reward_info: [T, B, ...] -> [B, T, ...] via vmap over B
       online_log["reward_info"] = jax.tree_util.tree_map(
-        lambda x: x[0] if x.ndim > 1 else x, online_reward_info
-      )
-      # q_target for online
-      online_sel = jnp.argmax(q_vals_gbt[0, 0], axis=-1)
-      online_log["q_target"] = rlax.batched_index(
-        target_q_vals_gbt[0, 0, 1:], online_sel[1:]
+        lambda x: jnp.swapaxes(x, 0, 1) if x.ndim > 1 else x, online_reward_info
       )
       all_log_info["online"] = online_log
 
       if self.her_coeff > 0 and N > 0:
         her_log = _make_log_info(1)  # first HER goal
-        her_log["timesteps"] = jax.tree_util.tree_map(lambda x: x[:, 0], data.timestep)
-        her_log["goal_index"] = her_goal_indices[0, 0]
+        her_log["goal_index"] = her_goal_indices[0]  # [B]
 
-        # her reward info for first goal, first batch
-        first_her_ts = jax.tree_util.tree_map(lambda x: x[:, 0], data.timestep)
-        first_her_goal = jax.tree_util.tree_map(lambda x: x[0, 0], her_goals)
-        her_log["reward_info"] = _her_reward_info_single(first_her_ts, first_her_goal)
-        her_sel = jnp.argmax(q_vals_gbt[1, 0], axis=-1)
-        her_log["q_target"] = rlax.batched_index(
-          target_q_vals_gbt[1, 0, 1:], her_sel[1:]
-        )
+        # Compute goal_episode_id for first HER goal: [B]
+        episode_ids_bt = jnp.swapaxes(
+          jnp.cumsum(make_float(data.timestep.first()), axis=0) - 1, 0, 1
+        )  # [B, T]
+        her_log["goal_episode_id"] = jax.vmap(
+          lambda eids, gi: jax.lax.dynamic_index_in_dim(eids, gi, keepdims=False)
+        )(episode_ids_bt, her_goal_indices[0])  # [B]
+
+        # her reward info for first goal, all batch: vmap over B
+        _reward_info_b = jax.vmap(_her_reward_info_single, (0, 0))
+        her_goals_first = jax.tree_util.tree_map(
+          lambda x: x[0], her_goals
+        )  # [B, GoalPos]
+        her_log["reward_info"] = _reward_info_b(
+          timesteps_bt, her_goals_first
+        )  # [B, T, ...]
         all_log_info["her"] = her_log
 
       if self.all_goals_coeff > 0 and D > 2:
-        ag_idx = 1 + N + min(2, D - 1)
+        ag_goal_idx = min(2, D - 1)
+        ag_idx = 1 + N + ag_goal_idx
         ag_log = _make_log_info(ag_idx)
-        ag_log["timesteps"] = jax.tree_util.tree_map(lambda x: x[:, 0], data.timestep)
-        first_ag_ts = jax.tree_util.tree_map(lambda x: x[:, 0], data.timestep)
-        first_ag_goal = jax.tree_util.tree_map(lambda x: x[min(2, D - 1), 0], td_goals)
-        ag_log["reward_info"] = _her_reward_info_single(first_ag_ts, first_ag_goal)
-        ag_sel = jnp.argmax(q_vals_gbt[ag_idx, 0], axis=-1)
-        ag_log["q_target"] = rlax.batched_index(
-          target_q_vals_gbt[ag_idx, 0, 1:], ag_sel[1:]
-        )
+
+        # all-goals reward info for selected goal, all batch: vmap over B
+        _reward_info_b = jax.vmap(_her_reward_info_single, (0, 0))
+        ag_goal_selected = jax.tree_util.tree_map(
+          lambda x: x[ag_goal_idx], td_goals
+        )  # [B, GoalPos]
+        ag_log["reward_info"] = _reward_info_b(
+          timesteps_bt, ag_goal_selected
+        )  # [B, T, ...]
         all_log_info["all_goals"] = ag_log
 
       self.logger.learner_log_extra(all_log_info)
@@ -1187,7 +1174,6 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
       sample_td_goals=get_all_goals,
       online_reward_fn=online_reward_fn,
       her_reward_fn=her_reward_fn,
-      terminate_on_reward=config.get("TERMINATE_ON_REWARD", True),
       all_goals_coeff=config.get("ALL_GOALS_COEFF", 1.0),
       lambda_=config.get("TD_LAMBDA", 0.9),
       all_goals_lambda=config.get("ALL_GOALS_LAMBDA", 0.3),
@@ -1215,12 +1201,9 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     sample_td_goals=get_all_goals,
     online_reward_fn=online_reward_fn,
     her_reward_fn=her_reward_fn,
-    terminate_on_reward=config.get("TERMINATE_ON_REWARD", True),
     all_goals_coeff=config.get("ALL_GOALS_COEFF", 1.0),
     lambda_=config.get("TD_LAMBDA", 0.9),
     all_goals_lambda=config.get("ALL_GOALS_LAMBDA", 0.3),
-    cql_alpha=config.get("CQL_ALPHA", 0.0),
-    cql_temp=config.get("CQL_TEMP", 1.0),
   )
 
 
@@ -1628,7 +1611,7 @@ def jaxmaze_learner_log_fn(
         ax.legend(fontsize=10)
       ax.grid(True)
       ax.set_xticks(range(nT))
-      ax.set_ylim(0, 1)
+      ax.set_ylim(-.1, 1.5)
 
     ##############################
     # Row 1: Top and 2nd-top Q-values
@@ -1664,7 +1647,7 @@ def jaxmaze_learner_log_fn(
         ax.legend(fontsize=10)
       ax.grid(True)
       ax.set_xticks(range(nT))
-      ax.set_ylim(0, 1)
+      ax.set_ylim(-.1, 1.5)
 
     ##############################
     # Row 2: Combined heatmap (task_vector + achievements)
@@ -1718,7 +1701,11 @@ def jaxmaze_learner_log_fn(
       ep_timestep = jax.tree_util.tree_map(lambda x: x[ep_start], timesteps)
       task_w = ep_timestep.observation.task_w
       obj_idx = int(ep_timestep.state.objects[jnp.argmax(task_w)])
-      goal_name = image_keys[obj_idx] if image_keys is not None else get_task_name(extract_task_info(ep_timestep))
+      goal_name = (
+        image_keys[obj_idx]
+        if image_keys is not None
+        else get_task_name(extract_task_info(ep_timestep))
+      )
       ax.set_title(f"Ep {ep_idx} ({goal_name}, r={total_reward:.1f})", fontsize=8)
       ax.axis("off")
 
