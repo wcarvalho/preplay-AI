@@ -9,9 +9,9 @@ authors = [
 ]
 dependencies = [
     # JAX ecosystem
-    "jax[cuda12]==0.4.21; sys_platform == 'linux'",
-    "jax==0.4.21; sys_platform != 'linux'",
-    "jaxlib==0.4.21",
+    "jax[cuda12]>=0.4.20; sys_platform == 'linux'",
+    "jax>=0.4.20; sys_platform != 'linux'",
+    "jaxlib>=0.4.20",
     "flax>=0.8.4",
     "optax>=0.2.1",
     "chex>=0.1.86",
@@ -19,7 +19,7 @@ dependencies = [
     # RL environments & utilities
     "gymnax",
     "craftax",
-    "flashbax @ git+https://github.com/instadeepai/flashbax.git@1bda7f1765a555f41814886e67f9560c9ea723ea",
+    "flashbax",
     "mctx>=0.0.5",
     "jaxneurorl",
     "jaxmaze",
@@ -28,8 +28,8 @@ dependencies = [
     "omegaconf",
     "wandb",
     # Compute utilities
-    "scipy>=1.12.0,<1.13",
-    "numpy<2",
+    "scipy>=1.12.0",
+    "numpy",
     # Serialization
     "safetensors",
     # Utilities
@@ -56,7 +56,6 @@ indent-style = "space"
 
 [dependency-groups]
 dev = [
-    "jupyter>=1.1.1",
     "ruff",
 ]
 
@@ -66,8 +65,6 @@ required-environments = [
     "sys_platform == 'darwin'",
     "sys_platform == 'linux'",
 ]
-
-override-dependencies = ["jax==0.4.21"]
 
 [tool.uv.sources]
 jaxneurorl = { path = "libraries/jaxneurorl", editable = true }
