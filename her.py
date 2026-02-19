@@ -417,13 +417,8 @@ class HerLossFn(base.RecurrentLossFn):
           episode_mask = episode_mask * terminate_mask
 
         loss_mask = episode_mask * is_truncated(timestep)  # [T]
-<<<<<<< HEAD
-        achieved_something = (goal_logits.sum() > 1e-5).astype(batch_loss.dtype)
-        loss_mask = loss_mask * achieved_something
-=======
         achieved_something = (goal_logits.sum() > 1e-5).astype(loss_mask.dtype)
         loss_mask = loss_mask*achieved_something
->>>>>>> 195223a10be4fe6e0ed127546609363b6974147d
 
         # Create modified discount that's 0 at goal_index (episode terminates there)
         if self.terminate_on_reward:
@@ -1093,7 +1088,7 @@ def jaxmaze_learner_log_fn(
     fig, axes = plt.subplots(
       n_rows,
       n_cols,
-      figsize=(5 * n_cols, 3 * n_rows),
+      figsize=(8 * n_cols, 4 * n_rows),
       gridspec_kw={"hspace": 0.4, "wspace": 0.3},
     )
     if n_cols == 1:
@@ -1126,6 +1121,7 @@ def jaxmaze_learner_log_fn(
         ax.legend(fontsize=7)
       ax.grid(True)
       ax.set_xticks(range(nT))
+      ax.set_ylim(0, 1)
 
     ##############################
     # Row 1: Top and 2nd-top Q-values
@@ -1161,6 +1157,7 @@ def jaxmaze_learner_log_fn(
         ax.legend(fontsize=7)
       ax.grid(True)
       ax.set_xticks(range(nT))
+      ax.set_ylim(0, 1)
 
     ##############################
     # Row 2: Combined heatmap (task_vector + achievements)
