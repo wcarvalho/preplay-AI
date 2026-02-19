@@ -19,7 +19,7 @@ dependencies = [
     # RL environments & utilities
     "gymnax",
     "craftax",
-    "flashbax",
+    "flashbax @ git+https://github.com/instadeepai/flashbax.git@1bda7f1765a555f41814886e67f9560c9ea723ea",
     "mctx>=0.0.5",
     "jaxneurorl",
     "jaxmaze",
@@ -66,6 +66,8 @@ required-environments = [
     "sys_platform == 'darwin'",
     "sys_platform == 'linux'",
 ]
+
+override-dependencies = ["jax==0.4.21"]
 
 [tool.uv.sources]
 jaxneurorl = { path = "libraries/jaxneurorl", editable = true }
