@@ -559,7 +559,7 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["her"]},
-        "SEED": {"values": [1, 2]},
+        "SEED": {"values": [3]},
         "env.exp": {"values": ["her_test_big"]},
         "ALL_GOALS_LAMBDA": {"values": [.6, .3, .2]},
         "TD_LAMBDA": {"values": [0.9, .95]},
