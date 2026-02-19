@@ -459,10 +459,14 @@ def make_actor(
       stop=config.get("EPSILON_MAX", 0.9),
       base=config.get("EPSILON_BASE", 0.1),
     )
-  epsilons = jax.random.choice(rng, vals, shape=(config["NUM_ENVS"] - 1,))
-  epsilons = jnp.concatenate((jnp.array((0,)), epsilons))
+  num_envs = config["NUM_ENVS"]
 
-  explorer = FixedEpsilonGreedy(epsilons)
+  def train_choose_actions(q_vals, t, rng):
+    rng, rng_eps = jax.random.split(rng)
+    epsilons = jax.random.choice(rng_eps, vals, shape=(num_envs,))
+    epsilons = epsilons.at[0].set(0.0)
+    action_rngs = jax.random.split(rng, num_envs)
+    return jax.vmap(epsilon_greedy_act)(q_vals, epsilons, action_rngs)
 
   def actor_step(
     train_state: vbb.TrainState,
@@ -472,7 +476,7 @@ def make_actor(
   ):
     preds, agent_state = agent.apply(train_state.params, agent_state, timestep, rng)
 
-    action = explorer.choose_actions(preds.q_vals, train_state.timesteps, rng)
+    action = train_choose_actions(preds.q_vals, train_state.timesteps, rng)
 
     if remove_gpi_dim:
       preds = remove_gpi_dim_from_preds(preds)

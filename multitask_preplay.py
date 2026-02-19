@@ -584,7 +584,7 @@ class PreplayLossFn:
         non_terminal=data.timestep.discount,
         loss_mask=loss_mask,
       )
-      all_metrics.update({f"{k}/online": v for k, v in metrics.items()})
+      all_metrics.update({f"0.online{k}": v for k, v in metrics.items()})
       all_log_info["online"] = log_info
       td_error = jnp.concatenate((td_error, jnp.zeros(B)[None]), 0)
       td_error = jnp.abs(td_error)
@@ -686,7 +686,7 @@ class PreplayLossFn:
         jax.random.split(key_grad, B),
       )
       batch_loss += self.all_goals_coeff * all_goals_batch_loss.mean(1)
-      all_metrics.update({f"{k}/all_goals": v for k, v in all_goals_metrics.items()})
+      all_metrics.update({f"2.all_goals/{k}": v for k, v in all_goals_metrics.items()})
 
     # ---- Dyna/preplay loss ----
     if self.dyna_coeff > 0.0:
@@ -708,7 +708,7 @@ class PreplayLossFn:
         jax.random.split(key_grad, B),
       )
       batch_loss += self.dyna_coeff * dyna_batch_loss
-      all_metrics.update({f"{k}/dyna": v for k, v in dyna_metrics.items()})
+      all_metrics.update({f"1.preplay/{k}": v for k, v in dyna_metrics.items()})
       all_log_info["dyna"] = dyna_log_info
 
     if self.logger.learner_log_extra is not None:
@@ -761,7 +761,7 @@ class PreplayLossFn:
 
       return jax.vmap(at_t)(rnn_out)
 
-    def unroll_target_rnn(x_t, h_tar_t, all_t, num_sims):
+    def unroll_target_rnn(x_t, h_tar_t, all_t, num_sims, rng):
       """Unroll target RNN on simulated timesteps (vmap-over-scan).
 
       Uses original x_t at step 0 (matching what the online RNN saw inside
@@ -773,6 +773,7 @@ class PreplayLossFn:
         h_tar_t: target RNN state (no sim dim)
         all_t: simulated timesteps [S+1, num_sims, ...]
         num_sims: number of simulations
+        rng: random key for RNN stochasticity
       Returns:
         target_rnn_out: [S+1, num_sims, D]
       """
@@ -790,20 +791,22 @@ class PreplayLossFn:
         lambda y: jnp.broadcast_to(y, (num_sims,) + y.shape), h_tar_t
       )
 
-      def single_sim_unroll(h_init, xs):
+      def single_sim_unroll(h_init, xs, sim_rng):
         """Unroll target RNN for a single simulation."""
 
-        def step(h, x_step):
+        def step(carry, x_step):
+          h, rng_ = carry
+          rng_, step_rng = jax.random.split(rng_)
           new_h, rnn_out = self.network.apply(
             target_params,
             h,
             x_step,
-            jax.random.PRNGKey(0),
+            step_rng,
             method=self.network.apply_rnn,
           )
-          return new_h, rnn_out
+          return (new_h, rng_), rnn_out
 
-        _, rnn_outs = jax.lax.scan(step, h_init, xs)
+        _, rnn_outs = jax.lax.scan(step, (h_init, sim_rng), xs)
         return rnn_outs  # [S+1, D]
 
       # vmap over sim dimension: input [num_sims, S+1, ...] -> [num_sims, S+1, D]
@@ -811,8 +814,9 @@ class PreplayLossFn:
       target_input_t = jax.tree_util.tree_map(
         lambda y: jnp.swapaxes(y, 0, 1), target_input
       )
+      sim_rngs = jax.random.split(rng, num_sims)
       target_rnn_out = jax.vmap(single_sim_unroll)(
-        h_tar_broadcast, target_input_t
+        h_tar_broadcast, target_input_t, sim_rngs
       )  # [num_sims, S+1, D]
       return jnp.swapaxes(target_rnn_out, 0, 1)  # [S+1, num_sims, D]
 
@@ -872,8 +876,9 @@ class PreplayLossFn:
         sim_out.predictions.state
       )  # [S+1, total_sims, D]
       # Target RNN outputs (re-run target network on simulated timesteps)
+      key, key_tar = jax.random.split(key)
       target_rnn_out = unroll_target_rnn(
-        x_t, h_tar_t, all_t, total_sims
+        x_t, h_tar_t, all_t, total_sims, key_tar
       )  # [S+1, total_sims, D]
 
       init_mask = jnp.broadcast_to(l_mask_t, (total_sims,))
@@ -947,8 +952,8 @@ class PreplayLossFn:
         achieve_poss * jnp.log(achieve_poss + 1e-5), axis=-1
       ) / jnp.log(achieve_poss.shape[-1])
       metrics = {
-        **{f"{k}/offtask-sub": v for k, v in off_sub_metrics.items()},
-        **{f"{k}/offtask-reg": v for k, v in main_metrics.items()},
+        **{f"{k}/offtask-goal": v for k, v in off_sub_metrics.items()},
+        **{f"{k}/main-q": v for k, v in main_metrics.items()},
         "2.achievable_entropy": entropy,
         "2.any_achievable": any_achievable_f,
       }
@@ -994,7 +999,8 @@ class PreplayLossFn:
       all_a = sim_outputs_t.actions
 
       online_rnn_out = rnn_output_from_state(sim_outputs_t.predictions.state)
-      target_rnn_out = unroll_target_rnn(x_t, h_tar_t, all_t, num_sims)
+      key, key_tar = jax.random.split(key)
+      target_rnn_out = unroll_target_rnn(x_t, h_tar_t, all_t, num_sims, key_tar)
 
       main_q_online = apply_q_head(
         online_rnn_out, params, self.network.main_task_q_fn, main_goal
@@ -1057,7 +1063,7 @@ def make_loss_fn_class(config, **kwargs) -> PreplayLossFn:
     offtask_loss_coeff=config.get("OFFTASK_LOSS_COEFF", 1.0),
     ontask_loss_coeff=config.get("ONTASK_LOSS_COEFF", 1.0),
     num_offtask_goals=config.get("NUM_OFFTASK_GOALS", 5),
-    offtask_coeff=config.get("SUBTASK_COEFF", 1.0),
+    offtask_coeff=config.get("OFFTASK_COEFF", config.get("SUBTASK_COEFF", 1.0)),
     mainq_coeff=config.get("MAINQ_COEFF", 1.0),
     all_goals_coeff=config.get("ALL_GOALS_COEFF", 1.0),
     all_goals_lambda=config.get("ALL_GOALS_LAMBDA", 0.6),
@@ -1605,7 +1611,7 @@ def make_train_craftax_multigoal(**kwargs):
     probabilities = achievable_ / achievable_.sum(-1)
     key, key_ = jax.random.split(key)
     goals = distrax.Categorical(probs=probabilities).sample(
-      seed=key, sample_shape=(num_offtask_goals)
+      seed=key_, sample_shape=(num_offtask_goals)
     )
     num_classes = len(is_object_nearby)
     goals = jax.nn.one_hot(
@@ -1682,7 +1688,7 @@ def make_train_jaxmaze_multigoal(**kwargs):
     probabilities = achievable_ / achievable_.sum(-1)
     key, key_ = jax.random.split(key)
     goals = distrax.Categorical(probs=probabilities).sample(
-      seed=key, sample_shape=(num_offtask_goals)
+      seed=key_, sample_shape=(num_offtask_goals)
     )
     num_classes = len(is_object_nearby)
     goals = jax.nn.one_hot(
@@ -1889,7 +1895,6 @@ if __name__ == "__main__":
     "NUM_PRED_LAYERS": 1,
     "ACTIVATION": "leaky_relu",
     "QHEAD_TYPE": "duelling",
-    "SHARE_Q_FN": True,
     "USE_BIAS": False,
     # Preplay params
     "SIMULATION_LENGTH": 3,
@@ -1899,9 +1904,8 @@ if __name__ == "__main__":
     "ONLINE_COEFF": 1.0,
     "DYNA_COEFF": 1.0,
     "ALL_GOALS_COEFF": 1.0,
-    "SIM_EPSILON_SETTING": 1,
     "MAINQ_COEFF": 1e-2,
-    "SUBTASK_COEFF": 2.0,
+    "OFFTASK_COEFF": 2.0,
     # Optimizer
     "LR": 0.001,
     "MAX_GRAD_NORM": 80,
