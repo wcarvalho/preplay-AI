@@ -545,7 +545,7 @@ class HerLossFn(base.RecurrentLossFn):
       )
       # only first goal
       all_log_info["all_goals"] = jax.tree_util.tree_map(
-        lambda x: x[:, 2],
+        lambda x: x[:, 1],
         ag_log_info,
       )
       # ag_loss: [B, N] -> mean over N goals
@@ -1510,7 +1510,7 @@ def jaxmaze_learner_log_fn_old(
         )
         ax.add_patch(rect)
 
-      ax.set_title(f"t={idx}, r_t={reward:.1f}, r_h={her_reward:.1f}", fontsize=7)
+      ax.set_title(f"t={idx}, r_t={reward:.1f}, r_h={her_reward:.1f}", fontsize=10)
       ax.axis("off")
     # Hide unused subplots
     for idx in range(n_episode_steps, n_image_rows * ncols_img):
@@ -1553,6 +1553,7 @@ def jaxmaze_learner_log_fn(
   render_fn: Callable,
   extract_task_info: Callable[[TimeStep], flax.struct.PyTreeNode] = lambda t: t,
   get_task_name: Callable = lambda t: "Task",
+  image_keys: list = None,
 ):
   from math import ceil
 
@@ -1622,9 +1623,9 @@ def jaxmaze_learner_log_fn(
       if col_name == "her" and "goal_index" in cd:
         goal_index = int(cd["goal_index"])
         ax.axvline(goal_index, color="red", linestyle="--", alpha=0.7, label="Goal idx")
-      ax.set_title(f"{col_name} — Rewards and Q-Values", fontsize=9)
+      ax.set_title(f"{col_name} — Rewards and Q-Values", fontsize=13.5)
       if ci == 0:
-        ax.legend(fontsize=7)
+        ax.legend(fontsize=10)
       ax.grid(True)
       ax.set_xticks(range(nT))
       ax.set_ylim(0, 1)
@@ -1658,9 +1659,9 @@ def jaxmaze_learner_log_fn(
       if col_name == "her" and "goal_index" in cd:
         goal_index = int(cd["goal_index"])
         ax.axvline(goal_index, color="red", linestyle="--", alpha=0.7, label="Goal idx")
-      ax.set_title(f"{col_name} — Top Q-values", fontsize=9)
+      ax.set_title(f"{col_name} — Top Q-values", fontsize=13.5)
       if ci == 0:
-        ax.legend(fontsize=7)
+        ax.legend(fontsize=10)
       ax.grid(True)
       ax.set_xticks(range(nT))
       ax.set_ylim(0, 1)
@@ -1679,11 +1680,14 @@ def jaxmaze_learner_log_fn(
       ax.imshow(
         combined, aspect="auto", cmap="viridis", interpolation="nearest", vmin=0, vmax=2
       )
-      ax.set_title(f"{col_name} — Task+Ach", fontsize=9)
+      ax.set_title(f"{col_name} — Task+Ach", fontsize=13.5)
       ax.set_ylabel("Dims")
       ax.set_yticks(range(combined.shape[0]))
       ax.set_xticks(range(nT))
       ax.grid(True, axis="x", alpha=0.3, color="white")
+      # Draw white vertical lines at episode boundaries
+      for ep_start in episode_starts[1:]:
+        ax.axvline(ep_start - 0.5, color="white", linestyle="-", linewidth=2)
       if col_name == "her" and "goal_index" in cd:
         goal_index = int(cd["goal_index"])
         ax.axvline(goal_index, color="red", linestyle="--", alpha=0.7)
@@ -1712,8 +1716,9 @@ def jaxmaze_learner_log_fn(
       )
       total_reward = float(timesteps.reward[ep_start:ep_end].sum())
       ep_timestep = jax.tree_util.tree_map(lambda x: x[ep_start], timesteps)
-      task_info = extract_task_info(ep_timestep)
-      goal_name = get_task_name(task_info)
+      task_w = ep_timestep.observation.task_w
+      obj_idx = int(ep_timestep.state.objects[jnp.argmax(task_w)])
+      goal_name = image_keys[obj_idx] if image_keys is not None else get_task_name(extract_task_info(ep_timestep))
       ax.set_title(f"Ep {ep_idx} ({goal_name}, r={total_reward:.1f})", fontsize=8)
       ax.axis("off")
 
@@ -1846,7 +1851,7 @@ def crafax_learner_log_fn(data: dict, config: dict):
 
       ax.set_title(
         f"t={idx}, r_t={reward:.1f}, r_h={her_reward:.1f}\n{actions_taken[idx]}",
-        fontsize=7,
+        fontsize=10,
       )
       ax.axis("off")
     # Hide unused subplots

@@ -210,7 +210,7 @@ def run_single(config: dict, save_path: str = None):
   ###################
   # load env
   ###################
-  fast_env = config.get("FAST_ENV", False)
+  fast_env = config.get("FAST_ENV", True)
   mt_env = multitask_env_fast if fast_env else multitask_env
 
   if config["ALG"] == "usfa":
@@ -418,6 +418,7 @@ def run_single(config: dict, save_path: str = None):
           extract_task_info=extract_task_info,
           get_task_name=get_task_name,
           render_fn=jaxmaze_render_fn,
+          image_keys=keys,
         ),
       ),
     )
@@ -558,14 +559,14 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["her"]},
-        "SEED": {"values": [1]},
+        "SEED": {"values": [1, 2]},
         "env.exp": {"values": ["her_test_big"]},
-        "CQL_ALPHA": {"values": [0.0]},
-        "ALL_GOALS_LAMBDA": {"values": [0.3, 0.6, 0.9]},
-        "TD_LAMBDA": {"values": [0.3, 0.6, 0.9]},
+        "ALL_GOALS_LAMBDA": {"values": [.6, .3, .2]},
+        "TD_LAMBDA": {"values": [0.9, .95]},
+        "NEW_LOSS_FN": {"values": [False]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-cql-5-debug",
+      "group": "her-debug-2",
     }
 
   # elif search == "dynaq_shared":
