@@ -397,6 +397,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
   online_coeff: float = 1.0
   dyna_coeff: float = 1.0
   all_goals_coeff: float = 1.0
+  all_goals_lambda: float = 0.3
   max_priority_weight: float = 0.9
   importance_sampling_exponent: float = 0.6
   num_offtask_goals: int = 5
@@ -408,7 +409,6 @@ class DynaLossFn(vbb.RecurrentLossFn):
   backtracking: bool = True
   combine_real_sim: bool = False
 
-  sarsa_td: bool = False
   dyna_policy: SimPolicy = None
   offtask_dyna_policy: SimPolicy = None
   sample_preplay_goals: Callable = None
@@ -427,43 +427,31 @@ class DynaLossFn(vbb.RecurrentLossFn):
     is_last,
     non_terminal,
     loss_mask,
-    sarsa: bool = False,
+    lambda_override=None,
   ):
     rewards = make_float(rewards)
     rewards = rewards - self.step_cost
     is_last = make_float(is_last)
     discounts = make_float(non_terminal) * self.discount
-    lambda_ = jnp.ones_like(non_terminal) * self.lambda_
+    effective_lambda = self.lambda_ if lambda_override is None else lambda_override
+    lambda_ = jnp.ones_like(non_terminal) * effective_lambda
 
     # Get N-step transformed TD error and loss.
-    if sarsa:
-      batch_td_error_fn = jax.vmap(losses.sarsa_lambda, in_axes=1, out_axes=1)
-      lambda_ = lambda_ * (1 - is_last)
-      q_t, target_q_t = batch_td_error_fn(
-        online_preds.q_vals[:-1],  # [T+1] --> [T]
-        actions[:-1],  # [T+1] --> [T]
-        rewards[1:],  # [T+1] --> [T]
-        discounts[1:],
-        target_preds.q_vals[1:],  # [T+1] --> [T]
-        actions[1:],  # [T+1] --> [T]
-        lambda_[1:],
-      )
-    else:
-      batch_td_error_fn = jax.vmap(losses.q_learning_lambda_td, in_axes=1, out_axes=1)
-      # [T, B]
-      selector_actions = jnp.argmax(online_preds.q_vals, axis=-1)
+    batch_td_error_fn = jax.vmap(losses.q_learning_lambda_td, in_axes=1, out_axes=1)
+    # [T, B]
+    selector_actions = jnp.argmax(online_preds.q_vals, axis=-1)
 
-      # [T+1, B]
-      q_t, target_q_t = batch_td_error_fn(
-        online_preds.q_vals[:-1],  # [T+1] --> [T]
-        actions[:-1],  # [T+1] --> [T]
-        target_preds.q_vals[1:],  # [T+1] --> [T]
-        selector_actions[1:],  # [T+1] --> [T]
-        rewards[1:],  # [T+1] --> [T]
-        discounts[1:],
-        is_last[1:],
-        lambda_[1:],
-      )
+    # [T+1, B]
+    q_t, target_q_t = batch_td_error_fn(
+      online_preds.q_vals[:-1],  # [T+1] --> [T]
+      actions[:-1],  # [T+1] --> [T]
+      target_preds.q_vals[1:],  # [T+1] --> [T]
+      selector_actions[1:],  # [T+1] --> [T]
+      rewards[1:],  # [T+1] --> [T]
+      discounts[1:],
+      is_last[1:],
+      lambda_[1:],
+    )
 
     # ensure target = 0 when episode terminates
     target_q_t = target_q_t * non_terminal[:-1]
@@ -635,7 +623,7 @@ class DynaLossFn(vbb.RecurrentLossFn):
           is_last=make_float(timestep_repeated.last()),
           non_terminal=timestep_repeated.discount,
           loss_mask=loss_mask_repeated,
-          sarsa=self.sarsa_td,
+          lambda_override=self.all_goals_lambda,
         )
         # ag_td_error: [T-1, N], ag_batch_loss: [N]
         return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
@@ -1162,7 +1150,7 @@ def make_loss_fn_class(config, **kwargs) -> DynaLossFn:
     mainq_coeff=config.get("MAINQ_COEFF", 1.0),
     combine_real_sim=config.get("COMBINE_REAL_SIM", False),
     all_goals_coeff=config.get("ALL_GOALS_COEFF", 1.0),
-    sarsa_td=config.get("SARSA_TD", False),
+    all_goals_lambda=config.get("ALL_GOALS_LAMBDA", 0.6),
     **kwargs,
   )
 
@@ -1396,7 +1384,9 @@ class DuellingMLP(nn.Module):
   use_bias: bool = False
 
   @nn.compact
-  def __call__(self, x, train: bool = False):
+  def __call__(self, x, task, train: bool = False):
+    import ipdb; ipdb.set_trace()
+    x = jnp.concatenate((x, task), axis=-1)
     value_mlp = MLP(
       hidden_dim=self.hidden_dim,
       num_layers=self.num_layers,
@@ -1440,6 +1430,7 @@ class DuellingDotMLP(nn.Module):
   @nn.compact
   def __call__(self, x, task, train: bool = False):
     task_dim = task.shape[-1]
+    x = jnp.concatenate((x, task), axis=-1)
     value_mlp = MLP(
       hidden_dim=self.hidden_dim,
       num_layers=self.num_layers,
@@ -2124,7 +2115,9 @@ def make_train_craftax_multigoal(**kwargs):
 
   def sample_nontask_visible_goals(timestep, key, num_offtask_goals):
     # [3, 3] - 1 hot for each turned into binary vector
-    import ipdb; ipdb.set_trace()
+    import ipdb
+
+    ipdb.set_trace()
     is_object_nearby = timestep.observation.nearby_objects[-1].astype(jnp.int32)
     is_object_nearby = is_object_nearby.sum(-1)
     task_object = timestep.observation.task_w[-1].astype(jnp.int32)
@@ -2268,16 +2261,14 @@ class DynaAgentEnvModelMultigoalJaxMaze(nn.Module):
 
   def reg_q_fn(self, rnn_out, task):
     task = self.task_fn(task)
-    inp = jnp.concatenate((rnn_out, task), axis=-1)
-    return self.q_fn(inp)
+    return self.q_fn(rnn_out, task)
 
   def subtask_q_fn(self, rnn_out, task):
     if self.share_q_fn:
       return self.reg_q_fn(rnn_out, task)
     else:
       task = self.task_fn(task)
-      inp = jnp.concatenate((rnn_out, task), axis=-1)
-      return self.q_fn_subtask(inp)
+      return self.q_fn_subtask(rnn_out, task)
 
   def unroll(
     self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey
