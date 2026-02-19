@@ -39,10 +39,10 @@ from flax.traverse_util import flatten_dict, unflatten_dict
 import numpy as np
 
 if os.environ.get("JAX_PLATFORMS") != "cpu":
-    os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "true"
-    os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".95"  # Use 90% of the A100 VRAM
-    os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
-    #os.environ["XLA_FLAGS"] = "--xla_gpu_enable_latency_hiding_scheduler=true"
+  os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "true"
+  os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".95"  # Use 90% of the A100 VRAM
+  os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
+  # os.environ["XLA_FLAGS"] = "--xla_gpu_enable_latency_hiding_scheduler=true"
 
 
 from jaxneurorl.agents import value_based_basics as vbb
@@ -59,6 +59,7 @@ from jaxmaze.human_dyna import experiments as jaxmaze_experiments
 from jaxmaze import renderer
 from jaxmaze import utils as jaxmaze_utils
 from jaxmaze.human_dyna import multitask_env
+from jaxmaze.human_dyna import multitask_env_fast
 
 
 def make_logger(
@@ -209,9 +210,14 @@ def run_single(config: dict, save_path: str = None):
   ###################
   # load env
   ###################
+  fast_env = config.get("FAST_ENV", False)
+  mt_env = multitask_env_fast if fast_env else multitask_env
 
   if config["ALG"] == "usfa":
-    from jaxmaze.human_dyna import sf_task_runner
+    if fast_env:
+      from jaxmaze.human_dyna import sf_task_runner_fast as sf_task_runner
+    else:
+      from jaxmaze.human_dyna import sf_task_runner
 
     task_runner = sf_task_runner.TaskRunner(
       task_objects=task_objects,
@@ -219,15 +225,15 @@ def run_single(config: dict, save_path: str = None):
       vis_coeff=config.get("VIS_COEFF", 0.0),
     )
   elif config["ALG"] == "her":
-    task_runner = multitask_env.TaskRunner(
+    task_runner = mt_env.TaskRunner(
       task_objects=task_objects,
       terminate_with_any=False,
     )
   else:
-    task_runner = multitask_env.TaskRunner(task_objects=task_objects)
+    task_runner = mt_env.TaskRunner(task_objects=task_objects)
     # success_fn = lambda timestep: timestep.rewards > .5
   keys = image_dict["keys"]
-  env = multitask_env.HouseMaze(
+  env = mt_env.HouseMaze(
     task_runner=task_runner,
     num_categories=200,
   )
@@ -504,7 +510,7 @@ def sweep(search: str = ""):
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": list(range(1))},
         "NUM_STARTING_LOCS": {"values": [30, 40, 50]},
-        "GAMMA": {"values": [.99, .992]},
+        "GAMMA": {"values": [0.99, 0.992]},
         "ADD_GREEDY_EPSILON": {"values": [True, False]},
         "env.exp": {"values": ["exp4"]},
       },
@@ -513,20 +519,20 @@ def sweep(search: str = ""):
     }
   elif search == "preplay2":
     sweep_config = {
-        "metric": {
-            "name": "evaluator_performance/0.0 avg_episode_return",
-            "goal": "maximize",
-        },
-        "parameters": {
-            "ALG": {"values": ["preplay"]},
-            "SEED": {"values": list(range(1))},
-            "KNOWN_OFFTASK_GOAL": {"values": [False]},
-            "TD_LAMBDA": {"values": [.3, .6, .9]},
-            "SARSA_TD": {"values": [True, False]},
-            "env.exp": {"values": ["exp4"]},
-        },
-        "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-        "group": "preplay-td-4-sarsa",
+      "metric": {
+        "name": "evaluator_performance/0.0 avg_episode_return",
+        "goal": "maximize",
+      },
+      "parameters": {
+        "ALG": {"values": ["preplay"]},
+        "SEED": {"values": list(range(1))},
+        "KNOWN_OFFTASK_GOAL": {"values": [False]},
+        "TD_LAMBDA": {"values": [0.3, 0.6, 0.9]},
+        "SARSA_TD": {"values": [True, False]},
+        "env.exp": {"values": ["exp4"]},
+      },
+      "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
+      "group": "preplay-td-4-sarsa",
     }
 
   elif search == "her":
@@ -538,7 +544,7 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["her"]},
         "SEED": {"values": [1]},
-        "env.exp": {"values": ["her_test_big", 'exp4']},
+        "env.exp": {"values": ["her_test_big", "exp4"]},
         "NUM_HER_GOALS": {"values": [1]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
@@ -555,8 +561,8 @@ def sweep(search: str = ""):
         "SEED": {"values": [1]},
         "env.exp": {"values": ["her_test_big"]},
         "CQL_ALPHA": {"values": [0.0]},
-        "ALL_GOALS_LAMBDA": {"values": [.3, .6, .9]},
-        "TD_LAMBDA": {"values": [.3, .6, .9]},
+        "ALL_GOALS_LAMBDA": {"values": [0.3, 0.6, 0.9]},
+        "TD_LAMBDA": {"values": [0.3, 0.6, 0.9]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
       "group": "her-cql-5-debug",
@@ -647,7 +653,7 @@ def sweep(search: str = ""):
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": list(range(1))},
         "NUM_STARTING_LOCS": {"values": [30, 40, 50]},
-        "GAMMA": {"values": [.99, .992]},
+        "GAMMA": {"values": [0.99, 0.992]},
         "ADD_GREEDY_EPSILON": {"values": [True, False]},
         "env.exp": {"values": ["exp4"]},
       },
