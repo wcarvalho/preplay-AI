@@ -349,9 +349,12 @@ def run_single(config: dict, save_path: str = None):
       ),
     )
   elif alg_name in ("preplay"):
-    import multitask_preplay_craftax_v2
+    if config.get("SIMPLE_PREPLAY"):
+      import multitask_preplay
+    else:
+      import multitask_preplay_craftax_v2 as multitask_preplay
 
-    train_fn = multitask_preplay_craftax_v2.make_train_jaxmaze_multigoal(
+    train_fn = multitask_preplay.make_train_jaxmaze_multigoal(
       config=config,
       env=env,
       save_path=save_path,
@@ -509,14 +512,16 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["preplay"]},
-        "SEED": {"values": list(range(1))},
-        "NUM_STARTING_LOCS": {"values": [30, 40, 50]},
-        "GAMMA": {"values": [0.99, 0.992]},
-        "ADD_GREEDY_EPSILON": {"values": [True, False]},
-        "env.exp": {"values": ["exp4"]},
+        "SEED": {"values": [2]},
+        #"NUM_STARTING_LOCS": {"values": [30, 40, 50]},
+        "QHEAD_TYPE": {"values": ['dot', 'duelling']},
+        "ALL_GOALS_LAMBDA": {"values": [.6, .7]},
+        "SIMPLE_PREPLAY": {"values": [True]},
+        "FAST_ENV": {"values": [True]},
+        "env.exp": {"values": ["preplay_test_big"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-easy-1",
+      "group": "preplay-fast-2",
     }
   elif search == "preplay2":
     sweep_config = {
@@ -526,13 +531,15 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["preplay"]},
-        "SEED": {"values": list(range(1))},
+        "SEED": {"values": [2]},
         "KNOWN_OFFTASK_GOAL": {"values": [False]},
-        "SARSA_TD": {"QHEAD_TYPE": ['dot', 'duelling']},
+        "FAST_ENV": {"values": [False]},
+        "ALL_GOALS_LAMBDA": {"values": [.6, .7]},
+        "QHEAD_TYPE": {"values": ['dot', 'duelling']},
         "env.exp": {"values": ["exp4"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-td-4-sarsa",
+      "group": "preplay-all-goals-2-prev-env",
     }
 
   elif search == "her":
@@ -560,9 +567,6 @@ def sweep(search: str = ""):
         "ALG": {"values": ["her"]},
         "SEED": {"values": [3]},
         "env.exp": {"values": ["her_test_big"]},
-        "ALL_GOALS_LAMBDA": {"values": [.6, .3, .2]},
-        "TD_LAMBDA": {"values": [0.9, .95]},
-        "NEW_LOSS_FN": {"values": [False]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
       "group": "her-debug-2",
