@@ -1385,7 +1385,6 @@ class DuellingMLP(nn.Module):
 
   @nn.compact
   def __call__(self, x, task, train: bool = False):
-    import ipdb; ipdb.set_trace()
     x = jnp.concatenate((x, task), axis=-1)
     value_mlp = MLP(
       hidden_dim=self.hidden_dim,
@@ -2115,9 +2114,6 @@ def make_train_craftax_multigoal(**kwargs):
 
   def sample_nontask_visible_goals(timestep, key, num_offtask_goals):
     # [3, 3] - 1 hot for each turned into binary vector
-    import ipdb
-
-    ipdb.set_trace()
     is_object_nearby = timestep.observation.nearby_objects[-1].astype(jnp.int32)
     is_object_nearby = is_object_nearby.sum(-1)
     task_object = timestep.observation.task_w[-1].astype(jnp.int32)
