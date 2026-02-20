@@ -1611,7 +1611,7 @@ def jaxmaze_learner_log_fn(
         ax.legend(fontsize=10)
       ax.grid(True)
       ax.set_xticks(range(nT))
-      ax.set_ylim(-.1, 1.5)
+      ax.set_ylim(-0.1, 1.5)
 
     ##############################
     # Row 1: Top and 2nd-top Q-values
@@ -1647,7 +1647,7 @@ def jaxmaze_learner_log_fn(
         ax.legend(fontsize=10)
       ax.grid(True)
       ax.set_xticks(range(nT))
-      ax.set_ylim(-.1, 1.5)
+      ax.set_ylim(-0.1, 1.5)
 
     ##############################
     # Row 2: Combined heatmap (task_vector + achievements)
