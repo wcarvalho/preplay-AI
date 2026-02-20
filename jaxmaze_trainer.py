@@ -51,7 +51,7 @@ from jaxneurorl import loggers
 
 import qlearning_jaxmaze
 import usfa_jaxmaze
-import multitask_preplay_jaxmaze
+import archive.multitask_preplay_jaxmaze as multitask_preplay_jaxmaze
 import her
 import jaxmaze_observer as humansf_observers
 from jaxmaze.human_dyna import experiments as jaxmaze_experiments
@@ -349,7 +349,7 @@ def run_single(config: dict, save_path: str = None):
       ),
     )
   elif alg_name in ("preplay"):
-    if config.get("SIMPLE_PREPLAY"):
+    if config.get("SIMPLE_PREPLAY", True):
       import multitask_preplay
     else:
       import multitask_preplay_craftax_v2 as multitask_preplay
@@ -370,7 +370,7 @@ def run_single(config: dict, save_path: str = None):
         get_task_name=get_task_name,
         action_names=action_names,
         learner_log_extra=functools.partial(
-          multitask_preplay_jaxmaze.learner_log_extra,
+          multitask_preplay.jaxmaze_learner_log_extra,
           config=config,
           action_names=action_names,
           extract_task_info=extract_task_info,
@@ -513,9 +513,6 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [2]},
-        #"NUM_STARTING_LOCS": {"values": [30, 40, 50]},
-        "QHEAD_TYPE": {"values": ['dot', 'duelling']},
-        "ALL_GOALS_LAMBDA": {"values": [.6, .7]},
         "SIMPLE_PREPLAY": {"values": [True]},
         "FAST_ENV": {"values": [True]},
         "env.exp": {"values": ["preplay_test_big"]},
@@ -534,8 +531,8 @@ def sweep(search: str = ""):
         "SEED": {"values": [2]},
         "KNOWN_OFFTASK_GOAL": {"values": [False]},
         "FAST_ENV": {"values": [False]},
-        "ALL_GOALS_LAMBDA": {"values": [.6, .7]},
-        "QHEAD_TYPE": {"values": ['dot', 'duelling']},
+        "ALL_GOALS_LAMBDA": {"values": [0.6, 0.7]},
+        "QHEAD_TYPE": {"values": ["dot", "duelling"]},
         "env.exp": {"values": ["exp4"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],

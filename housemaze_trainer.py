@@ -47,7 +47,7 @@ from jaxneurorl import loggers
 import alphazero
 import qlearning_jaxmaze
 import usfa_jaxmaze
-import multitask_preplay_jaxmaze
+import archive.multitask_preplay_jaxmaze as multitask_preplay_jaxmaze
 import multitask_preplay_craftax_v2
 import networks
 import jaxmaze_observer as humansf_observers
