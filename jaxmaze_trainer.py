@@ -51,7 +51,6 @@ from jaxneurorl import loggers
 
 import qlearning_jaxmaze
 import usfa_jaxmaze
-import archive.multitask_preplay_jaxmaze as multitask_preplay_jaxmaze
 import her
 import jaxmaze_observer as humansf_observers
 from jaxmaze.human_dyna import experiments as jaxmaze_experiments
@@ -513,15 +512,14 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [3]},
-        #"NUM_STARTING_LOCS": {"values": [30, 40, 50]},
+        "ALL_GOALS_LAMBDA": {"values": [0.0]},
         "QHEAD_TYPE": {"values": ['dot', 'duelling']},
-        "ALL_GOALS_LAMBDA": {"values": [.6, .7]},
         "SIMPLE_PREPLAY": {"values": [True]},
         "FAST_ENV": {"values": [True]},
-        "env.exp": {"values": ["preplay_test_big"]},
+        "env.exp": {"values": ["preplay_test"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-fast-2",
+      "group": "preplay-test-1",
     }
   elif search == "preplay2":
     sweep_config = {
