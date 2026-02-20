@@ -512,7 +512,7 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["preplay"]},
-        "SEED": {"values": [2]},
+        "SEED": {"values": [3]},
         #"NUM_STARTING_LOCS": {"values": [30, 40, 50]},
         "QHEAD_TYPE": {"values": ['dot', 'duelling']},
         "ALL_GOALS_LAMBDA": {"values": [.6, .7]},

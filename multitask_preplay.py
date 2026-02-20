@@ -1226,13 +1226,13 @@ class DynaAgentEnvModelMultigoalJaxMaze(nn.Module):
   observation_encoder: nn.Module
   rnn: vbb.ScannedRNN
   main_q_head: nn.Module
-  off_task_q_head: nn.Module  # ignored when shared
   env: environment.Environment
   env_params: environment.EnvParams
 
   def setup(self):
     kernel_init = nn.initializers.variance_scaling(1.0, "fan_in", "normal", out_axis=0)
     self.task_fn = nn.Dense(128, kernel_init=kernel_init)
+    self.off_task_q_head = self.main_q_head
 
   def initialize(self, x: TimeStep):
     rng = jax.random.PRNGKey(0)
@@ -1470,14 +1470,6 @@ def make_jaxmaze_multigoal_agent(
       activate_final=False,
       use_bias=config.get("USE_BIAS", False),
     ),
-    off_task_q_head=QFnCls(
-      hidden_dim=config.get("Q_HIDDEN_DIM", 512),
-      num_layers=config.get("NUM_PRED_LAYERS", 0),
-      out_dim=env.num_actions(env_params),
-      activation=config["ACTIVATION"],
-      activate_final=False,
-      use_bias=config.get("USE_BIAS", False),
-    ),
     env=model_env,
     env_params=model_env_params,
   )
@@ -1664,7 +1656,7 @@ def make_train_craftax_multigoal(**kwargs):
 def make_train_jaxmaze_multigoal(**kwargs):
   config = kwargs["config"]
   all_tasks = jnp.array(kwargs.pop("all_tasks"))
-  known_offtask_goal = config.get("KNOWN_OFFTASK_GOAL", True)
+  known_offtask_goal = config.get("KNOWN_OFFTASK_GOAL", False)
   num_offtask_goals = 1 if known_offtask_goal else config["NUM_OFFTASK_GOALS"]
   config["NUM_OFFTASK_GOALS"] = num_offtask_goals
 
