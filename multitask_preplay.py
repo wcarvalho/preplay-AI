@@ -210,16 +210,15 @@ def rnn_output_from_state(state):
 def simulate_n_trajectories(
   h_tm1: RnnState,
   x_t: TimeStep,
-  main_task_goal: jax.Array,
+  online_goal: jax.Array,
   rng: jax.random.PRNGKey,
   network: nn.Module,
   params: Params,
   policy_fn: Callable = None,
   num_steps: int = 5,
-  num_simulations: int = 5,
-  mainq_coeff: float = 1.0,
-  offtask_coeff: float = 1.0,
-  offtask_goal: jax.Array = None,
+  online_task_coeff: float = 1.0,
+  simulation_task_coeff: float = 1.0,
+  simulation_goal: jax.Array = None,
   make_init_goal_timestep=None,
 ):
   """Simulate n trajectories from a given state.
@@ -244,41 +243,37 @@ def simulate_n_trajectories(
     make_init_goal_timestep: optional fn to modify timestep for goal
   """
 
-  if offtask_goal is not None:
-    # Preplay: blend both Q-heads
-    def get_q_vals(lstm_out, main_w, off_w):
-      main_q = network.apply(params, lstm_out, main_w, method=network.main_task_q_fn)
-      offtask_q = network.apply(params, lstm_out, off_w, method=network.off_task_q_fn)
-      return mainq_coeff * main_q + offtask_coeff * offtask_q
+  if simulation_goal is not None:
+    simulation_goal = online_goal
+  assert online_goal.shape[0] == simulation_goal.shape[0]
+  num_simulations = online_goal.shape[0]
 
-    goal_for_timestep = offtask_goal
-  else:
-    # Dyna-only: use only main-task Q-head
-    offtask_goal = main_task_goal  # dummy so arrays have matching shape
-    goal_for_timestep = main_task_goal
+  def get_q_vals(lstm_out, main_w, off_w):
+    main_q = network.apply(params, lstm_out, main_w, method=network.main_task_q_fn)
+    offtask_q = network.apply(params, lstm_out, off_w, method=network.off_task_q_fn)
+    return online_task_coeff * main_q + simulation_task_coeff * offtask_q
 
-    def get_q_vals(lstm_out, main_w, off_w):
-      del off_w
-      return network.apply(params, lstm_out, main_w, method=network.main_task_q_fn)
-
-  def initial_predictions(x, prior_h, main_w, off_w, rng_):
+  # one for each simulation
+  # [N, ...]
+  def initial_predictions(x, prior_h, main_w, sim_w, rng_):
     lstm_state, lstm_out = network.apply(
       params, prior_h, x, rng_, method=network.apply_rnn
     )
-    preds = Predictions(q_vals=get_q_vals(lstm_out, main_w, off_w), state=lstm_state)
+    preds = Predictions(q_vals=get_q_vals(lstm_out, main_w, sim_w), state=lstm_state)
     if make_init_goal_timestep is not None:
-      x = make_init_goal_timestep(x, off_w)
+      x = make_init_goal_timestep(x, sim_w)
     return x, lstm_state, preds
 
   rng, rng_ = jax.random.split(rng)
+
 
   x_t, h_t, preds_t = jax.vmap(
     initial_predictions, in_axes=(None, None, 0, 0, 0), out_axes=0
   )(
     x_t,
     h_tm1,
-    main_task_goal,
-    goal_for_timestep,
+    online_goal,
+    simulation_goal,
     jax.random.split(rng_, num_simulations),
   )
   a_t = policy_fn(preds_t, rng_)
@@ -295,7 +290,7 @@ def simulate_n_trajectories(
     )
 
     next_preds = Predictions(
-      q_vals=jax.vmap(get_q_vals)(next_rnn_out, main_task_goal, goal_for_timestep),
+      q_vals=jax.vmap(get_q_vals)(next_rnn_out, online_goal, simulation_goal),
       state=next_lstm_state,
     )
     next_a = policy_fn(next_preds, rng_)
@@ -433,8 +428,8 @@ class PreplayLossFn:
   num_offtask_goals: int = 5
   offtask_loss_coeff: float = 1.0
   ontask_loss_coeff: float = 1.0
-  offtask_coeff: float = 1.0
-  mainq_coeff: float = 1.0
+  simulation_task_coeff: float = 1.0
+  online_task_coeff: float = 1.0
 
   augment_dyna_reward: Callable = None
   dyna_epsilon_values: Callable = None
@@ -771,8 +766,8 @@ class PreplayLossFn:
       network=self.network,
       params=params,
       num_steps=self.simulation_length,
-      mainq_coeff=self.mainq_coeff,
-      offtask_coeff=self.offtask_coeff,
+      online_task_coeff=self.online_task_coeff,
+      simulation_task_coeff=self.simulation_task_coeff,
       make_init_goal_timestep=self.make_init_goal_timestep,
     )
 
@@ -786,7 +781,7 @@ class PreplayLossFn:
 
       return jax.vmap(at_t)(rnn_out)
 
-    def unroll_target_rnn(x_t, h_tar_t, all_t, num_sims, rng):
+    def unroll_target_rnn(x_t, h_tar_tm1, all_t, num_sims, rng):
       """Unroll target RNN on simulated timesteps (vmap-over-scan).
 
       Uses original x_t at step 0 (matching what the online RNN saw inside
@@ -813,7 +808,7 @@ class PreplayLossFn:
       )  # [S+1, num_sims, ...]
 
       h_tar_broadcast = jax.tree_util.tree_map(
-        lambda y: jnp.broadcast_to(y, (num_sims,) + y.shape), h_tar_t
+        lambda y: jnp.broadcast_to(y, (num_sims,) + y.shape), h_tar_tm1
       )
 
       def single_sim_unroll(h_init, xs, sim_rng):
@@ -845,41 +840,52 @@ class PreplayLossFn:
       )  # [num_sims, S+1, D]
       return jnp.swapaxes(target_rnn_out, 0, 1)  # [S+1, num_sims, D]
 
-    def preplay_at_t(x_t, h_on_t, h_tar_t, l_mask_t, key):
-      """Combined off-task + on-task loss at a single timestep.
+    def preplay_at_t(x_t, h_on_tm1, h_tar_tm1, l_mask_t, key):
+      """Combined on-task + off-task loss at a single timestep.
 
       Merges on-task and off-task simulations into a single simulate call
       with total_sims = N_on + G_off * N_off.
 
       Args:
         x_t: single timestep (no time dim)
-        h_on_t: online RNN state at this timestep
-        h_tar_t: target RNN state at this timestep
+        h_on_tm1: online RNN state at this timestep
+        h_tar_tm1: target RNN state at this timestep
         l_mask_t: scalar loss mask
         key: random key
       """
-      N_on = self.num_ontask_simulations
+
+      # Sample goals
+      ontask_goals = self.get_main_goal(x_t)
+      N_on, dim_G = ontask_goals.shape
+      assert N_on == 1
+
+      # TODO: remove 3rd output from self.sample_preplay_goals function calls
+      offtask_goals, offtask_achievable, _ = self.sample_preplay_goals(x_t, key, G_off)
+      G_off = offtask_goals.shape[0]
       N_off = self.num_offtask_simulations
-      G_off = self.num_offtask_goals
       total_sims = N_on + G_off * N_off
 
-      # Sample off-task goals
-      goals, achievable, any_achievable = self.sample_preplay_goals(x_t, key, G_off)
-      main_goal = self.get_main_goal(x_t)  # [N_on, G]
-
       # Build unified goals: [total_sims, G]
-      offtask_goals = jnp.repeat(goals, N_off, axis=0)  # [G_off*N_off, G]
-      all_goals = jnp.concatenate((main_goal, offtask_goals), axis=0)
+      offtask_goals = jnp.tile(offtask_goals, (N_off, 1))  # [G_off*N_off, G]
+      offtask_achievable = jnp.tile(offtask_achievable, N_off)  # [G_off*N_off]
+      assert offtask_goals.shape == (G_off * N_off, dim_G)
+      all_sim_goals = jnp.concatenate((ontask_goals, offtask_goals), axis=0)
+      assert all_sim_goals.shape[0] == total_sims
+      ontask_goals_tiled = jnp.tile(ontask_goals, (total_sims, 1))
 
       # Build unified epsilon vector
       key, rng_on, rng_off = jax.random.split(key, 3)
+      ontask_epsilon_values = self.dyna_epsilon_values(rng_on)
+      offtask_epsilon_values = self.offtask_dyna_epsilon_values(rng_off)
+      assert ontask_epsilon_values.shape[0] == ontask_goals.shape[0]
       all_eps = jnp.concatenate(
         (
-          self.dyna_epsilon_values(rng_on),
-          jnp.tile(self.offtask_dyna_epsilon_values(rng_off), G_off),
+          ontask_epsilon_values,
+          jnp.tile(offtask_epsilon_values, N_off),
         )
       )  # [total_sims]
 
+      import ipdb; ipdb.set_trace()
       def sim_policy(preds, rng):
         q_vals = preds.q_vals  # [total_sims, A]
         rngs = jax.random.split(rng, total_sims)
@@ -889,12 +895,11 @@ class PreplayLossFn:
       # sim_out.actions: [sim_length+1, total_sims]
       key, key_ = jax.random.split(key)
       all_t, sim_out = simulate(
-        h_tm1=h_on_t,
+        h_tm1=h_on_tm1,
         x_t=x_t,
         rng=key_,
-        main_task_goal=jnp.tile(main_goal[0:1], (total_sims, 1)),
-        offtask_goal=all_goals,
-        num_simulations=total_sims,
+        online_goal=ontask_goals_tiled,
+        simulation_goal=all_sim_goals,
         policy_fn=sim_policy,
       )
       # all_a: [sim_length+1, total_sims]
@@ -903,33 +908,39 @@ class PreplayLossFn:
       online_rnn_out = rnn_output_from_state(sim_out.predictions.state)
       # target_rnn_out: [sim_length+1, total_sims, D]
       key, key_tar = jax.random.split(key)
-      target_rnn_out = unroll_target_rnn(x_t, h_tar_t, all_t, total_sims, key_tar)
+      target_rnn_out = unroll_target_rnn(x_t, h_tar_tm1, all_t, total_sims, key_tar)
 
       # all_mask: [sim_length+1, total_sims]
       init_mask = jnp.broadcast_to(l_mask_t, (total_sims,))
       all_mask = simulation_finished_mask(init_mask, all_t)
 
       # === MAIN-TASK LOSS on ALL sims ===
-      # all_main_goal: [total_sims, G]
-      all_main_goal = jnp.tile(main_goal, (total_sims, 1))
       # all_main_q_on: [sim_length+1, total_sims, A]
       all_main_q_on = apply_q_head(
-        online_rnn_out, params, self.network.main_task_q_fn, all_main_goal
+        online_rnn_out, params, self.network.main_task_q_fn, ontask_goals_tiled
       )
       # all_main_q_tar: [sim_length+1, total_sims, A]
       all_main_q_tar = apply_q_head(
-        target_rnn_out, target_params, self.network.main_task_q_fn, all_main_goal
+        target_rnn_out, target_params, self.network.main_task_q_fn, ontask_goals_tiled
       )
-      all_main_td, all_main_loss, main_metrics, main_log = self.loss_fn(
+
+      ontask_reward = self.compute_rewards(all_t, ontask_goals_tiled)
+      all_main_td, ontask_loss, main_metrics, main_log = self.loss_fn(
         all_t,
         Predictions(all_main_q_on, None),
         Predictions(all_main_q_tar, None),
         all_a,
-        all_t.reward,
+        ontask_reward,
         make_float(all_t.last()),
         all_t.discount,
         all_mask,
       )
+
+      import ipdb; ipdb.set_trace()
+      # zero-out all losses/TD corresponding to empty goals
+      all_achievable = jnp.concatenate((jnp.ones(N_on), offtask_achievable))
+      all_main_td = all_achievable*all_main_td
+      ontask_loss = all_achievable*ontask_loss
 
       # === OFF-TASK GOAL LOSS (split: different goals + different rewards) ===
       # off_*: [sim_length+1, G_off*N_off, ...]
@@ -939,16 +950,15 @@ class PreplayLossFn:
       off_a = all_a[:, N_on:]
       off_mask = all_mask[:, N_on:]
       # off_g: [G_off*N_off, G]
-      off_g = all_goals[N_on:]
+      off_g = all_sim_goals[N_on:]
 
       # offtask_reward: [sim_length+1, G_off*N_off]
       offtask_reward = self.compute_rewards(off_t, off_g)
-      # off_q_on: [sim_length+1, G_off*N_off, A]
-      off_q_on = apply_q_head(off_online_rnn, params, self.network.off_task_q_fn, off_g)
-      # off_q_tar: [sim_length+1, G_off*N_off, A]
+      # off_q_on/off_q_tar: [sim_length+1, G_off*N_off, A]
+      off_q_on = apply_q_head(
+        off_online_rnn, params, self.network.off_task_q_fn, off_g)
       off_q_tar = apply_q_head(
-        off_target_rnn, target_params, self.network.off_task_q_fn, off_g
-      )
+        off_target_rnn, target_params, self.network.off_task_q_fn, off_g)
       off_td, off_loss, off_sub_metrics, off_log = self.loss_fn(
         off_t,
         Predictions(off_q_on, None),
@@ -960,26 +970,26 @@ class PreplayLossFn:
         off_mask,
       )
 
-      # Scale off-task goal loss by achievability
-      any_achievable_f = any_achievable.astype(jnp.float32)
-      off_td = off_td * any_achievable_f
-      off_loss = off_loss * any_achievable_f
+      import ipdb; ipdb.set_trace()
+      # zero-out all off-task reward functions/TDs corresponding to empty goals
+      off_td = off_td*offtask_achievable
+      off_loss = off_loss*offtask_achievable
+
 
       # === Combine ===
-      denominator = G_off * N_off + self.ontask_loss_coeff * N_on
-
+      denominator = N_on + offtask_achievable.sum()
       batch_td_error = (
-        self.offtask_loss_coeff * jnp.abs(off_td).sum(axis=1)
-        + self.ontask_loss_coeff * jnp.abs(all_main_td).sum(axis=1)
+        self.ontask_loss_coeff * jnp.abs(all_main_td).sum(axis=1)
+        + self.offtask_loss_coeff * jnp.abs(off_td).sum(axis=1)
       ) / denominator
 
       batch_loss_mean = (
-        self.offtask_loss_coeff * off_loss.sum()
-        + self.ontask_loss_coeff * all_main_loss.sum()
+        self.ontask_loss_coeff * ontask_loss.sum()
+        + self.offtask_loss_coeff * off_loss.sum()
       ) / denominator
 
       # Metrics
-      achieve_poss = achievable + 1e-5
+      achieve_poss = offtask_achievable + 1e-5
       achieve_poss = achieve_poss / achieve_poss.sum()
       entropy = -jnp.sum(
         achieve_poss * jnp.log(achieve_poss + 1e-5), axis=-1
@@ -988,14 +998,10 @@ class PreplayLossFn:
         **{f"{k}/offtask-goal": v for k, v in off_sub_metrics.items()},
         **{f"{k}/main-q": v for k, v in main_metrics.items()},
         "2.achievable_entropy": entropy,
-        "2.any_achievable": any_achievable_f,
       }
       log_info = off_log
-      log_info["main_q_values"] = main_log["q_values"]
-      log_info["main_q_target"] = main_log["q_target"]
-      log_info["goal"] = off_g
-      log_info["any_achievable"] = any_achievable_f
-      log_info["offtask_reward"] = offtask_reward
+      log_info["goal"] = all_sim_goals
+      log_info["simulation_reward"] = offtask_reward
 
       return batch_td_error, batch_loss_mean, metrics, log_info
 
@@ -1027,9 +1033,7 @@ class PreplayLossFn:
         h_tm1=h_on_t,
         x_t=x_t,
         rng=key_,
-        main_task_goal=main_goal,
-        offtask_goal=None,
-        num_simulations=num_sims,
+        online_goal=main_goal,
         policy_fn=sim_policy,
       )
 
@@ -1205,7 +1209,6 @@ class DynaAgentEnvModelMultigoal(nn.Module):
   observation_encoder: nn.Module
   rnn: vbb.ScannedRNN
   main_q_head: nn.Module
-  off_task_q_head: nn.Module  # ignored when shared
   env: environment.Environment
   env_params: environment.EnvParams
 
@@ -1454,14 +1457,6 @@ def make_craftax_multigoal_agent(
       use_bias=config.get("USE_BIAS", True),
       out_dim=env.action_space(env_params).n,
     ),
-    off_task_q_head=QFnCls(
-      hidden_dim=config.get("Q_HIDDEN_DIM", 512),
-      num_layers=config.get("NUM_PRED_LAYERS", 0),
-      activation=config["ACTIVATION"],
-      activate_final=False,
-      use_bias=config.get("USE_BIAS", True),
-      out_dim=env.action_space(env_params).n,
-    ),
     env=model_env,
     env_params=model_env_params,
   )
@@ -1508,6 +1503,7 @@ def make_jaxmaze_multigoal_agent(
     num_mlp_layers=config["NUM_MLP_LAYERS"],
     activation=config["ACTIVATION"],
     norm_type=config.get("NORM_TYPE", "none"),
+    include_task=config.get("OBS_INCLUDE_GOAL", True),
   )
 
   agent = DynaAgentEnvModelMultigoalJaxMaze(
@@ -1519,14 +1515,7 @@ def make_jaxmaze_multigoal_agent(
       activation=config["ACTIVATION"],
       activate_final=False,
       use_bias=config.get("USE_BIAS", False),
-    ),
-    off_task_q_head=QFnCls(
-      hidden_dim=config.get("Q_HIDDEN_DIM", 512),
-      num_layers=config.get("NUM_PRED_LAYERS", 0),
       out_dim=env.num_actions(env_params),
-      activation=config["ACTIVATION"],
-      activate_final=False,
-      use_bias=config.get("USE_BIAS", False),
     ),
     env=model_env,
     env_params=model_env_params,
@@ -2144,7 +2133,7 @@ def jaxmaze_learner_log_extra(
     callback_data["dyna"] = jax.tree_util.tree_map(lambda x: x[0, 0, :, 0], dyna)
     callback_data["preplay"] = jax.tree_util.tree_map(lambda x: x[0, 0, :, 1], dyna)
 
-  def plot_unified(d):
+  def plot_online_data(d):
     """Plot online + all_goals columns (mimics her.py plot_unified)."""
     columns = ["online", "all_goals"]
     col_data = {c: d[c] for c in columns if c in d}
@@ -2274,7 +2263,7 @@ def jaxmaze_learner_log_extra(
       wandb.log({"learner_example/online": wandb.Image(fig)})
     plt.close(fig)
 
-  def plot_dyna(d):
+  def plot_simulation_data(d):
     """Plot dyna + preplay columns."""
     columns = ["dyna", "preplay"]
     col_data = {c: d[c] for c in columns if c in d}
@@ -2303,13 +2292,15 @@ def jaxmaze_learner_log_extra(
       q_target = cd["q_target"]
       td_errors = cd["td_errors"]
       loss_mask = cd.get("loss_mask")
-      rewards = timesteps.reward
-      nT = len(rewards)
+      #online_rewards = timesteps.reward
+      simulation_reward = cd['simulation_reward']
+
+      nT = len(simulation_reward)
       q_values_taken = rlax.batched_index(q_values, actions)
 
       # Row 0: Rewards, Q-values, Q-targets
       ax = axes[0, ci]
-      ax.plot(rewards, label="Rewards")
+      ax.plot(simulation_reward, label="Rewards")
       ax.plot(q_values_taken, label="Q-Values")
       ax.plot(q_target, label="Q-Targets")
       if loss_mask is not None:
@@ -2351,11 +2342,11 @@ def jaxmaze_learner_log_extra(
 
   def callback(d):
     try:
-      plot_unified(d)
+      plot_online_data(d)
     except Exception as e:
       print(f"plot_unified error: {e}")
     try:
-      plot_dyna(d)
+      plot_simulation_data(d)
     except Exception as e:
       print(f"plot_dyna error: {e}")
 

@@ -7,7 +7,7 @@ JAX_DEBUG_NANS=True \
 RL_RESULTS_DIR=/tmp/rl_results \
 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue jaxmaze_trainer.py \
   app.debug=True \
-  app.wandb=False \
+  app.wandb=True \
   app.search=preplay
 
 RUNNING ON SLURM:
@@ -513,13 +513,15 @@ def sweep(search: str = ""):
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [3]},
         "ALL_GOALS_LAMBDA": {"values": [0.0]},
-        "QHEAD_TYPE": {"values": ['dot', 'duelling']},
-        "SIMPLE_PREPLAY": {"values": [True]},
-        "FAST_ENV": {"values": [True]},
+        "LEARNER_EXTRA_LOG_PERIOD": {"values": [50]},
+        #"OBS_INCLUDE_GOAL": {"values": [True, False]},
+        "EVAL_EPSILON": {"values": [0]},
+        "SIMPLE_PREPLAY": {"values": [True, False]},
+        "FAST_ENV": {"values": [False, False]},
         "env.exp": {"values": ["preplay_test"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-test-1",
+      "group": "preplay-test-2",
     }
   elif search == "preplay2":
     sweep_config = {
@@ -631,20 +633,6 @@ def sweep(search: str = ""):
       "overrides": ["alg=dyna_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "dyna-final-rotations-4",
     }
-  elif search == "preplay-old-final":
-    sweep_config = {
-      "metric": {
-        "name": "evaluator_performance/0.0 avg_episode_return",
-        "goal": "maximize",
-      },
-      "parameters": {
-        "ALG": {"values": ["dynaq_shared"]},
-        "SEED": {"values": list(range(6, 11))},
-        "env.exp": {"values": ["exp4"]},
-      },
-      "overrides": ["alg=preplay", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-old-final-rotations-4",
-    }
   elif search == "preplay-final":
     sweep_config = {
       "metric": {
@@ -677,6 +665,37 @@ def sweep(search: str = ""):
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "preplay-ablation-rotations-5",
+    }
+  elif search == "her-test-small":
+    sweep_config = {
+      "metric": {
+        "name": "evaluator_performance/0.0 avg_episode_return",
+        "goal": "maximize",
+      },
+      "parameters": {
+        "ALG": {"values": ["her"]},
+        "SEED": {"values": list(range(3, 7))},
+        "TOTAL_TIMESTEPS": {"values": [10_000_000]},
+        "env.exp": {"values": ["her_test_small"]},
+      },
+      "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
+      "group": "her-test-small-1",
+    }
+  elif search == "her-test-big":
+    sweep_config = {
+      "metric": {
+        "name": "evaluator_performance/0.0 avg_episode_return",
+        "goal": "maximize",
+      },
+      "parameters": {
+        "ALG": {"values": ["her"]},
+        "SEED": {"values": list(range(5))},
+        "ALL_GOALS_COEFF": {"values": [0.0, 1.0]},
+        "TOTAL_TIMESTEPS": {"values": [30_000_000]},
+        "env.exp": {"values": ["her_test_big"]},
+      },
+      "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
+      "group": "her-test-big-1",
     }
 
   else:
