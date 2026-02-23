@@ -1308,7 +1308,7 @@ class DynaAgentEnvModelMultigoalJaxMaze(nn.Module):
 
     task = xs.observation.task_w
     rnn_out = self.rnn.output_from_state(new_rnn_states)
-    q_vals = nn.BatchApply(self.main_task_q_fn)(rnn_out, task)
+    q_vals = jax.vmap(self.main_task_q_fn)(rnn_out, task)
     predictions = Predictions(q_vals=q_vals, state=new_rnn_states)
     return predictions, new_rnn_state
 
@@ -1316,11 +1316,11 @@ class DynaAgentEnvModelMultigoalJaxMaze(nn.Module):
     task = self.task_fn(task)
     if self.ignore_ontask_goal:
       task = task*0
-    return self.main_q_head(rnn_out, task)
+    return jax.vmap(self.main_q_head)(rnn_out, task)
 
   def off_task_q_fn(self, rnn_out, task):
     task = self.task_fn(task)
-    return self.main_q_head(rnn_out, task)
+    return jax.vmap(self.off_task_q_head)(rnn_out, task)
 
   def apply_model(self, state, action, rng):
     B = action.shape[0]
