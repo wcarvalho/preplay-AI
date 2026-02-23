@@ -266,7 +266,6 @@ def simulate_n_trajectories(
 
   rng, rng_ = jax.random.split(rng)
 
-
   x_t, h_t, preds_t = jax.vmap(
     initial_predictions, in_axes=(None, None, 0, 0, 0), out_axes=0
   )(
@@ -859,15 +858,15 @@ class PreplayLossFn:
       N_on, dim_G = ontask_goals.shape
       assert N_on == 1
 
-      # TODO: remove 3rd output from self.sample_preplay_goals function calls
-      offtask_goals, offtask_achievable, _ = self.sample_preplay_goals(x_t, key, G_off)
-      G_off = offtask_goals.shape[0]
+      G_off = self.num_offtask_goals
+      # [G_off, D], , [1]
+      offtask_goals, _, offtask_achievable = self.sample_preplay_goals(x_t, key, G_off)
       N_off = self.num_offtask_simulations
       total_sims = N_on + G_off * N_off
 
       # Build unified goals: [total_sims, G]
       offtask_goals = jnp.tile(offtask_goals, (N_off, 1))  # [G_off*N_off, G]
-      offtask_achievable = jnp.tile(offtask_achievable, N_off)  # [G_off*N_off]
+      offtask_achievable = jnp.tile(offtask_achievable, G_off * N_off)  # [G_off*N_off]
       assert offtask_goals.shape == (G_off * N_off, dim_G)
       all_sim_goals = jnp.concatenate((ontask_goals, offtask_goals), axis=0)
       assert all_sim_goals.shape[0] == total_sims
@@ -885,7 +884,6 @@ class PreplayLossFn:
         )
       )  # [total_sims]
 
-      import ipdb; ipdb.set_trace()
       def sim_policy(preds, rng):
         q_vals = preds.q_vals  # [total_sims, A]
         rngs = jax.random.split(rng, total_sims)
@@ -925,7 +923,7 @@ class PreplayLossFn:
       )
 
       ontask_reward = self.compute_rewards(all_t, ontask_goals_tiled)
-      all_main_td, ontask_loss, main_metrics, main_log = self.loss_fn(
+      all_main_td, ontask_loss, main_metrics, _ = self.loss_fn(
         all_t,
         Predictions(all_main_q_on, None),
         Predictions(all_main_q_tar, None),
@@ -936,11 +934,10 @@ class PreplayLossFn:
         all_mask,
       )
 
-      import ipdb; ipdb.set_trace()
       # zero-out all losses/TD corresponding to empty goals
       all_achievable = jnp.concatenate((jnp.ones(N_on), offtask_achievable))
-      all_main_td = all_achievable*all_main_td
-      ontask_loss = all_achievable*ontask_loss
+      all_main_td = all_achievable * all_main_td
+      ontask_loss = all_achievable * ontask_loss
 
       # === OFF-TASK GOAL LOSS (split: different goals + different rewards) ===
       # off_*: [sim_length+1, G_off*N_off, ...]
@@ -949,16 +946,16 @@ class PreplayLossFn:
       off_target_rnn = target_rnn_out[:, N_on:]
       off_a = all_a[:, N_on:]
       off_mask = all_mask[:, N_on:]
-      # off_g: [G_off*N_off, G]
-      off_g = all_sim_goals[N_on:]
 
       # offtask_reward: [sim_length+1, G_off*N_off]
-      offtask_reward = self.compute_rewards(off_t, off_g)
+      offtask_reward = self.compute_rewards(off_t, offtask_goals)
       # off_q_on/off_q_tar: [sim_length+1, G_off*N_off, A]
       off_q_on = apply_q_head(
-        off_online_rnn, params, self.network.off_task_q_fn, off_g)
+        off_online_rnn, params, self.network.off_task_q_fn, offtask_goals
+      )
       off_q_tar = apply_q_head(
-        off_target_rnn, target_params, self.network.off_task_q_fn, off_g)
+        off_target_rnn, target_params, self.network.off_task_q_fn, offtask_goals
+      )
       off_td, off_loss, off_sub_metrics, off_log = self.loss_fn(
         off_t,
         Predictions(off_q_on, None),
@@ -970,11 +967,9 @@ class PreplayLossFn:
         off_mask,
       )
 
-      import ipdb; ipdb.set_trace()
       # zero-out all off-task reward functions/TDs corresponding to empty goals
-      off_td = off_td*offtask_achievable
-      off_loss = off_loss*offtask_achievable
-
+      off_td = off_td * offtask_achievable
+      off_loss = off_loss * offtask_achievable
 
       # === Combine ===
       denominator = N_on + offtask_achievable.sum()
@@ -1001,8 +996,8 @@ class PreplayLossFn:
       }
       log_info = off_log
       log_info["goal"] = all_sim_goals
-      log_info["simulation_reward"] = offtask_reward
 
+      log_info["simulation_reward"] = offtask_reward
       return batch_td_error, batch_loss_mean, metrics, log_info
 
     def dyna_only_at_t(x_t, h_on_t, h_tar_t, l_mask_t, key):
@@ -1081,7 +1076,6 @@ class PreplayLossFn:
         loss_mask=all_t_mask,
       )
       return batch_td_error, batch_loss_mean, metrics, log_info
-
     # Vmap over timesteps T
     loss_fn_ = preplay_at_t if self.num_offtask_goals > 0 else dyna_only_at_t
 
@@ -1118,8 +1112,8 @@ def make_loss_fn_class(config, **kwargs) -> PreplayLossFn:
     offtask_loss_coeff=config.get("OFFTASK_LOSS_COEFF", 1.0),
     ontask_loss_coeff=config.get("ONTASK_LOSS_COEFF", 1.0),
     num_offtask_goals=config.get("NUM_OFFTASK_GOALS", 5),
-    offtask_coeff=config.get("OFFTASK_COEFF", 2.0),
-    mainq_coeff=config.get("MAINQ_COEFF", 1.0),
+    simulation_task_coeff=config.get("OFFTASK_COEFF", 2.0),
+    online_task_coeff=config.get("MAINQ_COEFF", 1.0),
     all_goals_coeff=config.get("ALL_GOALS_COEFF", 1.0),
     all_goals_lambda=config.get("ALL_GOALS_LAMBDA", 0.6),
     **kwargs,
@@ -1615,6 +1609,7 @@ def make_train_craftax_singlegoal(**kwargs):
     achievement_coefficients = timesteps.observation.task_w.astype(
       jnp.float32
     )  # [T, ..., G]
+    assert goal_onehot.ndim == achievements.ndim - 1
     achievement_coefficients = achievement_coefficients[..., : goal_onehot.shape[-1]]
     coeff_mask = goal_onehot.astype(jnp.float32)  # [num_sims, G] or [G]
     # coeff_mask[None]: [1, num_sims, G] broadcasts with [T, num_sims, G]
@@ -1719,6 +1714,7 @@ def make_train_craftax_singlegoal_dyna_multigoal(**kwargs):
     achievement_coefficients = timesteps.observation.task_w.astype(
       jnp.float32
     )  # [T, num_sims, G]
+    assert goal_onehot.ndim == achievements.ndim - 1
     achievement_coefficients = achievement_coefficients[..., : goal_onehot.shape[-1]]
     coeff_mask = goal_onehot.astype(jnp.float32)  # [num_sims, G]
     # coeff_mask[None]: [1, num_sims, G] broadcasts with [T, num_sims, G]
@@ -2016,6 +2012,7 @@ def make_train_jaxmaze_multigoal(**kwargs):
     state_features = timesteps.state.task_state.features.astype(
       jnp.float32
     )  # [T, num_sims, G]
+    assert goal_onehot.ndim == state_features.ndim - 1
     # goal_onehot[None]: [1, num_sims, G] broadcasts with [T, num_sims, G]
     offtask_reward = (state_features * goal_onehot.astype(jnp.float32)[None]).sum(
       -1
@@ -2125,13 +2122,6 @@ def jaxmaze_learner_log_extra(
     callback_data["all_goals"] = jax.tree_util.tree_map(
       lambda x: x[0], data["all_goals"]
     )
-
-  # Dyna: [B, T, sim_len, sims, ...] -> batch=0, T=0, all sim_len, sim=0/1
-  if "dyna" in data:
-    dyna = data["dyna"]
-    dyna.pop("any_achievable", None)
-    callback_data["dyna"] = jax.tree_util.tree_map(lambda x: x[0, 0, :, 0], dyna)
-    callback_data["preplay"] = jax.tree_util.tree_map(lambda x: x[0, 0, :, 1], dyna)
 
   def plot_online_data(d):
     """Plot online + all_goals columns (mimics her.py plot_unified)."""
@@ -2263,6 +2253,18 @@ def jaxmaze_learner_log_extra(
       wandb.log({"learner_example/online": wandb.Image(fig)})
     plt.close(fig)
 
+  # Dyna: [B, T, sim_len, sims, ...] -> batch=0, T=0, all sim_len, sim=0/1
+  if "dyna" in data:
+    dyna = data["dyna"]
+    dyna.pop("any_achievable", None)
+
+    # [B, T, N, G]
+    simulation_goals = dyna.pop('goal')[0,0]
+    callback_data["dyna"] = jax.tree_util.tree_map(lambda x: x[0, 0, :, 0], dyna)
+    callback_data["preplay"] = jax.tree_util.tree_map(lambda x: x[0, 0, :, 1], dyna)
+    callback_data["dyna"]['goal'] = simulation_goals[0]
+    callback_data["preplay"]['goal'] = simulation_goals[1]
+
   def plot_simulation_data(d):
     """Plot dyna + preplay columns."""
     columns = ["dyna", "preplay"]
@@ -2274,7 +2276,7 @@ def jaxmaze_learner_log_extra(
     n_cols = len(col_data)
     col_names = list(col_data.keys())
 
-    n_rows = 3
+    n_rows = 4
     fig, axes = plt.subplots(
       n_rows,
       n_cols,
@@ -2292,15 +2294,15 @@ def jaxmaze_learner_log_extra(
       q_target = cd["q_target"]
       td_errors = cd["td_errors"]
       loss_mask = cd.get("loss_mask")
-      #online_rewards = timesteps.reward
-      simulation_reward = cd['simulation_reward']
+      # online_rewards = timesteps.reward
+      simulation_reward = cd["simulation_reward"]
 
       nT = len(simulation_reward)
       q_values_taken = rlax.batched_index(q_values, actions)
 
       # Row 0: Rewards, Q-values, Q-targets
       ax = axes[0, ci]
-      ax.plot(simulation_reward, label="Rewards")
+      ax.plot(simulation_reward, label="Sim rewards")
       ax.plot(q_values_taken, label="Q-Values")
       ax.plot(q_target, label="Q-Targets")
       if loss_mask is not None:
@@ -2318,8 +2320,30 @@ def jaxmaze_learner_log_extra(
       ax.grid(True)
       ax.set_xticks(range(len(td_errors)))
 
-      # Row 2: Environment image + path
+      # Row 2: Goal vector heatmap
       ax = axes[2, ci]
+      goal = cd.get("goal")
+      if goal is not None:
+        # Goal is (D,), tile to (T, D) then transpose to (D, T) for imshow
+        goal_2d = jnp.tile(goal[None, :], (nT, 1)).T  # [D, T]
+        ax.imshow(
+          goal_2d,
+          aspect="auto",
+          cmap="viridis",
+          interpolation="nearest",
+          vmin=0,
+          vmax=1,
+        )
+        ax.set_title(f"{col_name} — Goal Vector")
+        ax.set_ylabel("Dims")
+        ax.set_yticks(range(goal_2d.shape[0]))
+        ax.set_xticks(range(nT))
+        ax.grid(True, axis="x", alpha=0.3, color="white")
+      else:
+        ax.set_visible(False)
+
+      # Row 3: Environment image + path
+      ax = axes[3, ci]
       maze_height, maze_width, _ = timesteps.state.grid[0].shape
       initial_state = jax.tree_util.tree_map(lambda x: x[0], timesteps.state)
       img = render_fn(initial_state)

@@ -518,7 +518,7 @@ def sweep(search: str = ""):
         "EVAL_EPSILON": {"values": [0]},
         "SIMPLE_PREPLAY": {"values": [True, False]},
         "FAST_ENV": {"values": [False, False]},
-        "env.exp": {"values": ["preplay_test"]},
+        "env.exp": {"values": ["preplay_test_big"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "preplay-test-2",
