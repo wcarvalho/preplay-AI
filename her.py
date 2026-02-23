@@ -38,8 +38,8 @@ import rlax
 import wandb
 from flax import struct
 from gymnax.environments import environment
-from base_algorithm2 import TimeStep
-import base_algorithm2 as base
+from base_algo import TimeStep
+import base_algo as base
 
 make_optimizer = base.make_optimizer
 make_actor = base.make_actor
@@ -473,7 +473,7 @@ class HerLossFn(base.RecurrentLossFn):
         target_preds,
       ):
         """new_goal: GoalPosition with scalar fields [D], timestep: [T, ...]"""
-        length = len(data.action)
+        length = actions.shape[0]
         expand = lambda x: jnp.tile(x[None], [length, 1])
         expanded_goal = jax.tree_util.tree_map(expand, new_goal)
 

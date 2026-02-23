@@ -428,6 +428,7 @@ class PreplayLossFn:
   all_goals_coeff: float = 1.0
   all_goals_lambda: float = 0.3
   num_offtask_goals: int = 5
+  num_td_goals: int = 3
   offtask_loss_coeff: float = 1.0
   ontask_loss_coeff: float = 1.0
   simulation_task_coeff: float = 1.0
@@ -522,10 +523,13 @@ class PreplayLossFn:
     effective_lambda = self.lambda_ if lambda_override is None else lambda_override
     lambda_ = jnp.ones_like(non_terminal) * effective_lambda
 
-    batch_td_error_fn = jax.vmap(losses.q_learning_lambda_td, in_axes=1, out_axes=1)
+    has_batch_dim = rewards.ndim == 2
+    td_error_fn = losses.q_learning_lambda_td
+    if has_batch_dim:
+      td_error_fn = jax.vmap(td_error_fn, in_axes=1, out_axes=1)
     selector_actions = jnp.argmax(online_preds.q_vals, axis=-1)
 
-    q_t, target_q_t = batch_td_error_fn(
+    q_t, target_q_t = td_error_fn(
       online_preds.q_vals[:-1],
       actions[:-1],
       target_preds.q_vals[1:],
@@ -610,102 +614,80 @@ class PreplayLossFn:
     if self.all_goals_coeff > 0.0:
 
       def all_goals_loss_single(
-        timestep_b, action_b, h_on_b, h_tar_b, loss_mask_b, key
+        new_goal,
+        timestep,
+        actions,
+        online_preds,
+        target_preds,
       ):
-        """Off-task Q-learning loss on real trajectory for a single batch element.
-
-        Samples N random goals and applies off_task_q_fn to existing RNN outputs
-        (no simulation or RNN re-run needed).
+        """Off-task Q-learning loss for a single goal.
 
         Args:
-          timestep_b: [T, ...] timestep sequence for one batch element
-          action_b: [T] actions
-          h_on_b: [T, ...] online RNN states
-          h_tar_b: [T, ...] target RNN states
-          loss_mask_b: [T] loss mask
-          key: random key
+          new_goal: goal with scalar fields [G]
+          timestep: [T, ...] timestep sequence
+          actions: [T] actions
+          online_preds: Predictions with state [T, ...]
+          target_preds: Predictions with state [T, ...]
         """
-        N = self.num_offtask_goals * self.num_offtask_simulations
-        goals, _, _ = self.sample_td_goals(timestep_b, key, N)
+        length = actions.shape[0]
+        expand = lambda x: jnp.tile(x[None], [length, 1])
+        expanded_goal = jax.tree_util.tree_map(expand, new_goal)
 
-        # Extract rnn_out from online/target states (no RNN re-run)
-        rnn_out_online = rnn_output_from_state(h_on_b)  # [T, D]
-        rnn_out_target = rnn_output_from_state(h_tar_b)  # [T, D]
-
-        # Broadcast to [T, N, ...]
-        rnn_out_online_rep = jnp.broadcast_to(
-          rnn_out_online[:, None, :],
-          (rnn_out_online.shape[0], N, rnn_out_online.shape[1]),
+        apply_q = functools.partial(
+          self.network.apply, method=self.network.off_task_q_fn
         )
-        rnn_out_target_rep = jnp.broadcast_to(
-          rnn_out_target[:, None, :],
-          (rnn_out_target.shape[0], N, rnn_out_target.shape[1]),
-        )
-        action_repeated = jnp.broadcast_to(action_b[:, None], (action_b.shape[0], N))
-        loss_mask_repeated = jnp.broadcast_to(
-          loss_mask_b[:, None], (loss_mask_b.shape[0], N)
-        )
-        timestep_repeated = jax.tree_util.tree_map(
-          lambda x: jnp.broadcast_to(x[:, None, ...], (x.shape[0], N) + x.shape[1:]),
-          timestep_b,
-        )
-
-        # Apply off_task_q_fn to rnn outputs for each goal [T, N, A]
-        def apply_q(params_, rnn_out_rep, q_method):
-          """Apply Q-head to broadcast rnn outputs for each goal.
-
-          Args:
-            params_: network parameters
-            rnn_out_rep: [T, N, D] broadcast RNN outputs
-            q_method: network method (off_task_q_fn or main_task_q_fn)
-
-          Returns:
-            [T, N, A] Q-values
-          """
-          q_fn = lambda h, g: self.network.apply(params_, h, g, method=q_method)
-          return jax.vmap(jax.vmap(q_fn, (0, 0)), (0, None))(rnn_out_rep, goals)
-
-        online_q = apply_q(params, rnn_out_online_rep, self.network.off_task_q_fn)
-        target_q = apply_q(
-          target_params, rnn_out_target_rep, self.network.off_task_q_fn
-        )
+        rnn_out_online = rnn_output_from_state(online_preds.state)
+        rnn_out_target = rnn_output_from_state(target_preds.state)
+        online_q = apply_q(params, rnn_out_online, expanded_goal)
+        target_q = apply_q(target_params, rnn_out_target, expanded_goal)
 
         online_preds_g = Predictions(q_vals=online_q, state=None)
         target_preds_g = Predictions(q_vals=target_q, state=None)
 
-        goal_rewards = self.compute_rewards(timestep_repeated, goals)
+        goal_rewards = self.compute_rewards(timestep, new_goal)
 
         ag_td_error, ag_batch_loss, ag_metrics, ag_log_info = self.loss_fn(
-          timestep=timestep_repeated,
+          timestep=timestep,
           online_preds=online_preds_g,
           target_preds=target_preds_g,
-          actions=action_repeated,
+          actions=actions,
           rewards=goal_rewards,
-          is_last=make_float(timestep_repeated.last()),
-          non_terminal=timestep_repeated.discount,
-          loss_mask=loss_mask_repeated,
+          is_last=make_float(timestep.last()),
+          non_terminal=timestep.discount,
+          loss_mask=is_truncated(timestep),
           lambda_override=self.all_goals_lambda,
         )
         if self.make_log_extras is not None:
-          extras = self.make_log_extras(timestep_repeated, goal=goals)
+          extras = self.make_log_extras(timestep, goal=new_goal)
           ag_log_info.update(extras)
-        ag_log_info["sampled_goal"] = goals  # [N, G]
+
         return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
+
+      key_grad, key_grad_ = jax.random.split(key_grad)
+
+      key_grad_ = jax.random.split(key_grad_, B + 1)
+
+      # GoalPosition with [N, B, D] and [N, B, 2]
+      sample_td_goals = functools.partial(self.sample_td_goals, num=self.num_td_goals)
+      all_goals, _, _ = jax.vmap(sample_td_goals, (1, 0), 0)(
+        data.timestep, key_grad_[1:]
+      )
+      all_goals = jnp.swapaxes(all_goals, 0, 1)
 
       # Pass per-timestep RNN states (not initial state)
       # online_preds.state has shape [T, B, ...], target_preds.state likewise
-      all_goals_fn = jax.vmap(all_goals_loss_single, (1, 1, 1, 1, 1, 0), 0)
+      all_goals_fn = jax.vmap(all_goals_loss_single, (0, None, None, None, None), 0)
+      all_goals_fn = jax.vmap(all_goals_fn, 1, 0)
       _, all_goals_batch_loss, all_goals_metrics, all_goals_log_info = all_goals_fn(
+        all_goals,
         data.timestep,
         data.action,
-        online_preds.state,
-        target_preds.state,
-        loss_mask,
-        jax.random.split(key_grad, B),
+        online_preds,
+        target_preds,
       )
-      # Take first goal: [B, T, N, ...] -> [B, T, ...]
+      # Take first goal: [B, N, ...] -> [B, ...]
       all_log_info["all_goals"] = jax.tree_util.tree_map(
-        lambda x: x[:, :, 0], all_goals_log_info
+        lambda x: x[:, 0], all_goals_log_info
       )
       batch_loss += self.all_goals_coeff * all_goals_batch_loss.mean(1)
       all_metrics.update({f"2.all_goals/{k}": v for k, v in all_goals_metrics.items()})
@@ -1103,6 +1085,7 @@ def make_loss_fn_class(config, **kwargs) -> PreplayLossFn:
     online_task_coeff=config.get("MAINQ_COEFF", 1.0),
     all_goals_coeff=config.get("ALL_GOALS_COEFF", 1.0),
     all_goals_lambda=config.get("ALL_GOALS_LAMBDA", 0.6),
+    num_td_goals=config.get("NUM_TD_GOALS", 3),
     **kwargs,
   )
 
@@ -1582,7 +1565,7 @@ def make_train_craftax_singlegoal(**kwargs):
     goals = jax.nn.one_hot(goals, num_classes=num_classes)  # [N, G]
     return goals, achievable, any_achievable
 
-  def sample_random_goals(timestep, key, num_offtask_goals):
+  def sample_random_goals(timestep, key, num):
     """Sample uniformly random goals.
 
     Args:
@@ -1596,9 +1579,7 @@ def make_train_craftax_singlegoal(**kwargs):
     """
     num_classes = timestep.observation.achievable.shape[-1]
     key, key_ = jax.random.split(key)
-    goals = jax.random.randint(
-      key_, shape=(num_offtask_goals,), minval=0, maxval=num_classes
-    )  # [N]
+    goals = jax.random.randint(key_, shape=(num,), minval=0, maxval=num_classes)  # [N]
     goals = jax.nn.one_hot(goals, num_classes=num_classes)  # [N, G]
     achievable = jnp.ones(num_classes) / num_classes  # [G]
     any_achievable = jnp.bool_(True)
@@ -1685,7 +1666,7 @@ def make_train_craftax_singlegoal_dyna_multigoal(**kwargs):
     )  # [num_simulations-1]
     return jnp.concatenate((jnp.array([0.0]), epsilons))  # [num_simulations]
 
-  def sample_random_goals(timestep, key, num_offtask_goals):
+  def sample_random_goals(timestep, key, num):
     """Sample uniformly random goals.
 
     Args:
@@ -1699,9 +1680,7 @@ def make_train_craftax_singlegoal_dyna_multigoal(**kwargs):
     """
     num_classes = timestep.observation.achievable.shape[-1]
     key, key_ = jax.random.split(key)
-    goals = jax.random.randint(
-      key_, shape=(num_offtask_goals,), minval=0, maxval=num_classes
-    )  # [N]
+    goals = jax.random.randint(key_, shape=(num,), minval=0, maxval=num_classes)  # [N]
     goals = jax.nn.one_hot(goals, num_classes=num_classes)  # [N, G]
     achievable = jnp.ones(num_classes) / num_classes  # [G]
     any_achievable = jnp.bool_(True)
@@ -1805,7 +1784,7 @@ def make_train_craftax_multigoal(**kwargs):
     )  # [num_offtask_simulations-1]
     return jnp.concatenate((jnp.array([0.0]), epsilons))  # [num_offtask_simulations]
 
-  def sample_nontask_random_goals(timestep, key, num_offtask_goals):
+  def sample_nontask_random_goals(timestep, key, num):
     """Sample random goals excluding the current task goal.
 
     Args:
@@ -1824,7 +1803,7 @@ def make_train_craftax_multigoal(**kwargs):
     any_achievable = achievable.sum() > 0.1
     key, key_ = jax.random.split(key)
     goals = distrax.Categorical(probs=other_goal_probs).sample(
-      seed=key_, sample_shape=(num_offtask_goals)
+      seed=key_, sample_shape=(num)
     )  # [N]
     num_goals = timestep.observation.task_w.shape[-1]
     goals = jax.nn.one_hot(goals, num_classes=num_goals)  # [N, G]
@@ -1951,7 +1930,7 @@ def make_train_jaxmaze_multigoal(**kwargs):
     )  # [num_offtask_simulations-1]
     return jnp.concatenate((jnp.array([0.0]), epsilons))  # [num_offtask_simulations]
 
-  def sample_nontask_visible_goals(timestep, key, num_offtask_goals):
+  def sample_nontask_visible_goals(timestep, key, num):
     """Sample goals from nearby non-task objects.
 
     Args:
@@ -1971,7 +1950,7 @@ def make_train_jaxmaze_multigoal(**kwargs):
     probabilities = achievable_ / achievable_.sum(-1)  # [G]
     key, key_ = jax.random.split(key)
     goals = distrax.Categorical(probs=probabilities).sample(
-      seed=key_, sample_shape=(num_offtask_goals)
+      seed=key_, sample_shape=(num)
     )  # [N]
     num_classes = len(is_object_nearby)
     goals = jax.nn.one_hot(
@@ -1980,7 +1959,7 @@ def make_train_jaxmaze_multigoal(**kwargs):
     any_achievable = achievable.sum() > 0.1
     return goals, achievable, any_achievable
 
-  def sample_nontask_random_goals(timestep, key, num_offtask_goals):
+  def sample_random_goals(timestep, key, num):
     """Sample random off-task goals (known or from all_tasks pool).
 
     Args:
@@ -1992,18 +1971,13 @@ def make_train_jaxmaze_multigoal(**kwargs):
       achievable: [N] uniform achievability
       any_achievable: scalar bool
     """
-    if known_offtask_goal:
-      goals = timestep.state.offtask_w[0][None]  # [1, G]
-    else:
-      key, key_ = jax.random.split(key)
-      idxs = jax.random.choice(
-        key_, len(all_tasks), shape=(num_offtask_goals,), replace=False
-      )  # [N]
-      index_into_tasks = jax.vmap(
-        lambda i: jax.lax.dynamic_index_in_dim(all_tasks, i, keepdims=False)
-      )
-      goals = index_into_tasks(idxs)  # [N, G]
-      goals = goals.astype(timestep.state.offtask_w.dtype)
+    key, key_ = jax.random.split(key)
+    idxs = jax.random.choice(key_, len(all_tasks), shape=(num,), replace=False)  # [N]
+    index_into_tasks = jax.vmap(
+      lambda i: jax.lax.dynamic_index_in_dim(all_tasks, i, keepdims=False)
+    )
+    goals = index_into_tasks(idxs)  # [N, G]
+    goals = goals.astype(timestep.state.offtask_w.dtype)
     achievable = jnp.ones(len(goals))  # [N]
     any_achievable = achievable.sum() > 0.1
     return goals, achievable, any_achievable
@@ -2092,7 +2066,7 @@ def make_train_jaxmaze_multigoal(**kwargs):
       dyna_epsilon_values=dyna_epsilon_values,
       offtask_dyna_epsilon_values=offtask_dyna_epsilon_values,
       sample_preplay_goals=sample_nontask_visible_goals,
-      sample_td_goals=sample_nontask_random_goals,
+      sample_td_goals=sample_random_goals,
       compute_rewards=compute_rewards,
       get_main_goal=get_main_goal,
       make_init_goal_timestep=make_init_goal_timestep,

@@ -823,7 +823,7 @@ def make_train(**kwargs):
     epsilons = jax.random.choice(rng, vals, shape=(num_simulations - 1,))
     return jnp.concatenate((jnp.array([0.0]), epsilons))
 
-  make_agent = kwargs.pop("make_agent")
+  make_agent = kwargs.pop("make_agent", None)
   if make_agent is None:
     make_agent = partial(make_craftax_agent, model_env=kwargs.pop("model_env", None))
 
