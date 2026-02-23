@@ -1,9 +1,9 @@
 """
 
 TESTING:
-HYDRA_FULL_ERROR=1 \
 JAX_DISABLE_JIT=1 \
 JAX_DEBUG_NANS=True \
+HYDRA_FULL_ERROR=1 \
 RL_RESULTS_DIR=/tmp/rl_results \
 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue jaxmaze_trainer.py \
   app.debug=False \
@@ -514,7 +514,7 @@ def sweep(search: str = ""):
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [3]},
         "ALL_GOALS_COEFF": {"values": [0.0]},
-        "QHEAD_TYPE": {"values": ['duelling', 'dot']},
+        "QHEAD_TYPE": {"values": ['dot', 'duelling']},
         "OBS_INCLUDE_GOAL": {"values": [True, False]},
         "IGNORE_ONTASK_GOAL": {"values": [True, False]},
         "EVAL_EPSILON": {"values": [0]},
