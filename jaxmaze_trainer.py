@@ -513,15 +513,14 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [3]},
-        "ALL_GOALS_COEFF": {"values": [0.0]},
+        "ALL_GOALS_COEFF": {"values": [1.0]},
         "QHEAD_TYPE": {"values": ['dot', 'duelling']},
-        "OBS_INCLUDE_GOAL": {"values": [True, False]},
         "IGNORE_ONTASK_GOAL": {"values": [True, False]},
         "EVAL_EPSILON": {"values": [0]},
-        "env.exp": {"values": ["preplay_test_small"]},
+        "env.exp": {"values": ["preplay_test_big"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-test-5",
+      "group": "preplay-test-6-big-all-goals",
     }
   elif search == "preplay2":
     sweep_config = {
