@@ -625,7 +625,7 @@ class PreplayLossFn:
           loss_mask_b: [T] loss mask
           key: random key
         """
-        N = self.num_offtask_goals
+        N = self.num_offtask_goals * self.num_offtask_simulations
         goals, _, _ = self.sample_td_goals(timestep_b, key, N)
 
         # Extract rnn_out from online/target states (no RNN re-run)
@@ -774,10 +774,11 @@ class PreplayLossFn:
     )
 
     def apply_q_head(rnn_out, p, q_method, task):
-      """Apply Q-head to rnn outputs. 
+      """Apply Q-head to rnn outputs.
       rnn_out:[T, N, D],
-      task:   [N, G] 
+      task:   [N, G]
       output: [T, N, A]"""
+
       def q_head(hidden, goal):
         return self.network.apply(p, hidden, goal, method=q_method)
 
@@ -956,14 +957,22 @@ class PreplayLossFn:
       # === Combine ===
       denominator = (N_on + offtask_achievable.sum()).astype(jnp.float32)
       batch_td_error = (
-        self.ontask_loss_coeff * jnp.abs(ontask_td).sum(axis=1)
-        + self.offtask_loss_coeff * jnp.abs(off_td).sum(axis=1)
-      ) / 2*denominator
+        (
+          self.ontask_loss_coeff * jnp.abs(ontask_td).sum(axis=1)
+          + self.offtask_loss_coeff * jnp.abs(off_td).sum(axis=1)
+        )
+        / 2
+        * denominator
+      )
 
       batch_loss_mean = (
-        self.ontask_loss_coeff * ontask_loss.sum()
-        + self.offtask_loss_coeff * off_loss.sum()
-      ) / 2*denominator
+        (
+          self.ontask_loss_coeff * ontask_loss.sum()
+          + self.offtask_loss_coeff * off_loss.sum()
+        )
+        / 2
+        * denominator
+      )
 
       # Metrics
       metrics = {
@@ -1254,7 +1263,6 @@ class DynaAgentEnvModelMultigoalJaxMaze(nn.Module):
   main_q_head: nn.Module
   env: environment.Environment
   env_params: environment.EnvParams
-  ignore_ontask_goal: bool = False
 
   def setup(self):
     kernel_init = nn.initializers.variance_scaling(1.0, "fan_in", "normal", out_axis=0)
@@ -1274,7 +1282,7 @@ class DynaAgentEnvModelMultigoalJaxMaze(nn.Module):
 
   def apply_rnn(self, rnn_state, x: TimeStep, rng: jax.random.PRNGKey):
     embedding = self.observation_encoder(x.observation)
-    assert embedding.ndim in (1,2) # [D] or [B, D]
+    assert embedding.ndim in (1, 2)  # [D] or [B, D]
     rnn_in = vbb.RNNInput(obs=embedding, reset=x.first())
     rng, _rng = jax.random.split(rng)
     return self.rnn(rnn_state, rnn_in, _rng)
@@ -1312,18 +1320,16 @@ class DynaAgentEnvModelMultigoalJaxMaze(nn.Module):
     return predictions, new_rnn_state
 
   def main_task_q_fn(self, rnn_out, task):
-    assert task.ndim == rnn_out.ndim # [D] or [B, D]
+    assert task.ndim == rnn_out.ndim  # [D] or [B, D]
     assert task.ndim < 3
     q_head = self.main_q_head
     if task.ndim == 2:
       q_head = jax.vmap(q_head)
     task = self.task_fn(task)
-    if self.ignore_ontask_goal:
-      task = task * 0
     return q_head(rnn_out, task)
 
   def off_task_q_fn(self, rnn_out, task):
-    assert task.ndim == rnn_out.ndim # [D] or [B, D]
+    assert task.ndim == rnn_out.ndim  # [D] or [B, D]
     assert task.ndim < 3
     q_head = self.off_task_q_head
     if task.ndim == 2:
@@ -1515,7 +1521,6 @@ def make_jaxmaze_multigoal_agent(
     ),
     env=model_env,
     env_params=model_env_params,
-    ignore_ontask_goal=config.get("IGNORE_ONTASK_GOAL", False),
   )
 
   rng, _rng = jax.random.split(rng)
@@ -2198,7 +2203,7 @@ def jaxmaze_learner_log_extra(
         ax.legend(fontsize=10)
       ax.grid(True)
       ax.set_xticks(range(nT))
-      #ax.set_ylim(-0.1, 1.5)
+      # ax.set_ylim(-0.1, 1.5)
 
     # Row 1: Combined heatmap (task_vector + achievements)
     for ci, col_name in enumerate(col_names):

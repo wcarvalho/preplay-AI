@@ -328,9 +328,9 @@ def run_single(config: dict, save_path: str = None):
       ),
     )
   elif alg_name in ("dyna"):
-    import dyna_craftax
+    import dyna
 
-    train_fn = dyna_craftax.make_train(
+    train_fn = dyna.make_train(
       config=config,
       env=env,
       save_path=save_path,
@@ -338,7 +338,7 @@ def run_single(config: dict, save_path: str = None):
       test_env_params=test_env_params,
       ObserverCls=observer_class,
       initial_params=initial_params,
-      make_agent=dyna_craftax.make_jaxmaze_agent,
+      make_agent=dyna.make_jaxmaze_agent,
       make_logger=functools.partial(
         make_logger,
         render_fn=jaxmaze_render_fn,
@@ -514,7 +514,7 @@ def sweep(search: str = ""):
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [3]},
         "ALL_GOALS_COEFF": {"values": [1.0]},
-        "QHEAD_TYPE": {"values": ['dot', 'duelling']},
+        "QHEAD_TYPE": {"values": ["dot", "duelling"]},
         "IGNORE_ONTASK_GOAL": {"values": [True, False]},
         "EVAL_EPSILON": {"values": [0]},
         "env.exp": {"values": ["preplay_test_big"]},

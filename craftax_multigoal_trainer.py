@@ -72,7 +72,7 @@ from jaxneurorl.wrappers import TimestepWrapper
 import craftax_observer
 import networks
 import archive.alphazero_craftax as alphazero_craftax
-import dyna_craftax
+import dyna
 import multitask_preplay_craftax_v2
 import qlearning_craftax
 import qlearning_sf_aux_craftax
@@ -386,14 +386,12 @@ def run_single(config: dict, save_path: str = None):
       vmap_env=vmap_env,
     )
   elif config["ALG"] in ["dyna"]:
-    train_fn = dyna_craftax.make_train(
+    train_fn = dyna.make_train(
       config=config,
       save_path=save_path,
       env=vec_env,
       model_env=env,
-      make_logger=partial(
-        make_logger, learner_log_extra=dyna_craftax.learner_log_extra
-      ),
+      make_logger=partial(make_logger, learner_log_extra=dyna.learner_log_extra),
       train_env_params=env_params,
       test_env_params=test_env_params,
       ObserverCls=craftax_observer.Observer,
