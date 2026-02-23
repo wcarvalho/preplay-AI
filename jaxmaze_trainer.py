@@ -6,8 +6,8 @@ JAX_DISABLE_JIT=1 \
 JAX_DEBUG_NANS=True \
 RL_RESULTS_DIR=/tmp/rl_results \
 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue jaxmaze_trainer.py \
-  app.debug=True \
-  app.wandb=True \
+  app.debug=False \
+  app.wandb=False \
   app.search=preplay
 
 RUNNING ON SLURM:
@@ -512,16 +512,14 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [3]},
-        "ALL_GOALS_LAMBDA": {"values": [0.0]},
-        "LEARNER_EXTRA_LOG_PERIOD": {"values": [50]},
-        #"OBS_INCLUDE_GOAL": {"values": [True, False]},
+        "ALL_GOALS_COEFF": {"values": [0.0, 1.0]},
+        #"LEARNER_EXTRA_LOG_PERIOD": {"values": [50]},
+        "OBS_INCLUDE_GOAL": {"values": [True, False]},
         "EVAL_EPSILON": {"values": [0]},
-        "SIMPLE_PREPLAY": {"values": [True, False]},
-        "FAST_ENV": {"values": [False, False]},
-        "env.exp": {"values": ["preplay_test_big"]},
+        "env.exp": {"values": ["preplay_test_big", "preplay_test_small"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-test-2",
+      "group": "preplay-test-4",
     }
   elif search == "preplay2":
     sweep_config = {
@@ -604,7 +602,7 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["exp4"]},
       },
       "overrides": ["alg=ql", "rlenv=jaxmaze", "user=wilka"],
-      "group": "ql-final-rotations-2",
+      "group": "ql-final-epsilon-1",
     }
   elif search == "usfa-final":
     sweep_config = {

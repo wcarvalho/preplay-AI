@@ -880,7 +880,7 @@ class PreplayLossFn:
       all_eps = jnp.concatenate(
         (
           ontask_epsilon_values,
-          jnp.tile(offtask_epsilon_values, N_off),
+          jnp.tile(offtask_epsilon_values, G_off),
         )
       )  # [total_sims]
 
