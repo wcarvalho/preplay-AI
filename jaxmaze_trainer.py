@@ -375,6 +375,7 @@ def run_single(config: dict, save_path: str = None):
           extract_task_info=extract_task_info,
           get_task_name=get_task_name,
           render_fn=jaxmaze_render_fn,
+          image_keys=keys,
           sim_idx=0,
         ),
       ),
@@ -512,14 +513,15 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [3]},
-        "ALL_GOALS_COEFF": {"values": [0.0, 1.0]},
-        #"LEARNER_EXTRA_LOG_PERIOD": {"values": [50]},
+        "ALL_GOALS_COEFF": {"values": [0.0]},
+        "QHEAD_TYPE": {"values": ['duelling', 'dot']},
         "OBS_INCLUDE_GOAL": {"values": [True, False]},
+        "IGNORE_ONTASK_GOAL": {"values": [True, False]},
         "EVAL_EPSILON": {"values": [0]},
-        "env.exp": {"values": ["preplay_test_big", "preplay_test_small"]},
+        "env.exp": {"values": ["preplay_test_small"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-test-4",
+      "group": "preplay-test-5",
     }
   elif search == "preplay2":
     sweep_config = {
