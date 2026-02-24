@@ -3,6 +3,7 @@
 TESTING:
 JAX_DEBUG_NANS=True \
 JAX_DISABLE_JIT=1 \
+RL_RESULTS_DIR=/tmp/rl_results \
 HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue craftax_multigoal_trainer.py \
   app.parallel=none \
   app.debug=True \
@@ -71,11 +72,9 @@ from jaxneurorl.wrappers import TimestepWrapper
 
 import craftax_observer
 import networks
-import archive.alphazero_craftax as alphazero_craftax
 import dyna
-import multitask_preplay_craftax_v2
+import multitask_preplay
 import qlearning_craftax
-import qlearning_sf_aux_craftax
 import usfa_craftax as usfa
 import her
 import base_algorithm
@@ -398,14 +397,14 @@ def run_single(config: dict, save_path: str = None):
       vmap_env=vmap_env,
     )
   elif config["ALG"] in ["preplay"]:
-    train_fn = multitask_preplay_craftax_v2.make_train_craftax_multigoal(
+    train_fn = multitask_preplay.make_train_craftax_multigoal(
       config=config,
       save_path=save_path,
       env=vec_env,
       model_env=env,
       make_logger=partial(
         make_logger,
-        learner_log_extra=multitask_preplay_craftax_v2.learner_log_extra,
+        #learner_log_extra=multitask_preplay.learner_log_extra,
       ),
       train_env_params=env_params,
       test_env_params=test_env_params,

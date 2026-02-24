@@ -3,6 +3,7 @@
 TESTING:
 JAX_DISABLE_JIT=1 \
 JAX_DEBUG_NANS=True \
+RL_RESULTS_DIR=/tmp/rl_results \
 HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue craftax_trainer.py \
   app.parallel=none \
   app.debug=True \
@@ -78,7 +79,7 @@ import networks
 import archive.alphazero_craftax as alphazero_craftax
 import dyna
 import her
-import multitask_preplay_craftax_v2
+import multitask_preplay
 import qlearning_craftax
 import qlearning_sf_aux_craftax
 import usfa_craftax as usfa
@@ -538,7 +539,7 @@ def run_single(config: dict, save_path: str = None):
       vmap_env=vmap_env,
     )
   elif config["ALG"] in ["preplay"]:
-    train_fn = multitask_preplay_craftax_v2.make_train_craftax_singlegoal(
+    train_fn = multitask_preplay.make_train_craftax_singlegoal(
       config=config,
       save_path=save_path,
       online_trajectory_log_fn=default_craftax_log_fn,
@@ -546,7 +547,7 @@ def run_single(config: dict, save_path: str = None):
       model_env=env,
       make_logger=partial(
         make_logger,
-        learner_log_extra=multitask_preplay_craftax_v2.learner_log_extra,
+        #learner_log_extra=multitask_preplay.learner_log_extra,
       ),
       train_env_params=env_params,
       test_env_params=test_env_params,
@@ -712,7 +713,7 @@ def sweep(search: str = ""):
         "COMBINE_REAL_SIM": {"values": [True, False]},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "preplay-combine-1",
+      "group": "preplay-combine-2",
     }
   elif search == "dyna":
     sweep_config = {

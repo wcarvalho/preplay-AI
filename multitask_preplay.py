@@ -627,27 +627,32 @@ class PreplayLossFn:
         """
 
         if self.all_goals_rnn:
-          place_goal_in_timestep = jax.vmap(self.place_goal_in_timestep, (None, 0), 0)
-          place_goal_in_timestep = jax.vmap(place_goal_in_timestep, (0, None), 0)
-            # [T, N, G] <- [T, D], [N, G]
-          timestep = place_goal_in_timestep(timestep, new_goal)
-          
           N = new_goal.shape[0]
           def add_goal_dim(x, axis):
             def add_goal_dim_(y):
               return jnp.broadcast_to(
-                  jnp.expand_dims(y, axis=axis), y.shape[:axis] + (N,) + y.shape[axis:])
+                jnp.expand_dims(y, axis=axis), y.shape[:axis] + (N,) + y.shape[axis:]
+              )
             return jax.tree_util.tree_map(add_goal_dim_, x)
 
-          unroll = functools.partial(self.network.apply, method=self.network.unroll)
+          if self.place_goal_in_timestep:
+            place_goal_in_timestep = jax.vmap(self.place_goal_in_timestep, (None, 0), 0)
+            place_goal_in_timestep = jax.vmap(place_goal_in_timestep, (0, None), 0)
+            # [T, N, D] <- [T, D], [N, G]
+            timestep = place_goal_in_timestep(timestep, new_goal)
+          else:
+            # [T, N, D] <- [T, D]
+            timestep = add_goal_dim(timestep, 1)
+
           actions = add_goal_dim(actions, 1)  # [T, A] --> [T, N, A]
           online_h = add_goal_dim(online_h, 0)  # [D] --> [N, D]
           target_h = add_goal_dim(target_h, 0)  # [D] --> [N, D]
+
+          unroll = functools.partial(self.network.apply, method=self.network.unroll)
           key_grad, rng_1, rng_2 = jax.random.split(key_grad, 3)
-          online_preds_g, _ = unroll(
-              params, online_h, timestep, rng_1)
-          target_preds_g, _ = unroll(
-              target_params, target_h, timestep, rng_2)
+          online_preds_g, _ = unroll(params, online_h, timestep, rng_1)
+          target_preds_g, _ = unroll(target_params, target_h, timestep, rng_2)
+
         else:
           length = actions.shape[0]
           expand = lambda x: jnp.tile(x[None], [length, 1])
@@ -703,16 +708,16 @@ class PreplayLossFn:
       key_grad, key_grad_ = jax.random.split(key_grad)
       key_grad_ = jax.random.split(key_grad_, B)
 
-      # _, [B, N], _, [B, T, N] 
+      # _, [B, N], _, [B, T, N]
       _, all_goals_batch_loss, all_goals_metrics, all_goals_log_info = all_goals_loss(
-        all_goals,           # [B, N, G]
-        data.timestep,       # [T, B, ...]
-        data.action,         # [T, B]
-        online_preds,        # [T, B, ...]
-        target_preds,        # [T, B, ...]
-        online_state,        # [B, D]
-        target_state,        # [B, D]
-        key_grad_,           # [B]
+        all_goals,  # [B, N, G]
+        data.timestep,  # [T, B, ...]
+        data.action,  # [T, B]
+        online_preds,  # [T, B, ...]
+        target_preds,  # [T, B, ...]
+        online_state,  # [B, D]
+        target_state,  # [B, D]
+        key_grad_,  # [B]
       )
       # Take first goal: [B, N, ...] -> [B, ...]
       all_log_info["all_goals"] = jax.tree_util.tree_map(
@@ -1160,12 +1165,22 @@ class DynaAgentEnvModel(nn.Module):
     return predictions, new_rnn_state
 
   def main_task_q_fn(self, rnn_out, task):
+    assert task.ndim == rnn_out.ndim  # [D] or [B, D]
+    assert task.ndim < 3
+    q_head = self.main_q_head
+    if task.ndim == 2:
+      q_head = jax.vmap(q_head)
     task = self.task_fn(task)
-    return self.main_q_head(rnn_out, task)
+    return q_head(rnn_out, task)
 
   def off_task_q_fn(self, rnn_out, task):
+    assert task.ndim == rnn_out.ndim  # [D] or [B, D]
+    assert task.ndim < 3
+    q_head = self.off_task_q_head
+    if task.ndim == 2:
+      q_head = jax.vmap(q_head)
     task = self.task_fn(task)
-    return self.off_task_q_head(rnn_out, task)
+    return q_head(rnn_out, task)
 
   def unroll(
     self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey
@@ -1177,7 +1192,10 @@ class DynaAgentEnvModel(nn.Module):
 
     task = jnp.zeros_like(xs.observation.achievements)
     rnn_out = self.rnn.output_from_state(new_rnn_states)
-    q_vals = nn.BatchApply(self.main_task_q_fn)(rnn_out, task)
+    if embedding.ndim == 3:
+      q_vals = jax.vmap(self.main_task_q_fn)(rnn_out, task)
+    else:
+      q_vals = self.main_task_q_fn(rnn_out, task)
     predictions = Predictions(q_vals=q_vals, state=new_rnn_states)
     return predictions, new_rnn_state
 
@@ -1232,8 +1250,13 @@ class DynaAgentEnvModelMultigoal(nn.Module):
     return predictions, new_rnn_state
 
   def main_task_q_fn(self, rnn_out, task):
+    assert task.ndim == rnn_out.ndim  # [D] or [B, D]
+    assert task.ndim < 3
+    q_head = self.main_q_head
+    if task.ndim == 2:
+      q_head = jax.vmap(q_head)
     task = self.task_fn(task)
-    return self.main_q_head(rnn_out, task)
+    return q_head(rnn_out, task)
 
   def off_task_q_fn(self, rnn_out, task):
     return self.main_task_q_fn(rnn_out, task)
@@ -1248,7 +1271,10 @@ class DynaAgentEnvModelMultigoal(nn.Module):
 
     dummy_task = jnp.zeros_like(xs.observation.state_features)
     rnn_out = self.rnn.output_from_state(new_rnn_states)
-    q_vals = nn.BatchApply(self.main_task_q_fn)(rnn_out, dummy_task)
+    if embedding.ndim == 3:
+      q_vals = jax.vmap(self.main_task_q_fn)(rnn_out, dummy_task)
+    else:
+      q_vals = self.main_task_q_fn(rnn_out, dummy_task)
     predictions = Predictions(q_vals=q_vals, state=new_rnn_states)
     return predictions, new_rnn_state
 
@@ -1620,7 +1646,9 @@ def make_train_craftax_singlegoal(**kwargs):
     goals = jax.nn.one_hot(goals, num_classes=num_classes)  # [N, G]
     return goals, achievable, any_achievable
 
-  def sample_random_goals(timestep, key, num):
+  num_random_goals = num_offtask_simulations * config["NUM_OFFTASK_GOALS"]
+
+  def sample_random_goals(timestep, key):
     """Sample uniformly random goals.
 
     Args:
@@ -1634,7 +1662,9 @@ def make_train_craftax_singlegoal(**kwargs):
     """
     num_classes = timestep.observation.achievable.shape[-1]
     key, key_ = jax.random.split(key)
-    goals = jax.random.randint(key_, shape=(num,), minval=0, maxval=num_classes)  # [N]
+    goals = jax.random.randint(
+      key_, shape=(num_random_goals,), minval=0, maxval=num_classes
+    )  # [N]
     goals = jax.nn.one_hot(goals, num_classes=num_classes)  # [N, G]
     achievable = jnp.ones(num_classes) / num_classes  # [G]
     any_achievable = jnp.bool_(True)
@@ -1936,6 +1966,19 @@ def make_train_craftax_multigoal(**kwargs):
     new_observation = timestep.observation.replace(task_w=goal)
     return timestep.replace(state=new_state, observation=new_observation)
 
+  def make_log_extras(timestep, goal=None):
+    """Env-specific: extract goal reward, task vector, achievements from timestep."""
+    state_features = timestep.observation.state_features.astype(jnp.float32)
+    task_w = timestep.observation.task_w.astype(jnp.float32)
+    goal_vec = goal if goal is not None else task_w
+    goal_vec = jnp.broadcast_to(goal_vec, state_features.shape)
+    goal_reward = (goal_vec * state_features).sum(-1)
+    return {
+      "goal_reward": goal_reward,
+      "goal_task_vector": goal_vec,
+      "goal_achievements": state_features,
+    }
+
   return vbb.make_train(
     make_agent=partial(make_craftax_multigoal_agent, model_env=kwargs.pop("model_env")),
     make_loss_fn_class=functools.partial(
@@ -1947,6 +1990,7 @@ def make_train_craftax_multigoal(**kwargs):
       compute_rewards=compute_rewards,
       get_main_goal=get_main_goal,
       place_goal_in_timestep=place_goal_in_timestep,
+      make_log_extras=make_log_extras,
     ),
     make_optimizer=base_agent.make_optimizer,
     make_actor=make_actor,
