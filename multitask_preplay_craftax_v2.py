@@ -566,11 +566,11 @@ class DynaLossFn(vbb.RecurrentLossFn):
         timestep_b, action_b, h_on_b, h_tar_b, loss_mask_b, key
       ):
         # timestep_b: [T, ...], action_b: [T], h_on_b/h_tar_b: tree of [...], loss_mask_b: [T]
-        N = self.num_offtask_goals
 
-        # Sample goals from achievable set
-        # goals: [N, G]
-        goals, _, _ = self.sample_td_goals(timestep_b, key, N)
+        # Get all goals as one-hot matrix
+        # goals: [N, G] where N = number of goals
+        goals, _, _ = self.sample_td_goals(timestep_b, key)
+        N = goals.shape[0]
 
         # Repeat RNN states for N goals
         h_tm1_online_repeated = repeat(h_on_b, N)  # [N, D]
@@ -2133,23 +2133,21 @@ def make_train_craftax_multigoal(**kwargs):
     any_achievable = achievable.sum() > 0.1
     return goals, achievable, any_achievable
 
-  def sample_nontask_random_goals(timestep, key, num_offtask_goals):
-    # [T, G] --> [G]
-    current_goal = timestep.observation.task_w[0]
-    other_goals = 1.0 - current_goal
-    other_goal_probs = other_goals / other_goals.sum()
+  def sample_all_tasks(timestep, key):
+    """Return all tasks as one-hot identity matrix.
 
-    achievable = jnp.ones_like(other_goal_probs)
-    any_achievable = achievable.sum() > 0.1
-
-    key, key_ = jax.random.split(key)
-    goals = distrax.Categorical(probs=other_goal_probs).sample(
-      seed=key_, sample_shape=(num_offtask_goals)
-    )
-
-    # [num_offtask_goals, G]
+    Args:
+      timestep: single timestep (no batch/time dims), task_w is [T, G]
+      key: random key (unused)
+    Returns:
+      goals: [G, G] identity matrix (all one-hot goal vectors)
+      achievable: [G] uniform achievability
+      any_achievable: scalar bool
+    """
     num_goals = timestep.observation.task_w.shape[-1]
-    goals = jax.nn.one_hot(goals, num_classes=num_goals)
+    goals = jnp.eye(num_goals)  # [G, G] identity = all one-hots
+    achievable = jnp.ones(num_goals)
+    any_achievable = jnp.bool_(True)
     return goals, achievable, any_achievable
 
   def compute_rewards(timesteps, goal_onehot):
@@ -2189,7 +2187,7 @@ def make_train_craftax_multigoal(**kwargs):
       dyna_policy=dyna_policy,
       offtask_dyna_policy=offtask_dyna_policy,
       sample_preplay_goals=sample_nontask_visible_goals,
-      sample_td_goals=sample_nontask_random_goals,
+      sample_td_goals=sample_all_tasks,
       compute_rewards=compute_rewards,
       get_main_goal=get_main_goal,
       make_init_goal_timestep=make_init_goal_timestep,
@@ -2445,22 +2443,20 @@ def make_train_jaxmaze_multigoal(**kwargs):
     any_achievable = achievable.sum() > 0.1
     return goals, achievable, any_achievable
 
-  def sample_nontask_random_goals(timestep, key, num_offtask_goals):
-    if known_offtask_goal:
-      # first time-step, 1 goal
-      goals = timestep.state.offtask_w[0][None]  # [1, G]
-    else:
-      key, key_ = jax.random.split(key)
-      idxs = jax.random.choice(
-        key_, len(all_tasks), shape=(num_offtask_goals,), replace=False
-      )
-      goals = jax.vmap(
-        lambda i: jax.lax.dynamic_index_in_dim(all_tasks, i, keepdims=False)
-      )(idxs)
-      goals = goals.astype(timestep.state.offtask_w.dtype)  # [N, G]
-    achievable = jnp.ones(len(goals))
-    any_achievable = achievable.sum() > 0.1
+  def sample_all_tasks(timestep, key):
+    """Return all tasks directly.
 
+    Args:
+      timestep: single timestep (no batch/time dims)
+      key: random key (unused)
+    Returns:
+      goals: [G, G] all task vectors
+      achievable: [G] uniform achievability
+      any_achievable: scalar bool
+    """
+    goals = all_tasks.astype(timestep.state.offtask_w.dtype)
+    achievable = jnp.ones(len(goals))
+    any_achievable = jnp.bool_(True)
     return goals, achievable, any_achievable
 
   def compute_rewards(timesteps, goal_onehot):
@@ -2509,7 +2505,7 @@ def make_train_jaxmaze_multigoal(**kwargs):
       dyna_policy=dyna_policy,
       offtask_dyna_policy=offtask_dyna_policy,
       sample_preplay_goals=sample_nontask_visible_goals,
-      sample_td_goals=sample_nontask_random_goals,
+      sample_td_goals=sample_all_tasks,
       compute_rewards=compute_rewards,
       get_main_goal=get_main_goal,
       make_init_goal_timestep=make_init_goal_timestep,
