@@ -436,6 +436,7 @@ class PreplayLossFn:
   get_main_goal: Callable = None
   place_goal_in_timestep: Callable = None
   make_log_extras: Callable = None
+  all_goals_rnn: bool = True
 
   def __call__(
     self,
@@ -611,6 +612,9 @@ class PreplayLossFn:
         actions,
         online_preds,
         target_preds,
+        online_h,
+        target_h,
+        key_grad,
       ):
         """Off-task Q-learning loss for a single goal.
 
@@ -621,20 +625,32 @@ class PreplayLossFn:
           online_preds: Predictions with state [T, ...]
           target_preds: Predictions with state [T, ...]
         """
-        length = actions.shape[0]
-        expand = lambda x: jnp.tile(x[None], [length, 1])
-        expanded_goal = jax.tree_util.tree_map(expand, new_goal)
 
-        apply_q = functools.partial(
-          self.network.apply, method=self.network.off_task_q_fn
-        )
-        rnn_out_online = rnn_output_from_state(online_preds.state)
-        rnn_out_target = rnn_output_from_state(target_preds.state)
-        online_q = apply_q(params, rnn_out_online, expanded_goal)
-        target_q = apply_q(target_params, rnn_out_target, expanded_goal)
+        if self.all_goals_rnn:
+          timestep = jax.vmap(
+            self.place_goal_in_timestep, (0, None))(timestep, new_goal)
+          unroll = functools.partial(
+              self.network.apply, method=self.network.unroll)
+          key_grad, rng_1, rng_2 = jax.random.split(key_grad, 3)
+          online_preds_g, _ = unroll(
+              params, online_h, timestep, rng_1)
+          target_preds_g, _ = unroll(
+              target_params, target_h, timestep, rng_2)
+        else:
+          length = actions.shape[0]
+          expand = lambda x: jnp.tile(x[None], [length, 1])
+          expanded_goal = jax.tree_util.tree_map(expand, new_goal)
 
-        online_preds_g = Predictions(q_vals=online_q, state=None)
-        target_preds_g = Predictions(q_vals=target_q, state=None)
+          apply_q = functools.partial(
+            self.network.apply, method=self.network.off_task_q_fn
+          )
+          rnn_out_online = rnn_output_from_state(online_preds.state)
+          rnn_out_target = rnn_output_from_state(target_preds.state)
+          online_q = apply_q(params, rnn_out_online, expanded_goal)
+          target_q = apply_q(target_params, rnn_out_target, expanded_goal)
+
+          online_preds_g = Predictions(q_vals=online_q, state=None)
+          target_preds_g = Predictions(q_vals=target_q, state=None)
 
         goal_rewards = self.compute_rewards(timestep, new_goal)
 
@@ -674,14 +690,19 @@ class PreplayLossFn:
 
       # Pass per-timestep RNN states (not initial state)
       # online_preds.state has shape [T, B, ...], target_preds.state likewise
-      all_goals_fn = jax.vmap(all_goals_loss_single, (0, None, None, None, None), 0)
-      all_goals_fn = jax.vmap(all_goals_fn, 1, 0)
+      all_goals_fn = jax.vmap(
+        all_goals_loss_single, (0, None, None, None, None, None, None, None), 0)
+      all_goals_fn = jax.vmap(all_goals_fn, (1, 1, 1, 1, 1, 0, 0, 0), 0)
+      key_grad, key_grad_ = jax.random.split(key_grad)
       _, all_goals_batch_loss, all_goals_metrics, all_goals_log_info = all_goals_fn(
         all_goals,
         data.timestep,
         data.action,
         online_preds,
         target_preds,
+        online_state,
+        target_state,
+        jax.random.split(key_grad_, B),
       )
       # Take first goal: [B, N, ...] -> [B, ...]
       all_log_info["all_goals"] = jax.tree_util.tree_map(
@@ -1078,6 +1099,7 @@ def make_loss_fn_class(config, **kwargs) -> PreplayLossFn:
     online_task_coeff=config.get("MAINQ_COEFF", 1.0),
     all_goals_coeff=config.get("ALL_GOALS_COEFF", 1.0),
     all_goals_lambda=config.get("ALL_GOALS_LAMBDA", 0.6),
+    all_goals_rnn=config.get("ALL_GOALS_RNN", True),
     **kwargs,
   )
 
@@ -1309,13 +1331,17 @@ class DynaAgentEnvModelMultigoalJaxMaze(nn.Module):
     dropout_keys = jax.random.split(dropout_rng, T)
     obs = jax.vmap(self._maybe_dropout_task)(xs.observation, dropout_keys)
     embedding = jax.vmap(self.observation_encoder)(obs)
-    assert embedding.ndim == 3
+    assert embedding.ndim in (2, 3)
+
     rnn_in = vbb.RNNInput(obs=embedding, reset=xs.first())
     new_rnn_state, new_rnn_states = self.rnn.unroll(rnn_state, rnn_in, rnn_rng)
-
     task = xs.observation.task_w
     rnn_out = self.rnn.output_from_state(new_rnn_states)
-    q_vals = jax.vmap(self.main_task_q_fn)(rnn_out, task)
+
+    if embedding.ndim == 3:
+      q_vals = jax.vmap(self.main_task_q_fn)(rnn_out, task)
+    else:
+      q_vals = self.main_task_q_fn(rnn_out, task)
     predictions = Predictions(q_vals=q_vals, state=new_rnn_states)
     return predictions, new_rnn_state
 
