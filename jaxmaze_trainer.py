@@ -6,7 +6,7 @@ JAX_DEBUG_NANS=True \
 HYDRA_FULL_ERROR=1 \
 RL_RESULTS_DIR=/tmp/rl_results \
 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue jaxmaze_trainer.py \
-  app.debug=False \
+  app.debug=True \
   app.wandb=False \
   app.search=preplay
 
