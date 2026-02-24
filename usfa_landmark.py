@@ -284,6 +284,7 @@ class UsfaAgent(nn.Module):
   observation_encoder: nn.Module
   rnn: vbb.ScannedRNN
   sf_head: SfGpiHead
+  train_tasks: jnp.ndarray
   learn_tasks: jnp.ndarray
   learn_z_vectors: str
 
@@ -305,8 +306,8 @@ class UsfaAgent(nn.Module):
     new_rnn_state, rnn_out = self.rnn(rnn_state, rnn_in, _rng)
 
     if evaluate:
-      predictions = jax.vmap(self.sf_head.evaluate)(
-        rnn_out, x.observation.task_w, x.observation.train_tasks
+      predictions = jax.vmap(self.sf_head.evaluate, (0,0,None))(
+        rnn_out, x.observation.task_w, self.train_tasks
       )
     else:
       B = rnn_out.shape[0]
@@ -389,6 +390,7 @@ def make_agent(
     observation_encoder=observation_encoder,
     rnn=vbb.ScannedRNN(hidden_dim=config["AGENT_RNN_DIM"]),
     sf_head=sf_head,
+    train_tasks=train_tasks,
     learn_tasks=all_tasks,
     learn_z_vectors=config.get("LEARN_VECTORS", "ALL_TASKS"),
   )

@@ -422,7 +422,6 @@ class PreplayLossFn:
   all_goals_coeff: float = 1.0
   all_goals_lambda: float = 0.3
   num_offtask_goals: int = 5
-  num_td_goals: int = 3
   offtask_loss_coeff: float = 1.0
   ontask_loss_coeff: float = 1.0
   simulation_task_coeff: float = 1.0
@@ -545,8 +544,6 @@ class PreplayLossFn:
       "0.q_loss": batch_loss.mean(),
       "0.q_td": jnp.abs(batch_td_error).mean(),
       "1.reward": rewards[1:].mean(),
-      "z.q_mean": online_preds.q_vals.mean(),
-      "z.q_var": online_preds.q_vals.var(),
     }
 
     log_info = {
@@ -591,7 +588,7 @@ class PreplayLossFn:
         non_terminal=data.timestep.discount,
         loss_mask=loss_mask,
       )
-      all_metrics.update({f"0.online{k}": v for k, v in metrics.items()})
+      all_metrics.update({f"0.online/{k}": v for k, v in metrics.items()})
       # Swap [T, B, ...] -> [B, T, ...] for consistent first-batch indexing
       swap = lambda x: jnp.swapaxes(x, 0, 1)
       all_log_info["online"] = jax.tree_util.tree_map(swap, log_info)
@@ -647,7 +644,7 @@ class PreplayLossFn:
           actions=actions,
           rewards=goal_rewards,
           is_last=make_float(timestep.last()),
-          non_terminal=timestep.discount,
+          non_terminal=jnp.ones_like(timestep.discount),
           loss_mask=is_truncated(timestep),
           lambda_override=self.all_goals_lambda,
         )
@@ -661,10 +658,11 @@ class PreplayLossFn:
 
       key_grad_ = jax.random.split(key_grad_, B + 1)
 
-      # GoalPosition with [N, B, D] and [N, B, 2]
+      # [N, B, G]
       all_goals, _, _ = jax.vmap(self.sample_td_goals, (1, 0), 0)(
         data.timestep, key_grad_[1:]
       )
+      # [B, N, G]
       all_goals = jnp.swapaxes(all_goals, 0, 1)
 
       # Pass per-timestep RNN states (not initial state)
@@ -680,7 +678,7 @@ class PreplayLossFn:
       )
       # Take first goal: [B, N, ...] -> [B, ...]
       all_log_info["all_goals"] = jax.tree_util.tree_map(
-        lambda x: x[:, 0], all_goals_log_info
+        lambda x: x[:, 2], all_goals_log_info
       )
       batch_loss += self.all_goals_coeff * all_goals_batch_loss.mean(1)
       all_metrics.update({f"2.all_goals/{k}": v for k, v in all_goals_metrics.items()})
@@ -897,11 +895,6 @@ class PreplayLossFn:
         loss_mask=all_t_loss_mask,
       )
 
-      # zero-out all losses/TD corresponding to empty goals
-      all_achievable = jnp.concatenate((jnp.ones(N_on), offtask_achievable))
-      ontask_td = all_achievable[None] * ontask_td
-      ontask_loss = all_achievable[None] * ontask_loss
-
       # === OFF-TASK GOAL LOSS (split: different goals + different rewards) ===
       # all_main_q_on: [sim_length+1, total_sims, A]
       offtask_q_on = apply_q_head(
@@ -913,6 +906,8 @@ class PreplayLossFn:
       )
 
       offtask_reward = self.compute_rewards(all_t, all_sim_goals)
+
+      # [T,N], [N]
       off_td, off_loss, offtask_metrics, off_log = self.loss_fn(
         timestep=all_t,
         online_preds=Predictions(offtask_q_on, None),
@@ -924,32 +919,36 @@ class PreplayLossFn:
         loss_mask=all_t_loss_mask,
       )
 
+      #--------------------
       # zero-out all TDs corresponding to empty goals
-      # [T, total_sim]
-      off_td = all_achievable[None] * off_td
-      off_loss = all_achievable[None] * off_loss
+      #--------------------
+      all_achievable = jnp.concatenate((jnp.ones(N_on), offtask_achievable))
+      denominator = 2*(N_on + offtask_achievable.sum()).astype(jnp.float32)
 
-      # === Combine ===
-      denominator = (N_on + offtask_achievable.sum()).astype(jnp.float32)
+      # [T, total_sim]
+      ontask_td = all_achievable[None] * ontask_td
+      off_td = all_achievable[None] * off_td
       batch_td_error = (
         (
           self.ontask_loss_coeff * jnp.abs(ontask_td).sum(axis=1)
           + self.offtask_loss_coeff * jnp.abs(off_td).sum(axis=1)
         )
-        / 2
-        * denominator
+        / denominator
       )
 
+      # [total_sim]
+      ontask_loss = all_achievable * ontask_loss
+      off_loss = all_achievable * off_loss
       batch_loss_mean = (
         (
           self.ontask_loss_coeff * ontask_loss.sum()
           + self.offtask_loss_coeff * off_loss.sum()
         )
-        / 2
-        * denominator
+        / denominator
       )
 
       # Metrics
+      offtask_metrics[f"all_achievable"] = all_achievable.mean()
       metrics = {
         **{f"{k}/offtask": v for k, v in offtask_metrics.items()},
         **{f"{k}/ontask": v for k, v in ontask_metrics.items()},
@@ -1078,7 +1077,6 @@ def make_loss_fn_class(config, **kwargs) -> PreplayLossFn:
     online_task_coeff=config.get("MAINQ_COEFF", 1.0),
     all_goals_coeff=config.get("ALL_GOALS_COEFF", 1.0),
     all_goals_lambda=config.get("ALL_GOALS_LAMBDA", 0.6),
-    num_td_goals=config.get("NUM_TD_GOALS", 3),
     **kwargs,
   )
 

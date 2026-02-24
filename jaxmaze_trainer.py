@@ -298,7 +298,7 @@ def run_single(config: dict, save_path: str = None):
       ),
     )
   elif alg_name == "usfa":
-    train_fn = vbb.make_train(
+    train_fn = usfa_jaxmaze.make_train(
       config=config,
       env=env,
       save_path=save_path,
@@ -512,13 +512,15 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["preplay"]},
-        "SEED": {"values": [3]},
-        "ALL_GOALS_COEFF": {"values": [1.0]},
-        "ALL_GOALS_LAMBDA": {"values": [.6, .7, .8]},
+        "SEED": {"values": [1]},
+        "ALL_GOALS_COEFF": {"values": [.1, .5, 1.]},
+        "ALL_GOALS_LAMBDA": {"values": [.7, .8, .9]},
+        "GAMMA": {"values": [.99]},
+        "LR": {"values": [0.0001]},
         "env.exp": {"values": ["preplay_test_big"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-test-7-big-all-goals",
+      "group": "preplay-test-10-big-all-goals-low",
     }
   elif search == "preplay2":
     sweep_config = {
@@ -614,7 +616,21 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["exp4"]},
       },
       "overrides": ["alg=usfa", "rlenv=jaxmaze", "user=wilka"],
-      "group": "usfa-final-rotations-2",
+      "group": "usfa-final-epsilon-1",
+    }
+  elif search == "her-final":
+    sweep_config = {
+      "metric": {
+        "name": "evaluator_performance/0.0 avg_episode_return",
+        "goal": "maximize",
+      },
+      "parameters": {
+        "ALG": {"values": ["dhera"]},
+        "SEED": {"values": list(range(1, 11))},
+        "env.exp": {"values": ["exp4"]},
+      },
+      "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
+      "group": "her-final-epsilon-1",
     }
   elif search == "dyna-final":
     sweep_config = {
@@ -628,7 +644,7 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["exp4"]},
       },
       "overrides": ["alg=dyna_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "dyna-final-rotations-4",
+      "group": "dyna-final-epsilon-1",
     }
   elif search == "preplay-final":
     sweep_config = {
@@ -638,14 +654,11 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["preplay"]},
-        "SEED": {"values": list(range(1))},
-        "NUM_STARTING_LOCS": {"values": [30, 40, 50]},
-        "GAMMA": {"values": [0.99, 0.992]},
-        "ADD_GREEDY_EPSILON": {"values": [True, False]},
+        "SEED": {"values": list(range(1, 11))},
         "env.exp": {"values": ["exp4"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-final-rotations-10",
+      "group": "preplay-final-epsilon-1",
     }
 
   elif search == "preplay-ablation":
