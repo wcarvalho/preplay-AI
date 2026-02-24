@@ -532,11 +532,11 @@ def sweep(search: str = ""):
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [2]},
         "ALL_GOALS_RNN": {"values": [True]},
-        "ALL_GOALS_LAMBDA": {"values": [0.0, 0.6, 0.7, .8, .9]},
-        "env.exp": {"values": ["preplay_test_big"]},
+        #"ALL_GOALS_LAMBDA": {"values": [0.0, 0.6, 0.7, .8, .9]},
+        "env.exp": {"values": ["preplay_test_small", "preplay_test_big"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-test-13-all-goals-rnn",
+      "group": "preplay-test-14-all-goals-rnn",
     }
 
   elif search == "her":
