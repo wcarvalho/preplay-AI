@@ -606,7 +606,7 @@ class PreplayLossFn:
     # ---- All-goals loss (reusing RNN outputs) ----
     if self.all_goals_coeff > 0.0:
 
-      def all_goals_loss_single(
+      def all_goals_loss(
         new_goal,
         timestep,
         actions,
@@ -619,7 +619,7 @@ class PreplayLossFn:
         """Off-task Q-learning loss for a single goal.
 
         Args:
-          new_goal: goal with scalar fields [G]
+          new_goal: goal with scalar fields [N, G]
           timestep: [T, ...] timestep sequence
           actions: [T] actions
           online_preds: Predictions with state [T, ...]
@@ -627,10 +627,22 @@ class PreplayLossFn:
         """
 
         if self.all_goals_rnn:
-          timestep = jax.vmap(
-            self.place_goal_in_timestep, (0, None))(timestep, new_goal)
-          unroll = functools.partial(
-              self.network.apply, method=self.network.unroll)
+          place_goal_in_timestep = jax.vmap(self.place_goal_in_timestep, (None, 0), 0)
+          place_goal_in_timestep = jax.vmap(place_goal_in_timestep, (0, None), 0)
+            # [T, N, G] <- [T, D], [N, G]
+          timestep = place_goal_in_timestep(timestep, new_goal)
+          
+          N = new_goal.shape[0]
+          def add_goal_dim(x, axis):
+            def add_goal_dim_(y):
+              return jnp.broadcast_to(
+                  jnp.expand_dims(y, axis=axis), y.shape[:axis] + (N,) + y.shape[axis:])
+            return jax.tree_util.tree_map(add_goal_dim_, x)
+
+          unroll = functools.partial(self.network.apply, method=self.network.unroll)
+          actions = add_goal_dim(actions, 1)  # [T, A] --> [T, N, A]
+          online_h = add_goal_dim(online_h, 0)  # [D] --> [N, D]
+          target_h = add_goal_dim(target_h, 0)  # [D] --> [N, D]
           key_grad, rng_1, rng_2 = jax.random.split(key_grad, 3)
           online_preds_g, _ = unroll(
               params, online_h, timestep, rng_1)
@@ -685,29 +697,28 @@ class PreplayLossFn:
       all_goals, _, _ = jax.vmap(self.sample_td_goals, (1, 0), 0)(
         data.timestep, key_grad_[1:]
       )
-      # [B, N, G] --> [N, B, G]
-      all_goals = jnp.swapaxes(all_goals, 0, 1)
 
       # Pass per-timestep RNN states (not initial state)
-      # online_preds.state has shape [T, B, ...], target_preds.state likewise
-      all_goals_fn = jax.vmap(
-        all_goals_loss_single, (0, None, None, None, None, None, None, None), 0)
-      all_goals_fn = jax.vmap(all_goals_fn, (1, 1, 1, 1, 1, 0, 0, 0), 0)
+      all_goals_loss = jax.vmap(all_goals_loss, (0, 1, 1, 1, 1, 0, 0, 0), 0)
       key_grad, key_grad_ = jax.random.split(key_grad)
-      _, all_goals_batch_loss, all_goals_metrics, all_goals_log_info = all_goals_fn(
-        all_goals,
-        data.timestep,
-        data.action,
-        online_preds,
-        target_preds,
-        online_state,
-        target_state,
-        jax.random.split(key_grad_, B),
+      key_grad_ = jax.random.split(key_grad_, B)
+
+      # _, [B, N], _, [B, T, N] 
+      _, all_goals_batch_loss, all_goals_metrics, all_goals_log_info = all_goals_loss(
+        all_goals,           # [B, N, G]
+        data.timestep,       # [T, B, ...]
+        data.action,         # [T, B]
+        online_preds,        # [T, B, ...]
+        target_preds,        # [T, B, ...]
+        online_state,        # [B, D]
+        target_state,        # [B, D]
+        key_grad_,           # [B]
       )
       # Take first goal: [B, N, ...] -> [B, ...]
       all_log_info["all_goals"] = jax.tree_util.tree_map(
-        lambda x: x[:, 2], all_goals_log_info
+        lambda x: x[:, :, 2], all_goals_log_info
       )
+
       batch_loss += self.all_goals_coeff * all_goals_batch_loss.mean(1)
       all_metrics.update({f"2.all_goals/{k}": v for k, v in all_goals_metrics.items()})
 
@@ -2193,7 +2204,7 @@ def jaxmaze_learner_log_extra(
       q_values_taken = rlax.batched_index(q_values, actions)
       ax.plot(q_values_taken, label="Q-Values")
       ax.plot(q_target, label="Q-Targets")
-      ax.set_title(f"{col_name} — Rewards and Q-Values", fontsize=13.5)
+      ax.set_title(f"{col_name} - Q-Values", fontsize=13.5)
       if ci == 0:
         ax.legend(fontsize=10)
       ax.grid(True)
