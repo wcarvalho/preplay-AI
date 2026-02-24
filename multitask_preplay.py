@@ -550,6 +550,7 @@ class PreplayLossFn:
       "timesteps": timestep,
       "actions": actions,
       "td_errors": batch_td_error,
+      "non_terminal": non_terminal,
       "loss_mask": loss_mask,
       "q_values": online_preds.q_vals,
       "q_loss": batch_loss,
@@ -637,13 +638,19 @@ class PreplayLossFn:
 
         goal_rewards = self.compute_rewards(timestep, new_goal)
 
+        # NOTE: for all goals, this isn't meant to give a new learning signal
+        # it's just meant to propogate the knowledge already learned by the model
+        # therefore, you want to avoid adding extra signal
+        # for example, we normally force terminal to have a target of 0.
+        # since we're off-task and reusing data for a new task, we don't know this
+        # so should make non_terminal jnp.ones_like(timestep.discount)
         ag_td_error, ag_batch_loss, ag_metrics, ag_log_info = self.loss_fn(
           timestep=timestep,
           online_preds=online_preds_g,
           target_preds=target_preds_g,
           actions=actions,
           rewards=goal_rewards,
-          is_last=make_float(timestep.last()),
+          is_last=jnp.zeros_like(timestep.last()),
           non_terminal=jnp.ones_like(timestep.discount),
           loss_mask=is_truncated(timestep),
           lambda_override=self.all_goals_lambda,
@@ -919,33 +926,27 @@ class PreplayLossFn:
         loss_mask=all_t_loss_mask,
       )
 
-      #--------------------
+      # --------------------
       # zero-out all TDs corresponding to empty goals
-      #--------------------
+      # --------------------
       all_achievable = jnp.concatenate((jnp.ones(N_on), offtask_achievable))
-      denominator = 2*(N_on + offtask_achievable.sum()).astype(jnp.float32)
+      denominator = 2 * (N_on + offtask_achievable.sum()).astype(jnp.float32)
 
       # [T, total_sim]
       ontask_td = all_achievable[None] * ontask_td
       off_td = all_achievable[None] * off_td
       batch_td_error = (
-        (
-          self.ontask_loss_coeff * jnp.abs(ontask_td).sum(axis=1)
-          + self.offtask_loss_coeff * jnp.abs(off_td).sum(axis=1)
-        )
-        / denominator
-      )
+        self.ontask_loss_coeff * jnp.abs(ontask_td).sum(axis=1)
+        + self.offtask_loss_coeff * jnp.abs(off_td).sum(axis=1)
+      ) / denominator
 
       # [total_sim]
       ontask_loss = all_achievable * ontask_loss
       off_loss = all_achievable * off_loss
       batch_loss_mean = (
-        (
-          self.ontask_loss_coeff * ontask_loss.sum()
-          + self.offtask_loss_coeff * off_loss.sum()
-        )
-        / denominator
-      )
+        self.ontask_loss_coeff * ontask_loss.sum()
+        + self.offtask_loss_coeff * off_loss.sum()
+      ) / denominator
 
       # Metrics
       offtask_metrics[f"all_achievable"] = all_achievable.mean()
@@ -2112,8 +2113,8 @@ def jaxmaze_learner_log_extra(
     n_episodes = len(episode_ranges)
     n_traj_rows = ceil(n_episodes / n_cols)
 
-    # Layout: 2 data rows + n_traj_rows trajectory rows
-    n_rows = 2 + n_traj_rows
+    # Layout: 3 data rows + n_traj_rows trajectory rows
+    n_rows = 3 + n_traj_rows
     fig, axes = plt.subplots(
       n_rows,
       n_cols,
@@ -2140,14 +2141,6 @@ def jaxmaze_learner_log_extra(
       q_values_taken = rlax.batched_index(q_values, actions)
       ax.plot(q_values_taken, label="Q-Values")
       ax.plot(q_target, label="Q-Targets")
-      if loss_mask is not None:
-        mask_diff = np.diff(np.concatenate([[0], loss_mask, [0]]))
-        starts = np.where(mask_diff == 1)[0]
-        ends = np.where(mask_diff == -1)[0] - 1
-        for s in starts:
-          ax.axvline(s - 0.5, color="red", linestyle="-", linewidth=1.5)
-        for e in ends:
-          ax.axvline(e + 0.5, color="red", linestyle="-", linewidth=1.5)
       ax.set_title(f"{col_name} — Rewards and Q-Values", fontsize=13.5)
       if ci == 0:
         ax.legend(fontsize=10)
@@ -2192,9 +2185,28 @@ def jaxmaze_learner_log_extra(
       else:
         ax.set_visible(False)
 
-    # Rows 2+: Trajectory renders with arrows
+    # Row 2: Episode markers (discounts, mask, is_last)
+    for ci, col_name in enumerate(col_names):
+      ax = axes[2, ci]
+      cd = col_data[col_name]
+      timesteps = cd["timesteps"]
+      loss_mask = cd.get("loss_mask")
+
+      discounts = timesteps.discount
+      is_last = timesteps.last()
+
+      ax.plot(discounts, label="Discounts")
+      if loss_mask is not None:
+        ax.plot(loss_mask, label="mask")
+      ax.plot(is_last, label="is_last")
+      ax.set_title(f"{col_name} — Episode markers", fontsize=13.5)
+      ax.legend(fontsize=10)
+      ax.grid(True)
+      ax.set_xticks(range(nT))
+
+    # Rows 3+: Trajectory renders with arrows
     for ep_idx, (ep_start, ep_end) in enumerate(episode_ranges):
-      row_idx = 2 + ep_idx // n_cols
+      row_idx = 3 + ep_idx // n_cols
       col_idx = ep_idx % n_cols
       ax = axes[row_idx, col_idx]
 
@@ -2224,7 +2236,7 @@ def jaxmaze_learner_log_extra(
     # Hide unused trajectory subplots
     total_traj_slots = n_traj_rows * n_cols
     for slot_idx in range(n_episodes, total_traj_slots):
-      row_idx = 2 + slot_idx // n_cols
+      row_idx = 3 + slot_idx // n_cols
       col_idx = slot_idx % n_cols
       axes[row_idx, col_idx].set_visible(False)
 
