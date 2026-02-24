@@ -628,11 +628,13 @@ class PreplayLossFn:
 
         if self.all_goals_rnn:
           N = new_goal.shape[0]
+
           def add_goal_dim(x, axis):
             def add_goal_dim_(y):
               return jnp.broadcast_to(
                 jnp.expand_dims(y, axis=axis), y.shape[:axis] + (N,) + y.shape[axis:]
               )
+
             return jax.tree_util.tree_map(add_goal_dim_, x)
 
           if self.place_goal_in_timestep:
@@ -654,6 +656,7 @@ class PreplayLossFn:
           target_preds_g, _ = unroll(target_params, target_h, timestep, rng_2)
 
         else:
+          raise RuntimeError
           length = actions.shape[0]
           expand = lambda x: jnp.tile(x[None], [length, 1])
           expanded_goal = jax.tree_util.tree_map(expand, new_goal)
@@ -1315,6 +1318,7 @@ class DynaAgentEnvModelMultigoalJaxMaze(nn.Module):
 
   def _maybe_dropout_task(self, obs, rng):
     """Zero out entire task_w with probability task_dropout_rate."""
+    assert self.task_dropout_rate <= 0.0
     if self.task_dropout_rate <= 0.0:
       return obs
     keep_prob = 1.0 - self.task_dropout_rate
@@ -1376,8 +1380,10 @@ class DynaAgentEnvModelMultigoalJaxMaze(nn.Module):
     rnn_out = self.rnn.output_from_state(new_rnn_states)
 
     if embedding.ndim == 3:
+      # [T, B D]
       q_vals = jax.vmap(self.main_task_q_fn)(rnn_out, task)
     else:
+      # [T, D]
       q_vals = self.main_task_q_fn(rnn_out, task)
     predictions = Predictions(q_vals=q_vals, state=new_rnn_states)
     return predictions, new_rnn_state
@@ -1604,7 +1610,7 @@ def make_jaxmaze_multigoal_agent(
 ##############################
 def make_train_craftax_singlegoal(**kwargs):
   config = kwargs["config"]
-  # ACME default epsilon schedule
+  # ACME default epsilon schedule - in range of ~(0, .1)
   vals = np.logspace(num=256, start=1, stop=3, base=0.1)
 
   num_offtask_simulations = config["NUM_OFFTASK_SIMULATIONS"]
@@ -2174,6 +2180,7 @@ def jaxmaze_learner_log_extra(
   get_task_name: Callable = lambda t: "Task",
   image_keys: list = None,
   sim_idx: int = 0,
+  all_tasks=None,
 ):
   from math import ceil
 
@@ -2189,6 +2196,13 @@ def jaxmaze_learner_log_extra(
     callback_data["all_goals"] = jax.tree_util.tree_map(
       lambda x: x[0], data["all_goals"]
     )
+
+  def task_w__to__object(task_objects, task_w):
+    task_idx = jnp.argmax(task_w)
+    task = all_tasks[task_idx]
+    task_idx = jnp.argmax(task)
+    object_idx = task_objects[task_idx]
+    return image_keys[int(object_idx)]
 
   def plot_online_data(d):
     """Plot online + all_goals columns (mimics her.py plot_unified)."""
@@ -2247,6 +2261,7 @@ def jaxmaze_learner_log_extra(
       q_target = cd["q_target"]
       q_values_taken = rlax.batched_index(q_values, actions)
       ax.plot(q_values_taken, label="Q-Values")
+      ax.plot(q_values.max(axis=-1), label="Q-Max", linestyle="--")
       ax.plot(q_target, label="Q-Targets")
       ax.set_title(f"{col_name} - Q-Values", fontsize=13.5)
       if ci == 0:
@@ -2330,13 +2345,8 @@ def jaxmaze_learner_log_extra(
       )
       total_reward = float(timesteps.reward[ep_start:ep_end].sum())
       ep_timestep = jax.tree_util.tree_map(lambda x: x[ep_start], timesteps)
-      task_w = ep_timestep.observation.task_w
-      obj_idx = int(ep_timestep.state.objects[jnp.argmax(task_w)])
-      goal_name = (
-        image_keys[obj_idx]
-        if image_keys is not None
-        else get_task_name(extract_task_info(ep_timestep))
-      )
+      task_objects = ep_timestep.state.objects
+      goal_name = task_w__to__object(task_objects, ep_timestep.observation.task_w)
       ax.set_title(f"Ep {ep_idx} ({goal_name}, r={total_reward:.1f})", fontsize=8)
       ax.axis("off")
 
@@ -2507,12 +2517,9 @@ def jaxmaze_learner_log_extra(
         img, ep_positions, ep_actions, maze_height, maze_width, arrow_scale=5, ax=ax
       )
       initial_timestep = jax.tree_util.tree_map(lambda x: x[0], timesteps)
-      t_task_w = initial_timestep.observation.task_w
-      t_obj_idx = int(initial_timestep.state.objects[jnp.argmax(t_task_w)])
-      t_goal_name = image_keys[t_obj_idx]
-
-      sim_obj_idx = int(initial_timestep.state.objects[jnp.argmax(goal)])
-      sim_goal_name = image_keys[sim_obj_idx]
+      task_objects = initial_timestep.state.objects
+      t_goal_name = task_w__to__object(task_objects, initial_timestep.observation.task_w)
+      sim_goal_name = task_w__to__object(task_objects, goal)
       ax.set_title(f"{col_name} — Trajectory (sim={sim_goal_name}, t={t_goal_name})")
       ax.axis("off")
 

@@ -348,10 +348,7 @@ def run_single(config: dict, save_path: str = None):
       ),
     )
   elif alg_name in ("preplay"):
-    if config.get("SIMPLE_PREPLAY", True):
-      import multitask_preplay
-    else:
-      import multitask_preplay_craftax_v2 as multitask_preplay
+    import multitask_preplay
 
     train_fn = multitask_preplay.make_train_jaxmaze_multigoal(
       config=config,
@@ -377,6 +374,7 @@ def run_single(config: dict, save_path: str = None):
           render_fn=jaxmaze_render_fn,
           image_keys=keys,
           sim_idx=0,
+          all_tasks=all_tasks,
         ),
       ),
       task_objects=task_objects,
@@ -515,11 +513,11 @@ def sweep(search: str = ""):
         "SEED": {"values": [1]},
         #"ALL_GOALS_COEFF": {"values": [.1, 1.]},
         #"ALL_GOALS_LAMBDA": {"values": [0.0, .7, .6]},
-        "TASK_DROPOUT_RATE": {"values": [.5, .7, .9]},
-        "QHEAD_TYPE": {"values": ["dot", "duelling"]},
+        #"TASK_DROPOUT_RATE": {"values": [.5, .7, .9]},
+        #"QHEAD_TYPE": {"values": ["dot", "duelling"]},
         #"GAMMA": {"values": [.99]},
         #"LR": {"values": [0.0001]},
-        "env.exp": {"values": ["preplay_test_big"]},
+        "env.exp": {"values": ["preplay_test_small"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "preplay-test-12-task-dropout",
