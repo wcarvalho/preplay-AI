@@ -213,7 +213,7 @@ def simulate_n_trajectories(
   online_task_coeff: float = 1.0,
   simulation_task_coeff: float = 1.0,
   simulation_goal: jax.Array = None,
-  make_init_goal_timestep=None,
+  place_goal_in_timestep=None,
 ):
   """Simulate n trajectories from a given state.
 
@@ -234,7 +234,7 @@ def simulate_n_trajectories(
     mainq_coeff: coefficient for main-task Q values
     offtask_coeff: coefficient for off-task Q values
     offtask_goal: off-task goal vectors [num_simulations, G], or None for dyna-only
-    make_init_goal_timestep: optional fn to modify timestep for goal
+    place_goal_in_timestep: optional fn to modify timestep for goal
   """
 
   if simulation_goal is None:
@@ -248,8 +248,8 @@ def simulate_n_trajectories(
     return online_task_coeff * main_q + simulation_task_coeff * offtask_q
 
   def initial_predictions(x, prior_h, main_w, sim_w, rng_):
-    if make_init_goal_timestep is not None:
-      x = make_init_goal_timestep(x, sim_w)
+    if place_goal_in_timestep is not None:
+      x = place_goal_in_timestep(x, sim_w)
     lstm_state, lstm_out = network.apply(
       params, prior_h, x, rng_, method=network.apply_rnn
     )
@@ -434,7 +434,7 @@ class PreplayLossFn:
   sample_td_goals: Callable = None
   compute_rewards: Callable = None
   get_main_goal: Callable = None
-  make_init_goal_timestep: Callable = None
+  place_goal_in_timestep: Callable = None
   make_log_extras: Callable = None
 
   def __call__(
@@ -665,11 +665,11 @@ class PreplayLossFn:
 
       key_grad_ = jax.random.split(key_grad_, B + 1)
 
-      # [N, B, G]
+      # [B, N, G]
       all_goals, _, _ = jax.vmap(self.sample_td_goals, (1, 0), 0)(
         data.timestep, key_grad_[1:]
       )
-      # [B, N, G]
+      # [B, N, G] --> [N, B, G]
       all_goals = jnp.swapaxes(all_goals, 0, 1)
 
       # Pass per-timestep RNN states (not initial state)
@@ -750,7 +750,7 @@ class PreplayLossFn:
       num_steps=self.simulation_length,
       online_task_coeff=self.online_task_coeff,
       simulation_task_coeff=self.simulation_task_coeff,
-      make_init_goal_timestep=self.make_init_goal_timestep,
+      place_goal_in_timestep=self.place_goal_in_timestep,
     )
 
     def apply_q_head(rnn_out, p, q_method, task):
@@ -768,7 +768,7 @@ class PreplayLossFn:
       """Unroll target RNN on simulated timesteps (vmap-over-scan).
 
       Uses original x_t at step 0 (matching what the online RNN saw inside
-      simulate_n_trajectories, before make_init_goal_timestep), then the
+      simulate_n_trajectories, before place_goal_in_timestep), then the
       model-generated timesteps from all_t[1:] for subsequent steps.
 
       Args:
@@ -905,11 +905,11 @@ class PreplayLossFn:
       # === OFF-TASK GOAL LOSS (split: different goals + different rewards) ===
       # all_main_q_on: [sim_length+1, total_sims, A]
       offtask_q_on = apply_q_head(
-        all_t_rnn_online, params, self.network.main_task_q_fn, all_sim_goals
+        all_t_rnn_online, params, self.network.off_task_q_fn, all_sim_goals
       )
       # all_main_q_tar: [sim_length+1, total_sims, A]
       offtask_q_tar = apply_q_head(
-        all_t_rnn_target, target_params, self.network.main_task_q_fn, all_sim_goals
+        all_t_rnn_target, target_params, self.network.off_task_q_fn, all_sim_goals
       )
 
       offtask_reward = self.compute_rewards(all_t, all_sim_goals)
@@ -1233,16 +1233,37 @@ class DynaAgentEnvModelMultigoal(nn.Module):
 
 # ---- JaxMaze Multigoal (shared Q-fn) ----
 class DynaAgentEnvModelMultigoalJaxMaze(nn.Module):
+  """JaxMaze agent with shared Q-head for on-task and off-task goals.
+
+  task_dropout_rate: Randomly zero out task_w in observations during training.
+    This prevents over-reliance on task embedding in RNN states, enabling better
+    generalization for off-task Q-value estimation (e.g., in all_goals loss).
+    Inspired by classifier-free guidance (Ho & Salimans, 2022):
+    https://arxiv.org/abs/2207.12598
+  """
+
   observation_encoder: nn.Module
   rnn: vbb.ScannedRNN
   main_q_head: nn.Module
   env: environment.Environment
   env_params: environment.EnvParams
+  task_dropout_rate: float = 0.0  # 0.0 = disabled, 0.1-0.2 recommended
 
   def setup(self):
     kernel_init = nn.initializers.variance_scaling(1.0, "fan_in", "normal", out_axis=0)
     self.task_fn = nn.Dense(128, kernel_init=kernel_init)
     self.off_task_q_head = self.main_q_head
+
+  def _maybe_dropout_task(self, obs, rng):
+    """Zero out entire task_w with probability task_dropout_rate."""
+    if self.task_dropout_rate <= 0.0:
+      return obs
+    keep_prob = 1.0 - self.task_dropout_rate
+    keep_shape = obs.task_w.shape[:-1]  # [B] or () depending on input
+    keep = jax.random.bernoulli(rng, p=keep_prob, shape=keep_shape)
+    keep = keep[..., None]  # [B, 1] or [1] for broadcasting with [B, G] or [G]
+    new_task_w = obs.task_w * keep
+    return obs.replace(task_w=new_task_w)
 
   def initialize(self, x: TimeStep):
     rng = jax.random.PRNGKey(0)
@@ -1256,11 +1277,12 @@ class DynaAgentEnvModelMultigoalJaxMaze(nn.Module):
     return self.rnn.initialize_carry(*args, **kwargs)
 
   def apply_rnn(self, rnn_state, x: TimeStep, rng: jax.random.PRNGKey):
-    embedding = self.observation_encoder(x.observation)
+    rng, dropout_rng, rnn_rng = jax.random.split(rng, 3)
+    obs = self._maybe_dropout_task(x.observation, dropout_rng)
+    embedding = self.observation_encoder(obs)
     assert embedding.ndim in (1, 2)  # [D] or [B, D]
     rnn_in = vbb.RNNInput(obs=embedding, reset=x.first())
-    rng, _rng = jax.random.split(rng)
-    return self.rnn(rnn_state, rnn_in, _rng)
+    return self.rnn(rnn_state, rnn_in, rnn_rng)
 
   def __call__(
     self, rnn_state, x: TimeStep, rng: jax.random.PRNGKey
@@ -1282,11 +1304,14 @@ class DynaAgentEnvModelMultigoalJaxMaze(nn.Module):
     rnn_state: [B]
     x: [T, B]
     """
-    embedding = jax.vmap(self.observation_encoder)(xs.observation)
+    rng, dropout_rng, rnn_rng = jax.random.split(rng, 3)
+    T = xs.observation.task_w.shape[0]
+    dropout_keys = jax.random.split(dropout_rng, T)
+    obs = jax.vmap(self._maybe_dropout_task)(xs.observation, dropout_keys)
+    embedding = jax.vmap(self.observation_encoder)(obs)
     assert embedding.ndim == 3
     rnn_in = vbb.RNNInput(obs=embedding, reset=xs.first())
-    rng, _rng = jax.random.split(rng)
-    new_rnn_state, new_rnn_states = self.rnn.unroll(rnn_state, rnn_in, _rng)
+    new_rnn_state, new_rnn_states = self.rnn.unroll(rnn_state, rnn_in, rnn_rng)
 
     task = xs.observation.task_w
     rnn_out = self.rnn.output_from_state(new_rnn_states)
@@ -1496,6 +1521,7 @@ def make_jaxmaze_multigoal_agent(
     ),
     env=model_env,
     env_params=model_env_params,
+    task_dropout_rate=config.get("TASK_DROPOUT_RATE", 0.0),
   )
 
   rng, _rng = jax.random.split(rng)
@@ -1853,7 +1879,7 @@ def make_train_craftax_multigoal(**kwargs):
     goal = timestep.observation.task_w[None]  # [G] -> [1, G]
     return jnp.tile(goal, (num_ontask_simulations, 1))  # [num_ontask_simulations, G]
 
-  def make_init_goal_timestep(timestep, goal):
+  def place_goal_in_timestep(timestep, goal):
     """Create a new timestep with the given goal swapped in.
 
     Args:
@@ -1883,7 +1909,7 @@ def make_train_craftax_multigoal(**kwargs):
       sample_td_goals=sample_all_tasks,
       compute_rewards=compute_rewards,
       get_main_goal=get_main_goal,
-      make_init_goal_timestep=make_init_goal_timestep,
+      place_goal_in_timestep=place_goal_in_timestep,
     ),
     make_optimizer=base_agent.make_optimizer,
     make_actor=make_actor,
@@ -1994,7 +2020,7 @@ def make_train_jaxmaze_multigoal(**kwargs):
   env = kwargs["model_env"]
   task_objects = kwargs.pop("task_objects")
 
-  def make_init_goal_timestep(timestep, goal):
+  def place_goal_in_timestep(timestep, goal):
     """Create a new timestep with the given goal swapped in.
 
     Args:
@@ -2046,7 +2072,7 @@ def make_train_jaxmaze_multigoal(**kwargs):
       sample_td_goals=sample_all_tasks,
       compute_rewards=compute_rewards,
       get_main_goal=get_main_goal,
-      make_init_goal_timestep=make_init_goal_timestep,
+      place_goal_in_timestep=place_goal_in_timestep,
       make_log_extras=make_log_extras,
     ),
     make_optimizer=base_agent.make_optimizer,
