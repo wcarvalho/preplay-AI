@@ -511,16 +511,31 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [1]},
-        #"ALL_GOALS_COEFF": {"values": [.1, 1.]},
-        #"ALL_GOALS_LAMBDA": {"values": [0.0, .7, .6]},
-        #"TASK_DROPOUT_RATE": {"values": [.5, .7, .9]},
-        #"QHEAD_TYPE": {"values": ["dot", "duelling"]},
-        #"GAMMA": {"values": [.99]},
-        #"LR": {"values": [0.0001]},
+        # "ALL_GOALS_COEFF": {"values": [.1, 1.]},
+        # "ALL_GOALS_LAMBDA": {"values": [0.0, .7, .6]},
+        # "TASK_DROPOUT_RATE": {"values": [.5, .7, .9]},
+        # "QHEAD_TYPE": {"values": ["dot", "duelling"]},
+        # "GAMMA": {"values": [.99]},
+        # "LR": {"values": [0.0001]},
         "env.exp": {"values": ["preplay_test_small"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "preplay-test-12-task-dropout",
+    }
+  elif search == "preplay_debug":
+    sweep_config = {
+      "metric": {
+        "name": "evaluator_performance/0.0 avg_episode_return",
+        "goal": "maximize",
+      },
+      "parameters": {
+        "ALG": {"values": ["preplay"]},
+        "SEED": {"values": [1]},
+        "ALL_GOALS_RNN": {"values": [True]},
+        "env.exp": {"values": ["preplay_test_small"]},
+      },
+      "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
+      "group": "preplay-debug-qvalue",
     }
   elif search == "preplay2":
     sweep_config = {
@@ -532,7 +547,7 @@ def sweep(search: str = ""):
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [2]},
         "ALL_GOALS_RNN": {"values": [True]},
-        "ALL_GOALS_LAMBDA": {"values": [0.0, 0.6, 0.7, .8, .9]},
+        "ALL_GOALS_LAMBDA": {"values": [0.0, 0.6, 0.7, 0.8, 0.9]},
         "env.exp": {"values": ["preplay_test_big"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],

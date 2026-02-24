@@ -254,6 +254,13 @@ def simulate_n_trajectories(
       params, prior_h, x, rng_, method=network.apply_rnn
     )
     preds = Predictions(q_vals=get_q_vals(lstm_out, main_w, sim_w), state=lstm_state)
+    # DEBUG: compare simulation RNN output and Q-values at t=0
+    jax.debug.print(
+      "PREPLAY t=0: lstm_out={r}, q_vals={q}, q_max={m}",
+      r=lstm_out[:5],
+      q=preds.q_vals,
+      m=preds.q_vals.max(),
+    )
     return x, lstm_state, preds
 
   rng, rng_ = jax.random.split(rng)
@@ -655,6 +662,14 @@ class PreplayLossFn:
           online_preds_g, _ = unroll(params, online_h, timestep, rng_1)
           target_preds_g, _ = unroll(target_params, target_h, timestep, rng_2)
 
+          # DEBUG: compare all_goals RNN output and Q-values at t=0, goal=0
+          jax.debug.print(
+            "ALL_GOALS t=0: q_vals={q}, q_max={m}, goal={g}",
+            q=online_preds_g.q_vals[0, 0],
+            m=online_preds_g.q_vals[0, 0].max(),
+            g=new_goal[0],
+          )
+
         else:
           raise RuntimeError
           length = actions.shape[0]
@@ -946,6 +961,16 @@ class PreplayLossFn:
       # all_main_q_on: [sim_length+1, total_sims, A]
       offtask_q_on = apply_q_head(
         all_t_rnn_online, params, self.network.off_task_q_fn, all_sim_goals
+      )
+      # DEBUG: compare preplay on-task and off-task Q-values at t=0, sim=0
+      jax.debug.print(
+        "PREPLAY_POST t=0: ontask_q={oq}, ontask_max={om}, offtask_q={fq}, offtask_max={fm}, goal={g}, ontask_goal={og}",
+        oq=ontask_q_on[0, 0],
+        om=ontask_q_on[0, 0].max(),
+        fq=offtask_q_on[0, 0],
+        fm=offtask_q_on[0, 0].max(),
+        g=all_sim_goals[0],
+        og=ontask_goals_tiled[0],
       )
       # all_main_q_tar: [sim_length+1, total_sims, A]
       offtask_q_tar = apply_q_head(
@@ -2199,8 +2224,6 @@ def jaxmaze_learner_log_extra(
 
   def task_w__to__object(task_objects, task_w):
     task_idx = jnp.argmax(task_w)
-    task = all_tasks[task_idx]
-    task_idx = jnp.argmax(task)
     object_idx = task_objects[task_idx]
     return image_keys[int(object_idx)]
 
@@ -2518,7 +2541,9 @@ def jaxmaze_learner_log_extra(
       )
       initial_timestep = jax.tree_util.tree_map(lambda x: x[0], timesteps)
       task_objects = initial_timestep.state.objects
-      t_goal_name = task_w__to__object(task_objects, initial_timestep.observation.task_w)
+      t_goal_name = task_w__to__object(
+        task_objects, initial_timestep.observation.task_w
+      )
       sim_goal_name = task_w__to__object(task_objects, goal)
       ax.set_title(f"{col_name} — Trajectory (sim={sim_goal_name}, t={t_goal_name})")
       ax.axis("off")
