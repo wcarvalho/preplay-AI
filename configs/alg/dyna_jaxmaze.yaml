@@ -57,7 +57,7 @@ STEP_COST: 0.0
 # Online epsilon settings
 FIXED_EPSILON: 2 # range of epsilons
 EPSILON_START: 1.0
-EPSILON_FINISH: 0.1
+EPSILON_FINISH: 0.05
 EPSILON_ANNEAL_TIME: 5e5
 
 # Training Params
