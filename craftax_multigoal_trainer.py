@@ -11,7 +11,8 @@ HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue crafta
   app.search=preplay-final
 
 RUNNING ON SLURM:
-python craftax_multigoal_trainer.py \
+RL_RESULTS_DIR=/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results \
+JAX_PLATFORMS=cpu python craftax_multigoal_trainer.py \
   app.parallel=slurm \
   app.search=usfa
 """
@@ -25,18 +26,18 @@ jax_config.update("jax_default_matmul_precision", "bfloat16")
 os.environ.setdefault("NVIDIA_TF32_OVERRIDE", "1")
 # These XLA flags are only supported on h100/h200 GPUs (Linux)
 if os.environ.get("JAX_PLATFORMS") != "cpu":
-  if sys.platform == "linux":
-    os.environ.setdefault(
-      "XLA_FLAGS",
-      " ".join(
-        [
-          "--xla_gpu_enable_triton_softmax_fusion=true",  # Fuse softmax ops
-          "--xla_gpu_triton_gemm_any=true",  # Use Triton for more GEMMs
-          "--xla_gpu_enable_async_collectives=true",  # Async communication
-          "--xla_gpu_enable_latency_hiding_scheduler=true",  # Better scheduling
-        ]
-      ),
-    )
+  #if sys.platform == "linux":
+  #  os.environ.setdefault(
+  #    "XLA_FLAGS",
+  #    " ".join(
+  #      [
+  #        "--xla_gpu_enable_triton_softmax_fusion=true",  # Fuse softmax ops
+  #        "--xla_gpu_triton_gemm_any=true",  # Use Triton for more GEMMs
+  #        "--xla_gpu_enable_async_collectives=true",  # Async communication
+  #        "--xla_gpu_enable_latency_hiding_scheduler=true",  # Better scheduling
+  #      ]
+  #    ),
+  #  )
   os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "true")
   os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.95")
 
@@ -544,17 +545,27 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 11))},
       },
       "overrides": ["alg=ql", "rlenv=craftax-multigoal", "user=wilka"],
-      "group": "ql-final-1",
+      "group": "ql-epsilon-final-1",
     }
   elif search == "usfa-final":
     sweep_config = {
       "metric": metric,
       "parameters": {
         "ALG": {"values": ["usfa"]},
-        "SEED": {"values": list(range(17, 25))},
+        "SEED": {"values": list(range(1, 11))},
       },
       "overrides": ["alg=usfa_craftax", "rlenv=craftax-multigoal", "user=wilka"],
-      "group": "usfa-final-5",
+      "group": "usfa-epsilon-final-1",
+    }
+  elif search == "her-final":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["her"]},
+        "SEED": {"values": list(range(1, 11))},
+      },
+      "overrides": ["alg=her", "rlenv=craftax-multigoal", "user=wilka"],
+      "group": "her-epsilon-final-1",
     }
   elif search == "dyna-final":
     sweep_config = {
@@ -564,8 +575,9 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 11))},
       },
       "overrides": ["alg=dyna", "rlenv=craftax-dyna-multigoal", "user=wilka"],
-      "group": "dyna-final-2",
+      "group": "dyna-epsilon-final-1",
     }
+
   elif search == "preplay-final":
     sweep_config = {
       "metric": metric,
@@ -574,7 +586,7 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(14, 17))},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-dyna-multigoal", "user=wilka"],
-      "group": "preplay-final-1",
+      "group": "preplay-epsilon-final-1",
     }
 
   else:

@@ -251,7 +251,7 @@ def simulate_n_trajectories(
     if place_goal_in_timestep is not None:
       x = place_goal_in_timestep(x, sim_w)
     lstm_state, lstm_out = network.apply(
-      params, prior_h, x, rng_, method=network.apply_rnn
+      params, prior_h, x, rng_, task_dropout=False, method=network.apply_rnn
     )
     preds = Predictions(q_vals=get_q_vals(lstm_out, main_w, sim_w), state=lstm_state)
     return x, lstm_state, preds
@@ -281,7 +281,12 @@ def simulate_n_trajectories(
     next_timestep = network.apply(params, timestep, a, rng_, method=network.apply_model)
 
     next_lstm_state, next_rnn_out = network.apply(
-      params, lstm_state, next_timestep, rng_, method=network.apply_rnn
+      params,
+      lstm_state,
+      next_timestep,
+      rng_,
+      task_dropout=False,
+      method=network.apply_rnn,
     )
 
     next_preds = Predictions(
@@ -438,7 +443,7 @@ class PreplayLossFn:
   make_log_extras: Callable = None
   all_goals_rnn: bool = True
   all_goals_td: str = "retrace"
-  retrace_temperature: float = 1.0
+  retrace_temperature: float = 0.1
 
   def __call__(
     self,
@@ -635,11 +640,11 @@ class PreplayLossFn:
             return jnp.broadcast_to(
               jnp.expand_dims(y, axis=axis), y.shape[:axis] + (N,) + y.shape[axis:]
             )
+
           return jax.tree_util.tree_map(add_goal_dim_, x)
 
         actions = add_goal_dim(actions, 1)  # [T, A] --> [T, N, A]
         if self.all_goals_rnn:
-
           if self.place_goal_in_timestep:
             place_goal_in_timestep = jax.vmap(self.place_goal_in_timestep, (None, 0), 0)
             place_goal_in_timestep = jax.vmap(place_goal_in_timestep, (0, None), 0)
@@ -649,20 +654,23 @@ class PreplayLossFn:
             # [T, N, D] <- [T, D]
             timestep = add_goal_dim(timestep, 1)
 
-
           online_h = add_goal_dim(online_h, 0)  # [D] --> [N, D]
           target_h = add_goal_dim(target_h, 0)  # [D] --> [N, D]
 
           unroll = functools.partial(self.network.apply, method=self.network.unroll)
           key_grad, rng_1, rng_2 = jax.random.split(key_grad, 3)
-          online_preds_g, _ = unroll(params, online_h, timestep, rng_1)
-          target_preds_g, _ = unroll(target_params, target_h, timestep, rng_2)
+          online_preds_g, _ = unroll(
+            params, online_h, timestep, rng_1, task_dropout=False
+          )
+          target_preds_g, _ = unroll(
+            target_params, target_h, timestep, rng_2, task_dropout=False
+          )
 
           goal_rewards = self.compute_rewards(timestep, new_goal)
 
         else:
           length = actions.shape[0]
-          expand = lambda x: jnp.tile(x[None], [length, 1,  1])
+          expand = lambda x: jnp.tile(x[None], [length, 1, 1])
           # [T, N, G]
           expanded_goal = jax.tree_util.tree_map(expand, new_goal)
 
@@ -679,7 +687,6 @@ class PreplayLossFn:
 
           online_preds_g = Predictions(q_vals=online_q, state=None)
           target_preds_g = Predictions(q_vals=target_q, state=None)
-
 
           timestep = add_goal_dim(timestep, 1)  # [T, N, D] <- [T, D]
           goal_rewards = self.compute_rewards(timestep, new_goal)
@@ -703,7 +710,7 @@ class PreplayLossFn:
           # Target policy: Boltzmann over off-task Q-values [T, N, A]
           pi_t = jax.nn.softmax(online_preds_g.q_vals / temp, axis=-1)
 
-          # Rewards and discounts (no episode boundaries for off-task goals)
+          # Rewards and discounts
           rewards = make_float(goal_rewards) - self.step_cost
           discounts = timestep.discount * self.discount
 
@@ -816,7 +823,7 @@ class PreplayLossFn:
           "timesteps": timestep,
           "actions": actions,
           "td_errors": ag_td_error,
-          "non_terminal": jnp.ones_like(timestep.discount),
+          "non_terminal": timestep.discount,
           "loss_mask": ag_loss_mask,
           "q_values": online_preds_g.q_vals,
           "q_loss": ag_loss_per_t,
@@ -965,6 +972,7 @@ class PreplayLossFn:
           h_tml,
           x_t,
           step_rng,
+          task_dropout=False,
           method=self.network.apply_rnn,
         )
         return (h_t, rng_), rnn_out
@@ -1253,7 +1261,7 @@ def make_loss_fn_class(config, **kwargs) -> PreplayLossFn:
     all_goals_lambda=config.get("ALL_GOALS_LAMBDA", 0.6),
     all_goals_rnn=config.get("ALL_GOALS_RNN", True),
     all_goals_td=config.get("ALL_GOALS_TD", "retrace"),
-    retrace_temperature=config.get("RETRACE_TEMPERATURE", 1.0),
+    retrace_temperature=config.get("RETRACE_TEMPERATURE", 0.1),
     **kwargs,
   )
 
@@ -1453,7 +1461,6 @@ class DynaAgentEnvModelMultigoalJaxMaze(nn.Module):
 
   def _maybe_dropout_task(self, obs, rng):
     """Zero out entire task_w with probability task_dropout_rate."""
-    assert self.task_dropout_rate <= 0.0
     if self.task_dropout_rate <= 0.0:
       return obs
     keep_prob = 1.0 - self.task_dropout_rate
@@ -1474,9 +1481,15 @@ class DynaAgentEnvModelMultigoalJaxMaze(nn.Module):
   def initialize_carry(self, *args, **kwargs):
     return self.rnn.initialize_carry(*args, **kwargs)
 
-  def apply_rnn(self, rnn_state, x: TimeStep, rng: jax.random.PRNGKey):
+  def apply_rnn(
+    self, rnn_state, x: TimeStep, rng: jax.random.PRNGKey, task_dropout: bool = True
+  ):
     rng, dropout_rng, rnn_rng = jax.random.split(rng, 3)
-    obs = self._maybe_dropout_task(x.observation, dropout_rng)
+    obs = (
+      self._maybe_dropout_task(x.observation, dropout_rng)
+      if task_dropout
+      else x.observation
+    )
     embedding = self.observation_encoder(obs)
     assert embedding.ndim in (1, 2)  # [D] or [B, D]
     rnn_in = vbb.RNNInput(obs=embedding, reset=x.first())
@@ -1489,14 +1502,14 @@ class DynaAgentEnvModelMultigoalJaxMaze(nn.Module):
     rnn_state: [B]
     x: [B]
     """
-    new_rnn_state, rnn_out = self.apply_rnn(rnn_state, x, rng)
+    new_rnn_state, rnn_out = self.apply_rnn(rnn_state, x, rng, task_dropout=False)
     task = x.observation.task_w
     q_vals = self.main_task_q_fn(rnn_out, task)
     predictions = Predictions(q_vals=q_vals, state=new_rnn_state)
     return predictions, new_rnn_state
 
   def unroll(
-    self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey
+    self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey, task_dropout: bool = True
   ) -> Tuple[Predictions, RnnState]:
     """
     rnn_state: [B]
@@ -1504,8 +1517,11 @@ class DynaAgentEnvModelMultigoalJaxMaze(nn.Module):
     """
     rng, dropout_rng, rnn_rng = jax.random.split(rng, 3)
     T = xs.observation.task_w.shape[0]
-    dropout_keys = jax.random.split(dropout_rng, T)
-    obs = jax.vmap(self._maybe_dropout_task)(xs.observation, dropout_keys)
+    if task_dropout:
+      dropout_keys = jax.random.split(dropout_rng, T)
+      obs = jax.vmap(self._maybe_dropout_task)(xs.observation, dropout_keys)
+    else:
+      obs = xs.observation
     embedding = jax.vmap(self.observation_encoder)(obs)
     assert embedding.ndim in (2, 3)
 

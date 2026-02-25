@@ -546,12 +546,15 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [2]},
-        "ALL_GOALS_RNN": {"values": [False]},
-        "ALL_GOALS_LAMBDA": {"values": [0.0, 0.6, 0.7, 0.8, 0.9]},
+        "ALL_GOALS_RNN": {"values": [True, False]},
+        "TASK_DROPOUT_RATE": {"values": [.6, .9]},
+        "ALL_GOALS_LAMBDA": {"values": [.6, .9]},
         "env.exp": {"values": ["preplay_test_big"]},
+        "ALL_GOALS_TD": {"values": ["tree"]},
+        "RETRACE_TEMPERATURE": {"values": [0.1]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-test-13-all-goals-rnn",
+      "group": "preplay-test-20-retrace-short",
     }
 
   elif search == "her":
