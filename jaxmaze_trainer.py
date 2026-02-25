@@ -546,7 +546,7 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [2]},
-        "ALL_GOALS_RNN": {"values": [True]},
+        "ALL_GOALS_RNN": {"values": [False]},
         "ALL_GOALS_LAMBDA": {"values": [0.0, 0.6, 0.7, 0.8, 0.9]},
         "env.exp": {"values": ["preplay_test_big"]},
       },

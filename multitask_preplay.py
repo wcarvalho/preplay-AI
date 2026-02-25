@@ -628,16 +628,17 @@ class PreplayLossFn:
           target_preds: Predictions with state [T, ...]
         """
 
+        N = new_goal.shape[0]
+
+        def add_goal_dim(x, axis):
+          def add_goal_dim_(y):
+            return jnp.broadcast_to(
+              jnp.expand_dims(y, axis=axis), y.shape[:axis] + (N,) + y.shape[axis:]
+            )
+          return jax.tree_util.tree_map(add_goal_dim_, x)
+
+        actions = add_goal_dim(actions, 1)  # [T, A] --> [T, N, A]
         if self.all_goals_rnn:
-          N = new_goal.shape[0]
-
-          def add_goal_dim(x, axis):
-            def add_goal_dim_(y):
-              return jnp.broadcast_to(
-                jnp.expand_dims(y, axis=axis), y.shape[:axis] + (N,) + y.shape[axis:]
-              )
-
-            return jax.tree_util.tree_map(add_goal_dim_, x)
 
           if self.place_goal_in_timestep:
             place_goal_in_timestep = jax.vmap(self.place_goal_in_timestep, (None, 0), 0)
@@ -648,7 +649,7 @@ class PreplayLossFn:
             # [T, N, D] <- [T, D]
             timestep = add_goal_dim(timestep, 1)
 
-          actions = add_goal_dim(actions, 1)  # [T, A] --> [T, N, A]
+
           online_h = add_goal_dim(online_h, 0)  # [D] --> [N, D]
           target_h = add_goal_dim(target_h, 0)  # [D] --> [N, D]
 
@@ -657,33 +658,40 @@ class PreplayLossFn:
           online_preds_g, _ = unroll(params, online_h, timestep, rng_1)
           target_preds_g, _ = unroll(target_params, target_h, timestep, rng_2)
 
+          goal_rewards = self.compute_rewards(timestep, new_goal)
+
         else:
-          raise RuntimeError
           length = actions.shape[0]
-          expand = lambda x: jnp.tile(x[None], [length, 1])
+          expand = lambda x: jnp.tile(x[None], [length, 1,  1])
+          # [T, N, G]
           expanded_goal = jax.tree_util.tree_map(expand, new_goal)
+
+          # [T, D]
+          rnn_out_online = rnn_output_from_state(online_preds.state)
+          rnn_out_target = rnn_output_from_state(target_preds.state)
 
           apply_q = functools.partial(
             self.network.apply, method=self.network.off_task_q_fn
           )
-          rnn_out_online = rnn_output_from_state(online_preds.state)
-          rnn_out_target = rnn_output_from_state(target_preds.state)
+          apply_q = jax.vmap(apply_q, (None, None, 1), 1)
           online_q = apply_q(params, rnn_out_online, expanded_goal)
           target_q = apply_q(target_params, rnn_out_target, expanded_goal)
 
           online_preds_g = Predictions(q_vals=online_q, state=None)
           target_preds_g = Predictions(q_vals=target_q, state=None)
 
-        goal_rewards = self.compute_rewards(timestep, new_goal)
 
-        if self.all_goals_td in ("retrace", 'tree'):
+          timestep = add_goal_dim(timestep, 1)  # [T, N, D] <- [T, D]
+          goal_rewards = self.compute_rewards(timestep, new_goal)
+
+        if self.all_goals_td in ("retrace", "tree"):
           # Retrace off-policy correction (Munos et al., 2016)
           # The trajectory was collected under the main-task policy (behavior),
           # but we want to learn Q-values for the off-task goal (target).
           # Retrace uses clipped IS ratios to safely correct for this mismatch.
           temp = self.retrace_temperature
 
-          if self.all_goals_td == 'tree':
+          if self.all_goals_td == "tree":
             mu_t = jnp.ones(goal_rewards.shape[0])
           else:
             # Behavior policy: Boltzmann over on-task Q-values [T, A]
@@ -865,7 +873,7 @@ class PreplayLossFn:
         self.preplay_loss_fn, params=params, target_params=target_params
       )
       dyna_loss_fn = jax.vmap(dyna_loss_fn, (1, 1, 1, 1, 1, 0), 0)
-      _, dyna_batch_loss, dyna_metrics, dyna_log_info = dyna_loss_fn(
+      dyna_td_error, dyna_batch_loss, dyna_metrics, dyna_log_info = dyna_loss_fn(
         x_t,
         data.action,
         h_tm1_online,
@@ -874,6 +882,7 @@ class PreplayLossFn:
         jax.random.split(key_grad, B),
       )
       batch_loss += self.dyna_coeff * dyna_batch_loss
+      td_error += self.dyna_coeff * dyna_td_error
       all_metrics.update({f"1.preplay/{k}": v for k, v in dyna_metrics.items()})
       all_log_info["dyna"] = dyna_log_info
 
@@ -2323,6 +2332,9 @@ def jaxmaze_learner_log_extra(
       lambda x: x[0], data["all_goals"]
     )
 
+  def task_object_to_name(task_object_id):
+    return image_keys[int(task_object_id)]
+
   def task_w__to__object(task_objects, task_w):
     task_idx = jnp.argmax(task_w)
     object_idx = task_objects[task_idx]
@@ -2469,8 +2481,7 @@ def jaxmaze_learner_log_extra(
       )
       total_reward = float(timesteps.reward[ep_start:ep_end].sum())
       ep_timestep = jax.tree_util.tree_map(lambda x: x[ep_start], timesteps)
-      task_objects = ep_timestep.state.objects
-      goal_name = task_w__to__object(task_objects, ep_timestep.observation.task_w)
+      goal_name = task_object_to_name(ep_timestep.state.task_object)
       ax.set_title(f"Ep {ep_idx} ({goal_name}, r={total_reward:.1f})", fontsize=8)
       ax.axis("off")
 
@@ -2642,9 +2653,7 @@ def jaxmaze_learner_log_extra(
       )
       initial_timestep = jax.tree_util.tree_map(lambda x: x[0], timesteps)
       task_objects = initial_timestep.state.objects
-      t_goal_name = task_w__to__object(
-        task_objects, initial_timestep.observation.task_w
-      )
+      t_goal_name = task_object_to_name(initial_timestep.state.task_object)
       sim_goal_name = task_w__to__object(task_objects, goal)
       ax.set_title(f"{col_name} — Trajectory (sim={sim_goal_name}, t={t_goal_name})")
       ax.axis("off")
