@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.10"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'linux'",
@@ -2391,14 +2391,13 @@ wheels = [
 
 [[package]]
 name = "nvidia-cudnn-cu12"
-version = "9.19.0.56"
+version = "8.9.2.26"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nvidia-cublas-cu12", marker = "sys_platform == 'linux'" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/09/b8/277c51962ee46fa3e5b203ac5f76107c650f781d6891e681e28e6f3e9fe6/nvidia_cudnn_cu12-9.19.0.56-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:08caaf27fe556aca82a3ee3b5aa49a77e7de0cfcb7ff4e5c29da426387a8267e", size = 656910700, upload-time = "2026-02-03T20:40:25.508Z" },
-    { url = "https://files.pythonhosted.org/packages/c5/41/65225d42fba06fb3dd3972485ea258e7dd07a40d6e01c95da6766ad87354/nvidia_cudnn_cu12-9.19.0.56-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:ac6ad90a075bb33a94f2b4cf4622eac13dd4dc65cf6dd9c7572a318516a36625", size = 657906812, upload-time = "2026-02-03T20:44:12.638Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/74/a2e2be7fb83aaedec84f391f082cf765dfb635e7caa9b49065f73e4835d8/nvidia_cudnn_cu12-8.9.2.26-py3-none-manylinux1_x86_64.whl", hash = "sha256:5ccb288774fdfb07a7e7025ffec286971c06d8d7b4fb162525334616d7629ff9", size = 731725872, upload-time = "2023-06-01T19:24:57.328Z" },
 ]
 
 [[package]]
@@ -2865,7 +2864,6 @@ dependencies = [
     { name = "gymnax" },
     { name = "hydra-core" },
     { name = "ipdb" },
-    { name = "jax" },
     { name = "jax", extra = ["cuda12-pip"], marker = "sys_platform == 'linux'" },
     { name = "jaxlib", version = "0.4.22", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and sys_platform != 'linux') or sys_platform == 'darwin' or sys_platform == 'win32'" },
     { name = "jaxlib", version = "0.4.22+cuda12.cudnn89", source = { registry = "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html" }, marker = "(python_full_version >= '3.11' and sys_platform != 'darwin' and sys_platform != 'win32') or sys_platform == 'linux'" },
@@ -2873,6 +2871,7 @@ dependencies = [
     { name = "jaxneurorl" },
     { name = "mctx" },
     { name = "numpy" },
+    { name = "nvidia-cudnn-cu12", marker = "sys_platform == 'linux'" },
     { name = "omegaconf" },
     { name = "optax" },
     { name = "rlax" },
@@ -2908,7 +2907,6 @@ requires-dist = [
     { name = "hydra-core" },
     { name = "ipdb" },
     { name = "ipywidgets", marker = "extra == 'dev'" },
-    { name = "jax", marker = "sys_platform != 'linux'", specifier = "==0.4.22" },
     { name = "jax", extras = ["cuda12-pip"], marker = "sys_platform == 'linux'", specifier = "==0.4.22" },
     { name = "jaxlib", specifier = "==0.4.22" },
     { name = "jaxmaze", editable = "libraries/jaxmaze" },
@@ -2916,6 +2914,7 @@ requires-dist = [
     { name = "jupyter", marker = "extra == 'dev'" },
     { name = "mctx", specifier = ">=0.0.5" },
     { name = "numpy", specifier = "<2" },
+    { name = "nvidia-cudnn-cu12", marker = "sys_platform == 'linux'", specifier = "==8.9.2.26" },
     { name = "omegaconf" },
     { name = "optax", specifier = "==0.2.1" },
     { name = "polars", marker = "extra == 'dev'" },
