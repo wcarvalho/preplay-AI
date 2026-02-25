@@ -437,6 +437,7 @@ class PreplayLossFn:
   place_goal_in_timestep: Callable = None
   make_log_extras: Callable = None
   all_goals_rnn: bool = True
+  retrace_temperature: float = 1.0
 
   def __call__(
     self,
@@ -674,23 +675,66 @@ class PreplayLossFn:
 
         goal_rewards = self.compute_rewards(timestep, new_goal)
 
-        # NOTE: for all goals, this isn't meant to give a new learning signal
-        # it's just meant to propogate the knowledge already learned by the model
-        # therefore, you want to avoid adding extra signal
-        # for example, we normally force terminal to have a target of 0.
-        # since we're off-task and reusing data for a new task, we don't know this
-        # so should make non_terminal jnp.ones_like(timestep.discount)
-        ag_td_error, ag_batch_loss, ag_metrics, ag_log_info = self.loss_fn(
-          timestep=timestep,
-          online_preds=online_preds_g,
-          target_preds=target_preds_g,
-          actions=actions,
-          rewards=goal_rewards,
-          is_last=jnp.zeros_like(timestep.last()),
-          non_terminal=jnp.ones_like(timestep.discount),
-          loss_mask=is_truncated(timestep),
-          lambda_override=self.all_goals_lambda,
+        # Retrace off-policy correction (Munos et al., 2016)
+        # The trajectory was collected under the main-task policy (behavior),
+        # but we want to learn Q-values for the off-task goal (target).
+        # Retrace uses clipped IS ratios to safely correct for this mismatch.
+        temp = self.retrace_temperature
+
+        # Target policy: Boltzmann over off-task Q-values [T, N, A]
+        pi_t = jax.nn.softmax(online_preds_g.q_vals / temp, axis=-1)
+
+        # Behavior policy: Boltzmann over on-task Q-values [T, A]
+        mu_probs = jax.nn.softmax(online_preds.q_vals / temp, axis=-1)
+        # Prob of the taken action under behavior policy: [T]
+        original_actions = actions[:, 0]  # [T, N] -> [T] (identical across N)
+        mu_t = rlax.batched_index(mu_probs, original_actions)
+
+        # Rewards and discounts
+        rewards = make_float(goal_rewards) - self.step_cost
+        discounts = timestep.discount * self.discount
+
+        ag_loss_mask = is_truncated(timestep)
+
+        # vmap retrace over N (goal dimension = axis 1)
+        retrace_fn = jax.vmap(
+          rlax.retrace,
+          in_axes=(1, 1, 1, 1, 1, 1, 1, None, None),
+          out_axes=1,
         )
+        ag_td_error = retrace_fn(
+          online_preds_g.q_vals,
+          target_preds_g.q_vals,
+          actions,
+          actions,
+          rewards,
+          discounts,
+          pi_t,
+          mu_t,
+          self.all_goals_lambda,
+        )
+
+        # Apply loss mask and compute loss
+        ag_td_error = ag_td_error * ag_loss_mask
+        ag_loss_per_t = 0.5 * jnp.square(ag_td_error)
+        # [N] — per-goal mean loss (matches self.loss_fn return shape)
+        ag_batch_loss = (ag_loss_per_t * ag_loss_mask).sum(0) / ag_loss_mask.sum(0)
+
+        ag_metrics = {
+          "0.q_loss": ag_loss_per_t.mean(),
+          "0.q_td": jnp.abs(ag_td_error).mean(),
+          "1.reward": rewards.mean(),
+        }
+        ag_log_info = {
+          "timesteps": timestep,
+          "actions": actions,
+          "td_errors": ag_td_error,
+          "non_terminal": timestep.discount,
+          "loss_mask": ag_loss_mask,
+          "q_values": online_preds_g.q_vals,
+          "q_loss": ag_loss_per_t,
+          "q_target": ag_td_error + rlax.batched_index(online_preds_g.q_vals, actions),
+        }
         if self.make_log_extras is not None:
           extras = self.make_log_extras(timestep, goal=new_goal)
           ag_log_info.update(extras)
@@ -1119,6 +1163,7 @@ def make_loss_fn_class(config, **kwargs) -> PreplayLossFn:
     all_goals_coeff=config.get("ALL_GOALS_COEFF", 1.0),
     all_goals_lambda=config.get("ALL_GOALS_LAMBDA", 0.6),
     all_goals_rnn=config.get("ALL_GOALS_RNN", True),
+    retrace_temperature=config.get("RETRACE_TEMPERATURE", 1.0),
     **kwargs,
   )
 
@@ -2199,8 +2244,6 @@ def jaxmaze_learner_log_extra(
 
   def task_w__to__object(task_objects, task_w):
     task_idx = jnp.argmax(task_w)
-    task = all_tasks[task_idx]
-    task_idx = jnp.argmax(task)
     object_idx = task_objects[task_idx]
     return image_keys[int(object_idx)]
 
@@ -2518,7 +2561,9 @@ def jaxmaze_learner_log_extra(
       )
       initial_timestep = jax.tree_util.tree_map(lambda x: x[0], timesteps)
       task_objects = initial_timestep.state.objects
-      t_goal_name = task_w__to__object(task_objects, initial_timestep.observation.task_w)
+      t_goal_name = task_w__to__object(
+        task_objects, initial_timestep.observation.task_w
+      )
       sim_goal_name = task_w__to__object(task_objects, goal)
       ax.set_title(f"{col_name} — Trajectory (sim={sim_goal_name}, t={t_goal_name})")
       ax.axis("off")
