@@ -829,6 +829,11 @@ class PreplayLossFn:
           "q_loss": ag_loss_per_t,
           "q_target": ag_td_error
           + rlax.batched_index(online_preds_g.q_vals[:-1], actions[:-1]),
+          "target_q_values": target_preds_g.q_vals,  # [T, N, A]
+          "behavior_q_values": jnp.broadcast_to(
+            online_preds.q_vals[:, None, :],
+            online_preds_g.q_vals.shape,
+          ),  # [T, N, A] (on-task Q-values, broadcast over goals)
         }
         if self.make_log_extras is not None:
           extras = self.make_log_extras(timestep, goal=new_goal)
@@ -2413,11 +2418,15 @@ def jaxmaze_learner_log_extra(
       q_target = cd["q_target"]
       q_values_taken = rlax.batched_index(q_values, actions)
       ax.plot(q_values_taken, label="Q-Values")
-      ax.plot(q_values.max(axis=-1), label="Q-Max", linestyle="--")
+      ax.plot(q_values.max(axis=-1), label="Q-Max")
       ax.plot(q_target, label="Q-Targets")
+      target_q_values = cd.get("target_q_values")
+      if target_q_values is not None:
+        target_q_taken = rlax.batched_index(target_q_values, actions)
+        ax.plot(target_q_taken, label="Target-Net Q")
       ax.set_title(f"{col_name} - Q-Values", fontsize=13.5)
-      if ci == 0:
-        ax.legend(fontsize=10)
+      if ci == 1:
+        ax.legend(fontsize=12)
       ax.grid(True)
       ax.set_xticks(range(nT))
       # ax.set_ylim(-0.1, 1.5)
@@ -2459,22 +2468,61 @@ def jaxmaze_learner_log_extra(
       else:
         ax.set_visible(False)
 
-    # Row 2: Episode markers (discounts, mask, is_last)
+    # Row 2: π/μ for all_goals, episode markers for online
     for ci, col_name in enumerate(col_names):
       ax = axes[2, ci]
       cd = col_data[col_name]
-      timesteps = cd["timesteps"]
-      loss_mask = cd.get("loss_mask")
 
-      discounts = timesteps.discount
-      is_last = timesteps.last()
+      behavior_q = cd.get("behavior_q_values")
+      if behavior_q is not None:
+        # All_goals: show π/μ at multiple temps
+        temps = [0.1, 1.0]
+        row_colors = ["tab:blue", "tab:orange", "tab:green", "tab:red"]
+        q_values = cd["q_values"]  # off-task Q [T, A]
+        actions = cd["actions"]
+        greedy_a = jnp.argmax(q_values, axis=-1)
 
-      ax.plot(discounts, label="Discounts")
-      if loss_mask is not None:
-        ax.plot(loss_mask, label="mask")
-      ax.plot(is_last, label="is_last")
-      ax.set_title(f"{col_name} — Episode markers", fontsize=13.5)
-      ax.legend(fontsize=10)
+        # Precompute all values
+        pi_data = []
+        mu_data = []
+        color_idx = 0
+        for temp in temps:
+          pi_probs = jax.nn.softmax(q_values / temp, axis=-1)
+          mu_probs = jax.nn.softmax(behavior_q / temp, axis=-1)
+          pi_taken = rlax.batched_index(pi_probs, actions)
+          mu_taken = rlax.batched_index(mu_probs, actions)
+          pi_greedy = rlax.batched_index(pi_probs, greedy_a)
+          mu_greedy = rlax.batched_index(mu_probs, greedy_a)
+          c_taken = row_colors[color_idx]
+          c_greedy = row_colors[color_idx + 1]
+          pi_data.append((pi_taken, f"π(a) τ={temp}", c_taken, {}))
+          pi_data.append(
+            (pi_greedy, f"π(a*) τ={temp}", c_greedy, {"marker": "o", "markersize": 3})
+          )
+          mu_data.append((mu_taken, f"μ(a) τ={temp}", c_taken, {}))
+          mu_data.append(
+            (mu_greedy, f"μ(a*) τ={temp}", c_greedy, {"marker": "o", "markersize": 3})
+          )
+          color_idx += 2
+
+        # Plot all π (col 0) then all μ (col 1) for column-first legend
+        for vals, label, c, kw in pi_data:
+          ax.plot(vals, label=label, color=c, linestyle="-", **kw)
+        for vals, label, c, kw in mu_data:
+          ax.plot(vals, label=label, color=c, linestyle="--", **kw)
+
+        ax.set_title(f"{col_name} — π/μ (solid=π, dashed=μ, ●=greedy)", fontsize=13.5)
+        ax.legend(fontsize=7, ncol=2)
+      else:
+        # Online: existing episode markers
+        timesteps = cd["timesteps"]
+        loss_mask = cd.get("loss_mask")
+        ax.plot(timesteps.discount, label="Discounts")
+        if loss_mask is not None:
+          ax.plot(loss_mask, label="mask")
+        ax.plot(timesteps.last(), label="is_last")
+        ax.set_title(f"{col_name} — Episode markers", fontsize=13.5)
+        ax.legend(fontsize=10)
       ax.grid(True)
       ax.set_xticks(range(nT))
 
