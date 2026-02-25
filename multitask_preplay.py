@@ -437,6 +437,7 @@ class PreplayLossFn:
   place_goal_in_timestep: Callable = None
   make_log_extras: Callable = None
   all_goals_rnn: bool = True
+  all_goals_td: str = "retrace"
   retrace_temperature: float = 1.0
 
   def __call__(
@@ -675,45 +676,120 @@ class PreplayLossFn:
 
         goal_rewards = self.compute_rewards(timestep, new_goal)
 
-        # Retrace off-policy correction (Munos et al., 2016)
-        # The trajectory was collected under the main-task policy (behavior),
-        # but we want to learn Q-values for the off-task goal (target).
-        # Retrace uses clipped IS ratios to safely correct for this mismatch.
-        temp = self.retrace_temperature
+        if self.all_goals_td in ("retrace", 'tree'):
+          # Retrace off-policy correction (Munos et al., 2016)
+          # The trajectory was collected under the main-task policy (behavior),
+          # but we want to learn Q-values for the off-task goal (target).
+          # Retrace uses clipped IS ratios to safely correct for this mismatch.
+          temp = self.retrace_temperature
 
-        # Behavior policy: Boltzmann over on-task Q-values [T, A]
-        mu_probs = jax.nn.softmax(online_preds.q_vals / temp, axis=-1)
-        # Prob of the taken action under behavior policy: [T]
-        original_actions = actions[:, 0]  # [T, N] -> [T] (identical across N)
-        mu_t = rlax.batched_index(mu_probs, original_actions)
+          if self.all_goals_td == 'tree':
+            mu_t = jnp.ones(goal_rewards.shape[0])
+          else:
+            # Behavior policy: Boltzmann over on-task Q-values [T, A]
+            mu_probs = jax.nn.softmax(online_preds.q_vals / temp, axis=-1)
+            # Prob of the taken action under behavior policy: [T]
+            original_actions = actions[:, 0]  # [T, N] -> [T] (identical across N)
+            mu_t = rlax.batched_index(mu_probs, original_actions)
 
-        # Target policy: Boltzmann over off-task Q-values [T, N, A]
-        pi_t = jax.nn.softmax(online_preds_g.q_vals / temp, axis=-1)
+          # Target policy: Boltzmann over off-task Q-values [T, N, A]
+          pi_t = jax.nn.softmax(online_preds_g.q_vals / temp, axis=-1)
 
-        # Rewards and discounts (no episode boundaries for off-task goals)
-        rewards = make_float(goal_rewards) - self.step_cost
-        discounts = jnp.ones_like(goal_rewards) * self.discount
+          # Rewards and discounts (no episode boundaries for off-task goals)
+          rewards = make_float(goal_rewards) - self.step_cost
+          discounts = timestep.discount * self.discount
 
-        ag_loss_mask = is_truncated(timestep)
+          ag_loss_mask = is_truncated(timestep)
 
-        # vmap retrace over N (goal dimension = axis 1)
-        retrace_fn = jax.vmap(
-          rlax.retrace,
-          in_axes=(1, 1, 1, 1, 1, 1, 1, None, None),
-          out_axes=1,
-        )
+          # vmap retrace over N (goal dimension = axis 1)
+          retrace_fn = jax.vmap(
+            rlax.retrace,
+            in_axes=(1, 1, 1, 1, 1, 1, 1, None, None),
+            out_axes=1,
+          )
 
-        ag_td_error = retrace_fn(
-          online_preds_g.q_vals[:-1],
-          target_preds_g.q_vals[1:],
-          actions[:-1],
-          actions[1:],
-          rewards[1:],
-          discounts[1:],
-          pi_t[1:],
-          mu_t[1:],
-          self.all_goals_lambda,
-        )
+          ag_td_error = retrace_fn(
+            online_preds_g.q_vals[:-1],
+            target_preds_g.q_vals[1:],
+            actions[:-1],
+            actions[1:],
+            rewards[1:],
+            discounts[1:],
+            pi_t[1:],
+            mu_t[1:],
+            self.all_goals_lambda,
+          )
+        elif self.all_goals_td == "e-sarsa":
+          rewards = make_float(goal_rewards) - self.step_cost
+          discounts = timestep.discount * self.discount
+          ag_loss_mask = is_truncated(timestep)
+
+          temp = self.retrace_temperature
+          # probs_a_t: softmax over off-task Q-values at t+1 [T, N, A]
+          probs_a_t = jax.nn.softmax(online_preds_g.q_vals / temp, axis=-1)
+
+          # vmap over T (time), then over N (goals)
+          esarsa_single = jax.vmap(rlax.expected_sarsa)  # vmap over T
+          esarsa_fn = jax.vmap(
+            esarsa_single,  # vmap over N
+            in_axes=(1, 1, 1, 1, 1, 1),
+            out_axes=1,
+          )
+
+          ag_td_error = esarsa_fn(
+            online_preds_g.q_vals[:-1],  # q_tm1: [T-1, N, A]
+            actions[:-1],  # a_tm1: [T-1, N]
+            rewards[1:],  # r_t:   [T-1, N]
+            discounts[1:],  # discount_t: [T-1, N]
+            target_preds_g.q_vals[1:],  # q_t:   [T-1, N, A]
+            probs_a_t[1:],  # probs_a_t: [T-1, N, A]
+          )  # returns [T-1, N]
+        elif self.all_goals_td == "sarsa":
+          rewards = make_float(goal_rewards) - self.step_cost
+          discounts = timestep.discount * self.discount
+          ag_loss_mask = is_truncated(timestep)
+
+          # sarsa_lambda is a sequence fn ([T, A] q-values), vmap over N only
+          sarsa_fn = jax.vmap(
+            losses.sarsa_lambda,
+            in_axes=(1, 1, 1, 1, 1, 1, None),
+            out_axes=1,
+          )
+
+          qa_tm1, target_tm1 = sarsa_fn(
+            online_preds_g.q_vals[:-1],  # q_tm1: [T-1, N, A]
+            actions[:-1],  # a_tm1: [T-1, N]
+            rewards[1:],  # r_t:   [T-1, N]
+            discounts[1:],  # discount_t: [T-1, N]
+            target_preds_g.q_vals[1:],  # q_t:   [T-1, N, A]
+            actions[1:],  # a_t:   [T-1, N]
+            self.all_goals_lambda,
+          )
+          ag_td_error = target_tm1 - qa_tm1  # [T-1, N]
+        elif self.all_goals_td == "qlearning":
+          rewards = make_float(goal_rewards) - self.step_cost
+          discounts = jnp.ones_like(goal_rewards) * self.discount
+          ag_loss_mask = is_truncated(timestep)
+
+          # sarsa_lambda is a sequence fn ([T, A] q-values), vmap over N only
+          sarsa_fn = jax.vmap(
+            losses.sarsa_lambda,
+            in_axes=(1, 1, 1, 1, 1, 1, None),
+            out_axes=1,
+          )
+
+          qa_tm1, target_tm1 = sarsa_fn(
+            online_preds_g.q_vals[:-1],  # q_tm1: [T-1, N, A]
+            actions[:-1],  # a_tm1: [T-1, N]
+            rewards[1:],  # r_t:   [T-1, N]
+            discounts[1:],  # discount_t: [T-1, N]
+            target_preds_g.q_vals[1:],  # q_t:   [T-1, N, A]
+            actions[1:],  # a_t:   [T-1, N]
+            self.all_goals_lambda,
+          )
+          ag_td_error = target_tm1 - qa_tm1  # [T-1, N]
+        else:
+          raise ValueError(f"Unknown all_goals_td: {self.all_goals_td}")
 
         # Apply loss mask and compute loss
         ag_td_error = ag_td_error * ag_loss_mask[:-1]
@@ -1167,6 +1243,7 @@ def make_loss_fn_class(config, **kwargs) -> PreplayLossFn:
     all_goals_coeff=config.get("ALL_GOALS_COEFF", 1.0),
     all_goals_lambda=config.get("ALL_GOALS_LAMBDA", 0.6),
     all_goals_rnn=config.get("ALL_GOALS_RNN", True),
+    all_goals_td=config.get("ALL_GOALS_TD", "retrace"),
     retrace_temperature=config.get("RETRACE_TEMPERATURE", 1.0),
     **kwargs,
   )
