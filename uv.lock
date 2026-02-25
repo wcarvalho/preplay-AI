@@ -36,15 +36,6 @@ wheels = [
 ]
 
 [[package]]
-name = "aiofiles"
-version = "25.1.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/41/c3/534eac40372d8ee36ef40df62ec129bee4fdb5ad9706e58a29be53b2c970/aiofiles-25.1.0.tar.gz", hash = "sha256:a8d728f0a29de45dc521f18f07297428d56992a742f0cd2701ba86e44d23d5b2", size = 46354, upload-time = "2025-10-09T20:51:04.358Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/bc/8a/340a1555ae33d7354dbca4faa54948d76d89a27ceef032c8c3bc661d003e/aiofiles-25.1.0-py3-none-any.whl", hash = "sha256:abe311e527c862958650f9438e859c1fa7568a141b22abcd015e120e86a85695", size = 14668, upload-time = "2025-10-09T20:51:03.174Z" },
-]
-
-[[package]]
 name = "annotated-types"
 version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -396,56 +387,19 @@ wheels = [
 name = "chex"
 version = "0.1.90"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version < '3.11' and sys_platform == 'linux'",
-    "python_full_version < '3.11' and sys_platform != 'linux'",
-]
 dependencies = [
-    { name = "absl-py", marker = "python_full_version < '3.11'" },
-    { name = "jax", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "jaxlib", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "absl-py" },
+    { name = "jax" },
+    { name = "jaxlib" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "toolz", marker = "python_full_version < '3.11'" },
-    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "setuptools", marker = "python_full_version >= '3.12'" },
+    { name = "toolz" },
+    { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/77/70/53c7d404ce9e2a94009aea7f77ef6e392f6740e071c62683a506647c520f/chex-0.1.90.tar.gz", hash = "sha256:d3c375aeb6154b08f1cccd2bee4ed83659ee2198a6acf1160d2fe2e4a6c87b5c", size = 92363, upload-time = "2025-07-23T19:50:47.945Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6f/3d/46bb04776c465cea2dd8aa2d4b61ab610b707f798f47838ef7e6105b025c/chex-0.1.90-py3-none-any.whl", hash = "sha256:fce3de82588f72d4796e545e574a433aa29229cbdcf792555e41bead24b704ae", size = 101047, upload-time = "2025-07-23T19:50:46.603Z" },
-]
-
-[[package]]
-name = "chex"
-version = "0.1.91"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.14' and sys_platform == 'linux'",
-    "python_full_version == '3.13.*' and sys_platform == 'linux'",
-    "python_full_version == '3.12.*' and sys_platform == 'linux'",
-    "python_full_version == '3.11.*' and sys_platform == 'linux'",
-    "python_full_version >= '3.14' and sys_platform == 'win32'",
-    "python_full_version >= '3.14' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.12.*' and sys_platform == 'win32'",
-    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.11.*' and sys_platform == 'win32'",
-    "python_full_version == '3.11.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.11.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-]
-dependencies = [
-    { name = "absl-py", marker = "python_full_version >= '3.11'" },
-    { name = "jax", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "jaxlib", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "toolz", marker = "python_full_version >= '3.11'" },
-    { name = "typing-extensions", marker = "python_full_version >= '3.11'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/5b/7d/812f01e7b2ddf28a0caa8dde56bd951a2c8f691c9bbfce38d469458d1502/chex-0.1.91.tar.gz", hash = "sha256:65367a521415ada905b8c0222b0a41a68337fcadf79a1fb6fc992dbd95dd9f76", size = 90302, upload-time = "2025-09-01T21:49:32.834Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/12/0c/96102c01dd02ae740d4afc3644d5c7d7fc51d3feefd67300a2aa1ddbf7cb/chex-0.1.91-py3-none-any.whl", hash = "sha256:6fc4cbfc22301c08d4a7ef706045668410100962eba8ba6af03fa07f4e5dcf9b", size = 100965, upload-time = "2025-09-01T21:49:31.141Z" },
 ]
 
 [[package]]
@@ -663,14 +617,11 @@ name = "craftax"
 version = "1.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "chex", version = "0.1.90", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "chex", version = "0.1.91", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "flax", version = "0.10.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "flax", version = "0.12.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "chex" },
+    { name = "flax" },
     { name = "gymnax" },
     { name = "imageio" },
-    { name = "jax", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "jax", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "jax" },
     { name = "matplotlib" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -741,56 +692,19 @@ wheels = [
 name = "distrax"
 version = "0.1.5"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version < '3.11' and sys_platform == 'linux'",
-    "python_full_version < '3.11' and sys_platform != 'linux'",
-]
 dependencies = [
-    { name = "absl-py", marker = "python_full_version < '3.11'" },
-    { name = "chex", version = "0.1.90", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "jax", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "jaxlib", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "absl-py" },
+    { name = "chex" },
+    { name = "jax" },
+    { name = "jaxlib" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "tensorflow-probability", marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "setuptools", marker = "python_full_version >= '3.12'" },
+    { name = "tensorflow-probability" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/81/a7/d87f5c5caf2ae9e28a9f506274870c25eb7e38c1ce0a1b7b3696afc73ac9/distrax-0.1.5.tar.gz", hash = "sha256:ec41522d389af69efedc8d475a7e6d8f229429c00f2140dcd641feacf7e21948", size = 190162, upload-time = "2023-11-22T12:53:44.836Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d8/42/efa7985eefd516f273bc5557550539ebd687cc6a3a2a176d5e1f5b0398ca/distrax-0.1.5-py3-none-any.whl", hash = "sha256:5020f4b53a9a480d019c12e44292fbacb7de857cce478bc594dacf29519c61b7", size = 319716, upload-time = "2023-11-22T12:53:42.449Z" },
-]
-
-[[package]]
-name = "distrax"
-version = "0.1.7"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.14' and sys_platform == 'linux'",
-    "python_full_version == '3.13.*' and sys_platform == 'linux'",
-    "python_full_version == '3.12.*' and sys_platform == 'linux'",
-    "python_full_version == '3.11.*' and sys_platform == 'linux'",
-    "python_full_version >= '3.14' and sys_platform == 'win32'",
-    "python_full_version >= '3.14' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.12.*' and sys_platform == 'win32'",
-    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.11.*' and sys_platform == 'win32'",
-    "python_full_version == '3.11.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.11.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-]
-dependencies = [
-    { name = "absl-py", marker = "python_full_version >= '3.11'" },
-    { name = "chex", version = "0.1.91", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "jax", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "jaxlib", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "tfp-nightly", marker = "python_full_version >= '3.11'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/21/a1/eb2086d2fc27ddf627f47af392d67e7e023a153d1b00087d3d12eab0465a/distrax-0.1.7.tar.gz", hash = "sha256:78deec181894e811d416b34e6b500f5e8f6d39bc850bd6f3152ee9e2164c9bef", size = 183672, upload-time = "2025-09-01T23:06:00.108Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a2/3e/e67008a232c37f98f1563469e206b1f2820f01c9cce1118c02215f1bf361/distrax-0.1.7-py3-none-any.whl", hash = "sha256:cf502d64022c7a682882ae6f07aea35206c6a3d8ddfb1e3beb006723baf283fd", size = 312680, upload-time = "2025-09-01T23:05:58.175Z" },
 ]
 
 [[package]]
@@ -906,14 +820,10 @@ name = "flashbax"
 version = "0.1.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "chex", version = "0.1.90", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "chex", version = "0.1.91", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "flax", version = "0.10.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "flax", version = "0.12.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "jax", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "jax", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "jaxlib", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "jaxlib", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "chex" },
+    { name = "flax" },
+    { name = "jax" },
+    { name = "jaxlib" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "tensorstore", version = "0.1.78", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -927,65 +837,24 @@ wheels = [
 
 [[package]]
 name = "flax"
-version = "0.10.7"
+version = "0.10.4"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version < '3.11' and sys_platform == 'linux'",
-    "python_full_version < '3.11' and sys_platform != 'linux'",
-]
 dependencies = [
-    { name = "jax", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "msgpack", marker = "python_full_version < '3.11'" },
-    { name = "optax", marker = "python_full_version < '3.11'" },
-    { name = "orbax-checkpoint", marker = "python_full_version < '3.11'" },
-    { name = "pyyaml", marker = "python_full_version < '3.11'" },
-    { name = "rich", marker = "python_full_version < '3.11'" },
-    { name = "tensorstore", version = "0.1.78", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "treescope", marker = "python_full_version < '3.11'" },
-    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/e6/76/4ea55a60a47e98fcff591238ee26ed4624cb4fdc4893aa3ebf78d0d021f4/flax-0.10.7.tar.gz", hash = "sha256:2930d6671e23076f6db3b96afacf45c5060898f5c189ecab6dda7e05d26c2085", size = 5136099, upload-time = "2025-07-02T06:10:07.819Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/11/f6/560d338687d40182c8429cf35c64cc022e0d57ba3e52191c4a78ed239b4e/flax-0.10.7-py3-none-any.whl", hash = "sha256:4033223a9a9969ba0b252e085e9714d0a1e9124ac300aaf48e92c40769c420f6", size = 456944, upload-time = "2025-07-02T06:10:05.807Z" },
-]
-
-[[package]]
-name = "flax"
-version = "0.12.2"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.14' and sys_platform == 'linux'",
-    "python_full_version == '3.13.*' and sys_platform == 'linux'",
-    "python_full_version == '3.12.*' and sys_platform == 'linux'",
-    "python_full_version == '3.11.*' and sys_platform == 'linux'",
-    "python_full_version >= '3.14' and sys_platform == 'win32'",
-    "python_full_version >= '3.14' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.12.*' and sys_platform == 'win32'",
-    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.11.*' and sys_platform == 'win32'",
-    "python_full_version == '3.11.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.11.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-]
-dependencies = [
-    { name = "jax", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "msgpack", marker = "python_full_version >= '3.11'" },
+    { name = "jax" },
+    { name = "msgpack" },
     { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "optax", marker = "python_full_version >= '3.11'" },
-    { name = "orbax-checkpoint", marker = "python_full_version >= '3.11'" },
-    { name = "pyyaml", marker = "python_full_version >= '3.11'" },
-    { name = "rich", marker = "python_full_version >= '3.11'" },
+    { name = "optax" },
+    { name = "orbax-checkpoint" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "tensorstore", version = "0.1.78", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "tensorstore", version = "0.1.80", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "treescope", marker = "python_full_version >= '3.11'" },
-    { name = "typing-extensions", marker = "python_full_version >= '3.11'" },
+    { name = "treescope" },
+    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6b/7e/c4c66ab9b41149cf7a1961907d9a844832af1e76b121b35235a618c92825/flax-0.12.2.tar.gz", hash = "sha256:e9723b0881e571abe61885bb8770f53fdb3c383b6b3f5a923dcf6f1e9a687905", size = 5008370, upload-time = "2025-12-18T22:36:19.988Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/45/5d/6fa18b5dcb737f0c454ad3c116c4faebbb51f164d81109255391a0462c5e/flax-0.10.4.tar.gz", hash = "sha256:57ae44d3f111fc85cff9049adb9684ce8ebd44e87bd8ca776ed52422c2d85021", size = 5179580, upload-time = "2025-02-27T00:11:00.913Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b7/6b/7b75508251f4220df8f68e7718b476ee3d614a2a51f9eace97393ee91b46/flax-0.12.2-py3-none-any.whl", hash = "sha256:912fdd8a7c623ec8b2694b28d2827608e7fc82a3a6f8fff17ec5038f2bca66f4", size = 488031, upload-time = "2025-12-18T22:36:18.01Z" },
+    { url = "https://files.pythonhosted.org/packages/02/d3/c2de519b6b1f0292727406c5c12964fbe0f46bdbdbf92857716e358f1df3/flax-0.10.4-py3-none-any.whl", hash = "sha256:8cc83d91654ff943909730e02e858b4cd4577531373f83abe6597c58c581032d", size = 451817, upload-time = "2025-02-27T00:10:58.636Z" },
 ]
 
 [[package]]
@@ -1117,11 +986,9 @@ name = "gymnax"
 version = "0.0.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "flax", version = "0.10.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "flax", version = "0.12.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "flax" },
     { name = "gymnasium" },
-    { name = "jax", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "jax", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "jax" },
     { name = "matplotlib" },
     { name = "seaborn" },
 ]
@@ -1371,264 +1238,96 @@ wheels = [
 
 [[package]]
 name = "jax"
-version = "0.6.2"
+version = "0.4.38"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version < '3.11' and sys_platform == 'linux'",
-    "python_full_version < '3.11' and sys_platform != 'linux'",
-]
 dependencies = [
-    { name = "jaxlib", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "ml-dtypes", marker = "python_full_version < '3.11'" },
+    { name = "jaxlib" },
+    { name = "ml-dtypes" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "opt-einsum", marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "opt-einsum" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.17.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/cf/1e/267f59c8fb7f143c3f778c76cb7ef1389db3fd7e4540f04b9f42ca90764d/jax-0.6.2.tar.gz", hash = "sha256:a437d29038cbc8300334119692744704ca7941490867b9665406b7f90665cd96", size = 2334091, upload-time = "2025-06-17T23:10:27.186Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fb/e5/c4aa9644bb96b7f6747bd7c9f8cda7665ca5e194fa2542b2dea3ff730701/jax-0.4.38.tar.gz", hash = "sha256:43bae65881628319e0a2148e8f81a202fbc2b8d048e35c7cb1df2416672fa4a8", size = 1930034, upload-time = "2024-12-17T23:03:47.623Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/31/a8/97ef0cbb7a17143ace2643d600a7b80d6705b2266fc31078229e406bdef2/jax-0.6.2-py3-none-any.whl", hash = "sha256:bb24a82dc60ccf704dcaf6dbd07d04957f68a6c686db19630dd75260d1fb788c", size = 2722396, upload-time = "2025-06-17T23:10:25.293Z" },
+    { url = "https://files.pythonhosted.org/packages/22/49/b4418a7a892c0dd64442bbbeef54e1cdfe722dfc5a7bf0d611d3f5f90e99/jax-0.4.38-py3-none-any.whl", hash = "sha256:78987306f7041ea8500d99df1a17c33ed92620c2268c4c3677fb24e06712be64", size = 2236864, upload-time = "2024-12-17T23:03:44.433Z" },
 ]
 
 [package.optional-dependencies]
 cuda12 = [
-    { name = "jax-cuda12-plugin", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, extra = ["with-cuda"], marker = "python_full_version < '3.11' and sys_platform == 'linux'" },
-    { name = "jaxlib", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' and sys_platform == 'linux'" },
-]
-
-[[package]]
-name = "jax"
-version = "0.9.0"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.14' and sys_platform == 'linux'",
-    "python_full_version == '3.13.*' and sys_platform == 'linux'",
-    "python_full_version == '3.12.*' and sys_platform == 'linux'",
-    "python_full_version == '3.11.*' and sys_platform == 'linux'",
-    "python_full_version >= '3.14' and sys_platform == 'win32'",
-    "python_full_version >= '3.14' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.12.*' and sys_platform == 'win32'",
-    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.11.*' and sys_platform == 'win32'",
-    "python_full_version == '3.11.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.11.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-]
-dependencies = [
-    { name = "jaxlib", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "ml-dtypes", marker = "python_full_version >= '3.11'" },
-    { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "opt-einsum", marker = "python_full_version >= '3.11'" },
-    { name = "scipy", version = "1.17.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/39/28/13186d20cbece4944577de774269c620b2f5f5ea163748b61e48e423f47f/jax-0.9.0.tar.gz", hash = "sha256:e5ce9d6991333aeaad37729dd8315d29c4b094ea9476a32fb49933b556c723fb", size = 2534495, upload-time = "2026-01-20T23:06:47.099Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d8/99/91fd58d495f03495e93b3f6100336d7a1df212aa90ad37d1322b8bb7df71/jax-0.9.0-py3-none-any.whl", hash = "sha256:be1c7c1fa91b338f071805a786f9366d4a08361b711b0568ef5a157226c68915", size = 2955442, upload-time = "2026-01-20T22:27:05.128Z" },
-]
-
-[package.optional-dependencies]
-cuda12 = [
-    { name = "jax-cuda12-plugin", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, extra = ["with-cuda"], marker = "python_full_version >= '3.11' and sys_platform == 'linux'" },
-    { name = "jaxlib", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' and sys_platform == 'linux'" },
+    { name = "jax-cuda12-plugin", extra = ["with-cuda"], marker = "sys_platform == 'linux'" },
+    { name = "jaxlib", marker = "sys_platform == 'linux'" },
 ]
 
 [[package]]
 name = "jax-cuda12-pjrt"
-version = "0.6.2"
+version = "0.4.38"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version < '3.11' and sys_platform == 'linux'",
-]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/43/8b/096a12d91b1bc76a13cd8e63f2d8eae5ca9b5693b5ee2687e46be3b5d779/jax_cuda12_pjrt-0.6.2-py3-none-manylinux2014_aarch64.whl", hash = "sha256:22faf020d2e8f7ca1e2915633241f7df7678b73c7078f5f0b2f113248337f7de", size = 111228681, upload-time = "2025-06-17T23:11:55.179Z" },
-    { url = "https://files.pythonhosted.org/packages/9c/8e/21c21b4335fce1c022c339da5e6b6249c246ad062e924d28fb0eda4bcef0/jax_cuda12_pjrt-0.6.2-py3-none-manylinux2014_x86_64.whl", hash = "sha256:8cd9ead7948ea2c778a508fef5d1159e8b7abf4fccc7037c3fe1dbfcd95012dc", size = 125263999, upload-time = "2025-06-17T23:11:59.986Z" },
-]
-
-[[package]]
-name = "jax-cuda12-pjrt"
-version = "0.9.0"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.14' and sys_platform == 'linux'",
-    "python_full_version == '3.13.*' and sys_platform == 'linux'",
-    "python_full_version == '3.12.*' and sys_platform == 'linux'",
-    "python_full_version == '3.11.*' and sys_platform == 'linux'",
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/4c/59/440f469a331bd20780e32e159a2e88692f60db904120fe9658f4bb2b3c59/jax_cuda12_pjrt-0.9.0-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:23e574b8275b6015285742720f1ad7dbc6f0e1595cb09e3bb21d87817953953f", size = 148940205, upload-time = "2026-01-20T22:27:08.24Z" },
-    { url = "https://files.pythonhosted.org/packages/65/62/92d38feb8b536ca24610908dc23fe08e12f2c51eb722fd333e8572343cc6/jax_cuda12_pjrt-0.9.0-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:bdb3eabee435ac967aff8b2eeda2f7b9cd81ed003f127df4d6f1e55fa5d94684", size = 154911830, upload-time = "2026-01-20T22:27:14.003Z" },
+    { url = "https://files.pythonhosted.org/packages/90/43/ac2c369e202e3e3e7e5aa7929b197801ba02eaf11868437adaa5341704e4/jax_cuda12_pjrt-0.4.38-py3-none-manylinux2014_x86_64.whl", hash = "sha256:83be4c59fbcf30077a60085d98e7d59dc738b1c91e0d628e4ac1779fde15ac2b", size = 102694375, upload-time = "2024-12-17T23:08:39.747Z" },
 ]
 
 [[package]]
 name = "jax-cuda12-plugin"
-version = "0.6.2"
+version = "0.4.38"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version < '3.11' and sys_platform == 'linux'",
-]
 dependencies = [
-    { name = "jax-cuda12-pjrt", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' and sys_platform == 'linux'" },
+    { name = "jax-cuda12-pjrt", marker = "sys_platform == 'linux'" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/58/29/4b8822ca459da39bda9be7454908ae4e29d88cfb99b480b641cbb063af7a/jax_cuda12_plugin-0.6.2-cp310-cp310-manylinux2014_aarch64.whl", hash = "sha256:bc5c3a75d05519b4d326e4669d0f7ad0fe0f0acf875f9313d913748ccca5a9ea", size = 15873729, upload-time = "2025-06-17T23:12:05.046Z" },
-    { url = "https://files.pythonhosted.org/packages/4d/3d/f543bab6ef7eebb9840d618fb2272bdcc0e990e60aa012f14a3564532823/jax_cuda12_plugin-0.6.2-cp310-cp310-manylinux2014_x86_64.whl", hash = "sha256:1751f88989269b3cdb0dfe4f7b072a6442149818c9bc98c3a395c8acaf910a79", size = 15879965, upload-time = "2025-06-17T23:12:07.323Z" },
-    { url = "https://files.pythonhosted.org/packages/9e/99/90f81c660bf662698be17e8b959d8302682c5cd5ce0729c0bfc883d8affe/jax_cuda12_plugin-0.6.2-cp311-cp311-manylinux2014_aarch64.whl", hash = "sha256:2cd8e279a59a38ba0c978a831e13adeb6ee9e4572fba387c7975ba3ad535dd38", size = 15873970, upload-time = "2025-06-17T23:12:09.492Z" },
-    { url = "https://files.pythonhosted.org/packages/ad/00/e733c87a2fb7265c96f48c991a896552c873de949217823d519288724d91/jax_cuda12_plugin-0.6.2-cp311-cp311-manylinux2014_x86_64.whl", hash = "sha256:0896cbb308d95291e205cd89d254029dee3a1df43d66e9831331a9afd2d27870", size = 15879563, upload-time = "2025-06-17T23:12:11.439Z" },
-    { url = "https://files.pythonhosted.org/packages/1d/53/6ea0db7230ac3dcb26b732452f4f2e2c6868b75d3603be19cee388fef279/jax_cuda12_plugin-0.6.2-cp312-cp312-manylinux2014_aarch64.whl", hash = "sha256:6c9b002d13b1fcb9403713eedd3876a227ad1ffbdfb3811b1f9f89af4c25a5f7", size = 15867462, upload-time = "2025-06-17T23:12:14.093Z" },
-    { url = "https://files.pythonhosted.org/packages/a5/db/e6643143caf573273eedb991cb1af2bea964b84594a8887802eb0b6ba64a/jax_cuda12_plugin-0.6.2-cp312-cp312-manylinux2014_x86_64.whl", hash = "sha256:febd099f970d350eb8fa5a2c9a2fb4b0ea7b3d6a89df1496663edfa7afe590e5", size = 15876401, upload-time = "2025-06-17T23:12:15.964Z" },
-    { url = "https://files.pythonhosted.org/packages/b4/10/74fbae1c1bb9d11b113c62e03c445bdf0aaaa4981bc13d2de8e3f4f503ca/jax_cuda12_plugin-0.6.2-cp313-cp313-manylinux2014_aarch64.whl", hash = "sha256:773efa8b55a837406c561f0ef02144dda9019181193760ec5419eec9dd2b9aac", size = 15868561, upload-time = "2025-06-17T23:12:18.189Z" },
-    { url = "https://files.pythonhosted.org/packages/2b/96/53928ad62ecddbf76f4c413025fdeab5a90adf7fbd970d800162399e504a/jax_cuda12_plugin-0.6.2-cp313-cp313-manylinux2014_x86_64.whl", hash = "sha256:db4c6103c912d8cd1adf94c34d313bb4760ca7f01c897ca7cd62e65f27994199", size = 15876276, upload-time = "2025-06-17T23:12:20.361Z" },
-    { url = "https://files.pythonhosted.org/packages/22/29/f1c1790d77ccad3587e6c97045b567006a8050fec151581d4cf883779e25/jax_cuda12_plugin-0.6.2-cp313-cp313t-manylinux2014_aarch64.whl", hash = "sha256:ed5316ca1818db7ef53230ee0a41398d3a60942e361dfb857a952eb4d92fc8d7", size = 15964355, upload-time = "2025-06-17T23:12:22.176Z" },
-    { url = "https://files.pythonhosted.org/packages/07/af/c3224aafbc1d2d7654359a5410319bf15361067635bd3616cf5ad3e16af2/jax_cuda12_plugin-0.6.2-cp313-cp313t-manylinux2014_x86_64.whl", hash = "sha256:83345f52f610cdb8e90044566d8e120864150b8090968c8ab6dd8e0bfb9a6a9f", size = 16037754, upload-time = "2025-06-17T23:12:24.066Z" },
+    { url = "https://files.pythonhosted.org/packages/04/a1/68de086733e4c8c1bab9930b19f008c216b5d8ecf1bf76b698ea36963ca7/jax_cuda12_plugin-0.4.38-cp310-cp310-manylinux2014_x86_64.whl", hash = "sha256:9d42e999cd64dd567c149ed68f79392ba88644364218bb636cdcefa0197c92fe", size = 16191992, upload-time = "2024-12-17T23:08:50.44Z" },
+    { url = "https://files.pythonhosted.org/packages/52/26/d2e3b4779ae03969415c6779b0b46473174e301ff575fd3049fd039e51cb/jax_cuda12_plugin-0.4.38-cp311-cp311-manylinux2014_x86_64.whl", hash = "sha256:704654386f0e600a0281daaea95882aa67a47edb68393b61b1b173c7e8ca74a8", size = 16193253, upload-time = "2024-12-17T23:08:54.051Z" },
+    { url = "https://files.pythonhosted.org/packages/06/85/7ee0f28d06c527b29f872af0431bd8c3fc803e02c24540cb966478c25d8b/jax_cuda12_plugin-0.4.38-cp312-cp312-manylinux2014_x86_64.whl", hash = "sha256:51f6acff7130eb72ebb02534dfd3581a0f5ea06971de52d7ebc21ad4d87fe71e", size = 16190637, upload-time = "2024-12-17T23:08:58.427Z" },
+    { url = "https://files.pythonhosted.org/packages/36/3c/f377dda64f4899765de20e6172f99ea5fa1b38e5c044de310f2128985534/jax_cuda12_plugin-0.4.38-cp313-cp313-manylinux2014_x86_64.whl", hash = "sha256:09228a4c2b443b76a8cd9a8ec229060089c4cc836e062496875a6d6fdc66d31f", size = 16190799, upload-time = "2024-12-17T23:09:04.446Z" },
 ]
 
 [package.optional-dependencies]
 with-cuda = [
-    { name = "nvidia-cublas-cu12", marker = "python_full_version < '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-cuda-cupti-cu12", marker = "python_full_version < '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-cuda-nvcc-cu12", marker = "python_full_version < '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-cuda-nvrtc-cu12", marker = "python_full_version < '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-cuda-runtime-cu12", marker = "python_full_version < '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-cudnn-cu12", marker = "python_full_version < '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-cufft-cu12", marker = "python_full_version < '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-cusolver-cu12", marker = "python_full_version < '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-cusparse-cu12", marker = "python_full_version < '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-nccl-cu12", marker = "python_full_version < '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-nvjitlink-cu12", marker = "python_full_version < '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-nvshmem-cu12", marker = "python_full_version < '3.11' and sys_platform == 'linux'" },
-]
-
-[[package]]
-name = "jax-cuda12-plugin"
-version = "0.9.0"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.14' and sys_platform == 'linux'",
-    "python_full_version == '3.13.*' and sys_platform == 'linux'",
-    "python_full_version == '3.12.*' and sys_platform == 'linux'",
-    "python_full_version == '3.11.*' and sys_platform == 'linux'",
-]
-dependencies = [
-    { name = "jax-cuda12-pjrt", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' and sys_platform == 'linux'" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d5/3b/eacb05b1adced9df3ba2a0c80eb0dc349d065c588b56e082ee4cc1aef601/jax_cuda12_plugin-0.9.0-cp311-cp311-manylinux_2_27_aarch64.whl", hash = "sha256:a1c3f310494f9f7be62f2b8425705c3c466f2a621b4e4dbdbfb15ad9a7afbdc0", size = 5640073, upload-time = "2026-01-20T22:27:17.042Z" },
-    { url = "https://files.pythonhosted.org/packages/c1/5b/613eb8dc6ff57d5689c5680e1374641d850e7d470024e4c25760b82b11fb/jax_cuda12_plugin-0.9.0-cp311-cp311-manylinux_2_27_x86_64.whl", hash = "sha256:89387777e1721aaabdeda18a577afc7cfe4ee0ab1c37b3261bd472ab8df072f7", size = 5636670, upload-time = "2026-01-20T22:27:18.825Z" },
-    { url = "https://files.pythonhosted.org/packages/dc/12/c31201a0873c6c4ac4510d94983c8e5e67641d99027dd5888925a0083d63/jax_cuda12_plugin-0.9.0-cp312-cp312-manylinux_2_27_aarch64.whl", hash = "sha256:de2eafa6ebad54103f09c71100e4e46f7ea097e8d119459ef91e8e5b14cb9fa2", size = 5634516, upload-time = "2026-01-20T22:27:21.122Z" },
-    { url = "https://files.pythonhosted.org/packages/58/26/e33a3d0c6987a41509edf0a89770507824696cb3c3e52f554ee2b6840a0a/jax_cuda12_plugin-0.9.0-cp312-cp312-manylinux_2_27_x86_64.whl", hash = "sha256:34936d77ed6859da08c2e818a5154cc7efb58451d9d04c3ecd5b44d3605fbdf2", size = 5634244, upload-time = "2026-01-20T22:27:22.676Z" },
-    { url = "https://files.pythonhosted.org/packages/6d/a3/908e25a2491399730bbb7ae05fb395a8773a74f657a16bb75d6309bc9da8/jax_cuda12_plugin-0.9.0-cp313-cp313-manylinux_2_27_aarch64.whl", hash = "sha256:98d7f06d6ed31ffe5483603582ffdfc80b131bd7e397e612b624e21bf69de2e2", size = 5634780, upload-time = "2026-01-20T22:27:23.939Z" },
-    { url = "https://files.pythonhosted.org/packages/38/76/acd2a639f24f2b65de6213b9790de977b6ab5fe292e5be54fddc38dfb62e/jax_cuda12_plugin-0.9.0-cp313-cp313-manylinux_2_27_x86_64.whl", hash = "sha256:66790a20947f7f646a2a4a9c5ef821756d2c33fb99de2a80e61288c08dc1789a", size = 5633810, upload-time = "2026-01-20T22:27:25.183Z" },
-    { url = "https://files.pythonhosted.org/packages/92/c1/f1b1eb865530076c4cd3e9afaedbf64003601a339a7acda726e57781ba33/jax_cuda12_plugin-0.9.0-cp313-cp313t-manylinux_2_27_aarch64.whl", hash = "sha256:91f65c5c8e3bb59e85dfc0f932db620802689ddb9134a6c99b194815631c41b1", size = 5648176, upload-time = "2026-01-20T22:27:26.712Z" },
-    { url = "https://files.pythonhosted.org/packages/9a/dc/5b0c842e87c9fefff0d13f77ce232ca7a78ea4925cea5aad24ed2c9b8bb0/jax_cuda12_plugin-0.9.0-cp313-cp313t-manylinux_2_27_x86_64.whl", hash = "sha256:ef73888eee27b04ff21b9c4f824c45b3e185f4f18bc3759d6dde6c6227adc463", size = 5642913, upload-time = "2026-01-20T22:27:27.995Z" },
-    { url = "https://files.pythonhosted.org/packages/d0/68/05d90a64533d9a5ebd422255eb6bbfa17a66cbe316778ef0ccf490acf22e/jax_cuda12_plugin-0.9.0-cp314-cp314-manylinux_2_27_aarch64.whl", hash = "sha256:ea91d873f13a63c401c283a4f5ee870b811cb2b8122e2f6aa7d5abfa24410f33", size = 5635664, upload-time = "2026-01-20T22:27:29.975Z" },
-    { url = "https://files.pythonhosted.org/packages/54/f6/a4b5b856fe12eaec1815c5b008c4f636c1b7c487271c3ec4b3b1386be7e4/jax_cuda12_plugin-0.9.0-cp314-cp314-manylinux_2_27_x86_64.whl", hash = "sha256:9442c5879ffb4007e253ba7e713866425b3ba708363cdbb1a11338299c327bbd", size = 5635048, upload-time = "2026-01-20T22:27:31.294Z" },
-    { url = "https://files.pythonhosted.org/packages/86/1b/8df4da7d58589bb075c25b47eec47a8de82800677f21f31b27f363a2b432/jax_cuda12_plugin-0.9.0-cp314-cp314t-manylinux_2_27_aarch64.whl", hash = "sha256:b085f468eccc3205d5d1f6f2f8d6d48053dfa30d7d56d5b6492072fd63264947", size = 5648106, upload-time = "2026-01-20T22:27:32.933Z" },
-    { url = "https://files.pythonhosted.org/packages/c7/48/8c3933c56edaf329103591ab51a6d7e54bf692064214cdb81898d364c62a/jax_cuda12_plugin-0.9.0-cp314-cp314t-manylinux_2_27_x86_64.whl", hash = "sha256:29ac0baeca8cee1466b9bc666b21e9a2bfd1ba7743585cd14f231fe87c184758", size = 5643395, upload-time = "2026-01-20T22:27:34.178Z" },
-]
-
-[package.optional-dependencies]
-with-cuda = [
-    { name = "nvidia-cublas-cu12", marker = "python_full_version >= '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-cuda-cupti-cu12", marker = "python_full_version >= '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-cuda-nvcc-cu12", marker = "python_full_version >= '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-cuda-nvrtc-cu12", marker = "python_full_version >= '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-cuda-runtime-cu12", marker = "python_full_version >= '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-cudnn-cu12", marker = "python_full_version >= '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-cufft-cu12", marker = "python_full_version >= '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-cusolver-cu12", marker = "python_full_version >= '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-cusparse-cu12", marker = "python_full_version >= '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-nccl-cu12", marker = "python_full_version >= '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-nvjitlink-cu12", marker = "python_full_version >= '3.11' and sys_platform == 'linux'" },
-    { name = "nvidia-nvshmem-cu12", marker = "python_full_version >= '3.11' and sys_platform == 'linux'" },
+    { name = "nvidia-cublas-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cuda-cupti-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cuda-nvcc-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cuda-runtime-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cudnn-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cufft-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cusolver-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cusparse-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-nccl-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform == 'linux'" },
 ]
 
 [[package]]
 name = "jaxlib"
-version = "0.6.2"
+version = "0.4.38"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version < '3.11' and sys_platform == 'linux'",
-    "python_full_version < '3.11' and sys_platform != 'linux'",
-]
 dependencies = [
-    { name = "ml-dtypes", marker = "python_full_version < '3.11'" },
+    { name = "ml-dtypes" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/15/c5/41598634c99cbebba46e6777286fb76abc449d33d50aeae5d36128ca8803/jaxlib-0.6.2-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:da4601b2b5dc8c23d6afb293eacfb9aec4e1d1871cb2f29c5a151d103e73b0f8", size = 54298019, upload-time = "2025-06-17T23:10:36.916Z" },
-    { url = "https://files.pythonhosted.org/packages/81/af/db07d746cd5867d5967528e7811da53374e94f64e80a890d6a5a4b95b130/jaxlib-0.6.2-cp310-cp310-manylinux2014_aarch64.whl", hash = "sha256:4205d098ce8efb5f7fe2fe5098bae6036094dc8d8829f5e0e0d7a9b155326336", size = 79440052, upload-time = "2025-06-17T23:10:41.282Z" },
-    { url = "https://files.pythonhosted.org/packages/7e/d8/b7ae9e819c62c1854dbc2c70540a5c041173fbc8bec5e78ab7fd615a4aee/jaxlib-0.6.2-cp310-cp310-manylinux2014_x86_64.whl", hash = "sha256:c087a0eb6fb7f6f8f54d56f4730328dfde5040dd3b5ddfa810e7c28ea7102b42", size = 89917034, upload-time = "2025-06-17T23:10:45.897Z" },
-    { url = "https://files.pythonhosted.org/packages/fd/e5/87e91bc70569ac5c3e3449eefcaf47986e892f10cfe1d5e5720dceae3068/jaxlib-0.6.2-cp310-cp310-win_amd64.whl", hash = "sha256:153eaa51f778b60851720729d4f461a91edd9ba3932f6f3bc598d4413870038b", size = 57896337, upload-time = "2025-06-17T23:10:50.179Z" },
-    { url = "https://files.pythonhosted.org/packages/a4/ee/6899b0aed36a4acc51319465ddd83c7c300a062a9e236cceee00984ffe0b/jaxlib-0.6.2-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:a208ff61c58128d306bb4e5ad0858bd2b0960f2c1c10ad42c548f74a60c0020e", size = 54300346, upload-time = "2025-06-17T23:10:54.591Z" },
-    { url = "https://files.pythonhosted.org/packages/e6/03/34bb6b346609079a71942cfbf507892e3c877a06a430a0df8429c455cebc/jaxlib-0.6.2-cp311-cp311-manylinux2014_aarch64.whl", hash = "sha256:11eae7e05bc5a79875da36324afb9eddd4baeaef2a0386caf6d4f3720b9aef28", size = 79438425, upload-time = "2025-06-17T23:10:58.356Z" },
-    { url = "https://files.pythonhosted.org/packages/80/02/49b05cbab519ffd3cb79586336451fbbf8b6523f67128a794acc9f179000/jaxlib-0.6.2-cp311-cp311-manylinux2014_x86_64.whl", hash = "sha256:335d7e3515ce78b52a410136f46aa4a7ea14d0e7d640f34e1e137409554ad0ac", size = 89920354, upload-time = "2025-06-17T23:11:03.086Z" },
-    { url = "https://files.pythonhosted.org/packages/a7/7a/93b28d9452b46c15fc28dd65405672fc8a158b35d46beabaa0fe9631afb0/jaxlib-0.6.2-cp311-cp311-win_amd64.whl", hash = "sha256:c6815509997d6b05e5c9daa7994b9ad473ce3e8c8a17bdbbcacc3c744f76f7a0", size = 57895707, upload-time = "2025-06-17T23:11:07.074Z" },
-    { url = "https://files.pythonhosted.org/packages/ac/db/05e702d2534e87abf606b1067b46a273b120e6adc7d459696e3ce7399317/jaxlib-0.6.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:34d8a684a8be949dd87dd4acc97101b4106a0dc9ad151ec891da072319a57b99", size = 54301644, upload-time = "2025-06-17T23:11:10.977Z" },
-    { url = "https://files.pythonhosted.org/packages/0d/8a/b0a96887b97a25d45ae2c30e4acecd2f95acd074c18ec737dda8c5cc7016/jaxlib-0.6.2-cp312-cp312-manylinux2014_aarch64.whl", hash = "sha256:87ec2dc9c3ed9ab936eec8535160c5fbd2c849948559f1c5daa75f63fabe5942", size = 79439161, upload-time = "2025-06-17T23:11:14.822Z" },
-    { url = "https://files.pythonhosted.org/packages/ba/e8/71c2555431edb5dd115cf86a7b599aa7e1be26728d89ae59aa11251d299c/jaxlib-0.6.2-cp312-cp312-manylinux2014_x86_64.whl", hash = "sha256:f1dd09b481a93c1d4c750013f467f74194493ba7bd29fcd4d1cec16e3a214f65", size = 89942952, upload-time = "2025-06-17T23:11:19.181Z" },
-    { url = "https://files.pythonhosted.org/packages/de/3a/06849113c844b86d20174df54735c84202ccf82cbd36d805f478c834418b/jaxlib-0.6.2-cp312-cp312-win_amd64.whl", hash = "sha256:921dbd4db214eba19a29ba9f2450d880e08b2b2c7b968f28cc89da3e62366af4", size = 57919603, upload-time = "2025-06-17T23:11:23.207Z" },
-    { url = "https://files.pythonhosted.org/packages/af/38/bed4279c2a3407820ed8bcd72dbad43c330ada35f88fafe9952b35abf785/jaxlib-0.6.2-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:bff67b188133ce1f0111c7b163ac321fd646b59ed221ea489063e2e0f85cb967", size = 54300638, upload-time = "2025-06-17T23:11:26.372Z" },
-    { url = "https://files.pythonhosted.org/packages/52/dc/9e35a1dc089ddf3d6be53ef2e6ba4718c5b6c0f90bccc535a20edac0c895/jaxlib-0.6.2-cp313-cp313-manylinux2014_aarch64.whl", hash = "sha256:70498837caf538bd458ff6858c8bfd404db82015aba8f663670197fa9900ff02", size = 79439983, upload-time = "2025-06-17T23:11:30.016Z" },
-    { url = "https://files.pythonhosted.org/packages/34/16/e93f0184b80a4e1ad38c6998aa3a2f7569c0b0152cbae39f7572393eda04/jaxlib-0.6.2-cp313-cp313-manylinux2014_x86_64.whl", hash = "sha256:f94163f14c8fd3ba93ae14b631abacf14cb031bba0b59138869984b4d10375f8", size = 89941720, upload-time = "2025-06-17T23:11:34.62Z" },
-    { url = "https://files.pythonhosted.org/packages/06/b9/ea50792ee0333dba764e06c305fe098bce1cb938dcb66fbe2fc47ef5dd02/jaxlib-0.6.2-cp313-cp313-win_amd64.whl", hash = "sha256:b977604cd36c74b174d25ed685017379468138eb747d865f75e466cb273c801d", size = 57919073, upload-time = "2025-06-17T23:11:39.344Z" },
-    { url = "https://files.pythonhosted.org/packages/09/ce/9596391c104a0547fcaf6a8c72078bbae79dbc8e7f0843dc8318f6606328/jaxlib-0.6.2-cp313-cp313t-manylinux2014_aarch64.whl", hash = "sha256:39cf9555f85ae1ce2e2c1a59fc71f2eca4f9867a7cb934fef881ba56b11371d1", size = 79579638, upload-time = "2025-06-17T23:11:43.054Z" },
-    { url = "https://files.pythonhosted.org/packages/10/79/f6e80f7f4cacfc9f03e64ac57ecb856b140de7c2f939b25f8dcf1aff63f9/jaxlib-0.6.2-cp313-cp313t-manylinux2014_x86_64.whl", hash = "sha256:3abd536e44b05fb1657507e3ff1fc3691f99613bae3921ecab9e82f27255f784", size = 90066675, upload-time = "2025-06-17T23:11:47.454Z" },
-]
-
-[[package]]
-name = "jaxlib"
-version = "0.9.0"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.14' and sys_platform == 'linux'",
-    "python_full_version == '3.13.*' and sys_platform == 'linux'",
-    "python_full_version == '3.12.*' and sys_platform == 'linux'",
-    "python_full_version == '3.11.*' and sys_platform == 'linux'",
-    "python_full_version >= '3.14' and sys_platform == 'win32'",
-    "python_full_version >= '3.14' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.12.*' and sys_platform == 'win32'",
-    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.11.*' and sys_platform == 'win32'",
-    "python_full_version == '3.11.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.11.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-]
-dependencies = [
-    { name = "ml-dtypes", marker = "python_full_version >= '3.11'" },
     { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.17.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/96/71/283ee038a94869e7b3b3a27a594c028a58692e69f338bc30d0a466711830/jaxlib-0.9.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:2770e2250e7923111f5e28813e593492fde3df40185b50bdc8bc41b866b99a8e", size = 56091849, upload-time = "2026-01-20T22:28:06.682Z" },
-    { url = "https://files.pythonhosted.org/packages/1d/e9/100dd8a23407f5d883b684cd0ab9d23dfb5a889c17ba20ddc67fd6bb78d5/jaxlib-0.9.0-cp311-cp311-manylinux_2_27_aarch64.whl", hash = "sha256:1f21915b43b711f0abb3c35d26356bdcd16a68261d57fc8fefe370bc6dfcab4a", size = 74771277, upload-time = "2026-01-20T22:28:09.928Z" },
-    { url = "https://files.pythonhosted.org/packages/a5/43/056cd98633ab0454c77b1ecebe1d5e21a76c06576a0ba655e9ac582ce985/jaxlib-0.9.0-cp311-cp311-manylinux_2_27_x86_64.whl", hash = "sha256:9f9eba014590435cec5fa1f6af2310a1a05db98d61331d18d6b278ff5424cd33", size = 80323264, upload-time = "2026-01-20T22:28:13.864Z" },
-    { url = "https://files.pythonhosted.org/packages/85/75/abc1ad61eb08b8f47a3f752d9ab1ea89cdab93a48a279a3ea650ab0be47f/jaxlib-0.9.0-cp311-cp311-win_amd64.whl", hash = "sha256:67d05eb00b9af04d5213a962c5f0551b0fb521efc27aab63e802233da1c7814b", size = 60482859, upload-time = "2026-01-20T22:28:16.869Z" },
-    { url = "https://files.pythonhosted.org/packages/14/c1/ed8a199b71627f9c40b84a9fb40bba44bc048e62449633c5ee507066b19c/jaxlib-0.9.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:3c8d13bd74a55f9e5435587730b1ee067b17fc4c29b897f467c095003c63b37d", size = 56102192, upload-time = "2026-01-20T22:28:19.717Z" },
-    { url = "https://files.pythonhosted.org/packages/5e/15/345f16517435b8f1deadd5bbfaae8dde42ed19af6e86ebbca0620279bab4/jaxlib-0.9.0-cp312-cp312-manylinux_2_27_aarch64.whl", hash = "sha256:a19e0ad375161190073d12221b350b3da29f97d9e72b0bc6400d0dbf171cda5f", size = 74771957, upload-time = "2026-01-20T22:28:22.576Z" },
-    { url = "https://files.pythonhosted.org/packages/20/7c/54ea33501e46b62b80071ed9cb96b0cfb28df88b7907edff0de41e9e9892/jaxlib-0.9.0-cp312-cp312-manylinux_2_27_x86_64.whl", hash = "sha256:93258e8bbfad38f9207a649797e07bf6e7fb30a8dece67b1485f9d550c59121f", size = 80336468, upload-time = "2026-01-20T22:28:25.86Z" },
-    { url = "https://files.pythonhosted.org/packages/c6/fe/1969b10690fb49f1fadcc616367857c54b16949a008778877e359e5da13b/jaxlib-0.9.0-cp312-cp312-win_amd64.whl", hash = "sha256:c75f8d3ae8e8411fc90e6c18a99971ad4a5da8d200e5ad710d650e7c1d5652e6", size = 60508836, upload-time = "2026-01-20T22:28:29.275Z" },
-    { url = "https://files.pythonhosted.org/packages/ab/1a/a1db3023f66af906c85cdbafad88a0ae02df0d87ac7f749f1c9140ef6e3c/jaxlib-0.9.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:abcf50ca9f0f015f756035ff00803f5d04f42964775f936420d7afbf23b61c5c", size = 56102369, upload-time = "2026-01-20T22:28:32.554Z" },
-    { url = "https://files.pythonhosted.org/packages/23/7e/ad2d0519939a45eb4a3151d5e41bef1d68eec7b3e7f961e09ef3bf2d6607/jaxlib-0.9.0-cp313-cp313-manylinux_2_27_aarch64.whl", hash = "sha256:7da962fcbdfc18093ea371cfb5420fc70b51d3160d15bef0b780e63126ad25c0", size = 74769548, upload-time = "2026-01-20T22:28:35.481Z" },
-    { url = "https://files.pythonhosted.org/packages/ec/d0/77bda8d946e3a854a5a533be7baf439bfffab9adae2a668a4dc645a494cd/jaxlib-0.9.0-cp313-cp313-manylinux_2_27_x86_64.whl", hash = "sha256:6aba184182c45e403b62dc269a04747da55da11d97586269710199204262d4ec", size = 80336519, upload-time = "2026-01-20T22:28:39.067Z" },
-    { url = "https://files.pythonhosted.org/packages/22/0c/6e7891a226ee3fd717af26fdbc93ef6dcf587849a0020fdfc69ccb38ca7f/jaxlib-0.9.0-cp313-cp313-win_amd64.whl", hash = "sha256:e81debd335315ef178fa995399653444e620c316abe86bc51477ac012e13efd4", size = 60508118, upload-time = "2026-01-20T22:28:42.51Z" },
-    { url = "https://files.pythonhosted.org/packages/32/42/75c4cbb31cd56d334839fe5bea132eb5c00f1298f9a04245c0951af5f623/jaxlib-0.9.0-cp313-cp313t-macosx_11_0_arm64.whl", hash = "sha256:de5d4920da2eb1182a0dbc01cfee9acf8617b64562a0b8f153fdfbcd00381f35", size = 56213023, upload-time = "2026-01-20T22:28:45.202Z" },
-    { url = "https://files.pythonhosted.org/packages/06/af/91c23ae50bcfdc1dbeecd8ee4a7e87128a99a58bf6b6f6081215e8674a00/jaxlib-0.9.0-cp313-cp313t-manylinux_2_27_aarch64.whl", hash = "sha256:79caef921ebbbd78c239c3b4ed7644e0605bf454a066ad7700dde6c1e60b4b1e", size = 74887880, upload-time = "2026-01-20T22:28:48.227Z" },
-    { url = "https://files.pythonhosted.org/packages/9a/64/7875e6ee446b558a366b3e9cbf26bab2390d87ac8015bc0dc49b35806b53/jaxlib-0.9.0-cp313-cp313t-manylinux_2_27_x86_64.whl", hash = "sha256:c857f062c720cff924f2237c925d46b8a8e8fde2b829ef2dc44cd4b6a7b8df88", size = 80440020, upload-time = "2026-01-20T22:28:51.378Z" },
-    { url = "https://files.pythonhosted.org/packages/14/ce/5098b850ab4d667931ed4cd390aee0c866a5cb892270cddb692788168fd6/jaxlib-0.9.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:30460814e85e6cfda142726ffcb06d421ab60093ca248c7256c2ecfd10a81fd6", size = 56104537, upload-time = "2026-01-20T22:28:54.857Z" },
-    { url = "https://files.pythonhosted.org/packages/b9/66/e6f7e2603a61c9ea0291744321a2e8866d275578cd68594ac40eda315aad/jaxlib-0.9.0-cp314-cp314-manylinux_2_27_aarch64.whl", hash = "sha256:b6b1ea090293c2e62df64c3fd4d46f85f60bb18b8253b3587a62ee53ad14690f", size = 74782881, upload-time = "2026-01-20T22:28:57.675Z" },
-    { url = "https://files.pythonhosted.org/packages/50/49/b6773eba562747df115d8fbd0716625108e61af0001611a501ea9ad23eab/jaxlib-0.9.0-cp314-cp314-manylinux_2_27_x86_64.whl", hash = "sha256:881db842435ed40663c050745fdecf4f7b4850b1738a7538850d14e894798115", size = 80343444, upload-time = "2026-01-20T23:06:29.728Z" },
-    { url = "https://files.pythonhosted.org/packages/5f/b0/ed338d3d5ff378a214a9e5fedce6c96b4705d921bffded709e01d209b998/jaxlib-0.9.0-cp314-cp314-win_amd64.whl", hash = "sha256:d1077f30bd6608b12234f7d7a0cb0cf93f89c807ad69fee6c9146661f26e6b76", size = 62826259, upload-time = "2026-01-20T23:06:33.381Z" },
-    { url = "https://files.pythonhosted.org/packages/7d/c0/c172876423623282af055b4b46bcea1fd933afc3306455e5eb6e5ef18344/jaxlib-0.9.0-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:48e315c70509f7927e379c4dd98d6e2dc2a6198677a6e0c50f1cc44199ba50d3", size = 56210812, upload-time = "2026-01-20T23:06:36.154Z" },
-    { url = "https://files.pythonhosted.org/packages/49/c1/8d051e9c2860ca228b98ba068daeadd7cdd0e8e06b4a93e27cab880e36ab/jaxlib-0.9.0-cp314-cp314t-manylinux_2_27_aarch64.whl", hash = "sha256:ef8006070aaceab7bec17eaa7e1d1b9d369793ad95927a14a27be216c063cd9c", size = 74885282, upload-time = "2026-01-20T23:06:40.22Z" },
-    { url = "https://files.pythonhosted.org/packages/be/9a/b8daeec1fd3f492f9cbd5a8043032be6d24b23394254ff02ba0723f6b2e8/jaxlib-0.9.0-cp314-cp314t-manylinux_2_27_x86_64.whl", hash = "sha256:866ce0a67f59fb0cc70e9b7307e70cf61e8ea3c8bad841796a471162e20056f1", size = 80437354, upload-time = "2026-01-20T23:06:44.06Z" },
+    { url = "https://files.pythonhosted.org/packages/ee/d4/e6a0881a88b8f17491c2ee271fd77c348b0221d9e2ec92dad23a2c9e41bc/jaxlib-0.4.38-cp310-cp310-macosx_10_14_x86_64.whl", hash = "sha256:55c19b9d3f33a6fc59f644aa5a21fba02639ccdd776cb4a9b5526625f57839ff", size = 99663603, upload-time = "2024-12-17T23:04:08.864Z" },
+    { url = "https://files.pythonhosted.org/packages/b6/6d/11569ce873f04c82ec22e58d822f4187dccae1d400c0d6dd05ed314d5328/jaxlib-0.4.38-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:30b2f52cb50d74734af2f477c2533a7a583e3bb7b2c8acdeb361ee77d940577a", size = 79475708, upload-time = "2024-12-17T23:04:21.67Z" },
+    { url = "https://files.pythonhosted.org/packages/72/61/1de2405d13089c83b1ad87ec0266479c9d00080659dae2474892ae356306/jaxlib-0.4.38-cp310-cp310-manylinux2014_aarch64.whl", hash = "sha256:ee19c163a8fdf0839d4c18b88a5fbfb4e731ba7c437416d3e5483e570bb764e4", size = 93219045, upload-time = "2024-12-17T23:04:35.253Z" },
+    { url = "https://files.pythonhosted.org/packages/9c/24/0829decf233c6af9efe7c53888ae8ac72395e0979869cd9cee487e35dac3/jaxlib-0.4.38-cp310-cp310-manylinux2014_x86_64.whl", hash = "sha256:61aeccb9a27c67fdb8450f6357240019cd4511cb9d62a44e4764756d384853ad", size = 101732107, upload-time = "2024-12-17T23:04:49.106Z" },
+    { url = "https://files.pythonhosted.org/packages/0d/04/120c4caac6151f7297fedf9dd776362aa2d417d3f87bda826050b4da45e8/jaxlib-0.4.38-cp310-cp310-win_amd64.whl", hash = "sha256:d6ab745a89d0fb737a36fe1d8b86659e3fffe6ee8303b20651b26193d5edc0ef", size = 64223924, upload-time = "2024-12-17T23:05:04.362Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/6a/b9fba73eb5e758e40a514919e096a039d27dc0ab4776a6cc977f5153a55f/jaxlib-0.4.38-cp311-cp311-macosx_10_14_x86_64.whl", hash = "sha256:b67fdeabd6dfed08b7768f3bdffb521160085f8305669bd197beef61d08de08b", size = 99679916, upload-time = "2024-12-17T23:05:19.908Z" },
+    { url = "https://files.pythonhosted.org/packages/44/2a/3458130d44d44038fd6974e7c43948f68408f685063203b82229b9b72c1a/jaxlib-0.4.38-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:3fb0eaae7369157afecbead50aaf29e73ffddfa77a2335d721bd9794f3c510e4", size = 79488377, upload-time = "2024-12-17T23:05:31.031Z" },
+    { url = "https://files.pythonhosted.org/packages/94/96/7d9a0b9f35af4727df44b68ade4c6f15163840727d1cb47251b1ea515e30/jaxlib-0.4.38-cp311-cp311-manylinux2014_aarch64.whl", hash = "sha256:43db58c4c427627296366a56c10318e1f00f503690e17f94bb4344293e1995e0", size = 93241543, upload-time = "2024-12-17T23:05:42.246Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/2d/68f85037e60c981b37b18b23ace458c677199dea4722ddce541b48ddfc63/jaxlib-0.4.38-cp311-cp311-manylinux2014_x86_64.whl", hash = "sha256:2751ff7037d6a997d0be0e77cc4be381c5a9f9bb8b314edb755c13a6fd969f45", size = 101751923, upload-time = "2024-12-17T23:05:55.321Z" },
+    { url = "https://files.pythonhosted.org/packages/cc/24/a9c571c8a189f58e0b54b14d53fc7f5a0a06e4f1d7ab9edcf8d1d91d07e7/jaxlib-0.4.38-cp311-cp311-win_amd64.whl", hash = "sha256:35226968fc9de6873d1571670eac4117f5ed80e955f7a1775204d1044abe16c6", size = 64255189, upload-time = "2024-12-17T23:06:06.683Z" },
+    { url = "https://files.pythonhosted.org/packages/49/df/08b94c593c0867c7eaa334592807ba74495de4be90580f360db8b96221dc/jaxlib-0.4.38-cp312-cp312-macosx_10_14_x86_64.whl", hash = "sha256:3fefea985f0415816f3bbafd3f03a437050275ef9bac9a72c1314e1644ac57c1", size = 99737849, upload-time = "2024-12-17T23:06:20.406Z" },
+    { url = "https://files.pythonhosted.org/packages/ab/b1/c9d2a7ba9ebeabb7ac37082f4c466364f475dc7550a79358c0f0aa89fdf2/jaxlib-0.4.38-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:f33bcafe32c97a562ecf6894d7c41674c80c0acdedfa5423d49af51147149874", size = 79509242, upload-time = "2024-12-17T23:06:33.73Z" },
+    { url = "https://files.pythonhosted.org/packages/53/25/dd670d8bdf3799ece76d12cfe6a6a250ea256057aa4b0fcace4753a99d2d/jaxlib-0.4.38-cp312-cp312-manylinux2014_aarch64.whl", hash = "sha256:496f45b0e001a2341309cd0c74af0b670537dced79c168cb230cfcc773f0aa86", size = 93251503, upload-time = "2024-12-17T23:06:48.243Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/cc/37fce5162f6b9070203fd76cc0f298d9b3bfdf01939a78935a6078d63621/jaxlib-0.4.38-cp312-cp312-manylinux2014_x86_64.whl", hash = "sha256:dad6c0a96567c06d083c0469fec40f201210b099365bd698be31a6d2ec88fd59", size = 101792792, upload-time = "2024-12-17T23:07:01.615Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/7a/8515950a60a4ea5b13cc98fc0a42e36553b2db5a6eedc00d3bd7836f77b5/jaxlib-0.4.38-cp312-cp312-win_amd64.whl", hash = "sha256:966cdec36cfa978f5b4582bcb4147fe511725b94c1a752dac3a5f52ce46b6fa3", size = 64288223, upload-time = "2024-12-17T23:07:15.024Z" },
+    { url = "https://files.pythonhosted.org/packages/91/03/aee503c7077c6dbbd568842303426c6ec1cef9bff330c418c9e71906cccd/jaxlib-0.4.38-cp313-cp313-macosx_10_14_x86_64.whl", hash = "sha256:41e55ae5818a882e5789e848f6f16687ac132bcfbb5a5fa114a5d18b78d05f2d", size = 99739026, upload-time = "2024-12-17T23:07:27.542Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/bf/fbbf61da319611d88e11c691d5a2077039208ded05e1731dea940f824a59/jaxlib-0.4.38-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:6fe326b8af366387dd47ccf312583b2b17fed12712c9b74a648b18a13cbdbabf", size = 79508735, upload-time = "2024-12-17T23:07:42.037Z" },
+    { url = "https://files.pythonhosted.org/packages/e4/0b/8cbff0b6d62a4694351c49baf53b7ed8deb8a6854d129408c38158e11676/jaxlib-0.4.38-cp313-cp313-manylinux2014_aarch64.whl", hash = "sha256:248cca3771ebf24b070f49701364ceada33e6139445b06c782cca5ac5ad92bf4", size = 93251882, upload-time = "2024-12-17T23:07:56.85Z" },
+    { url = "https://files.pythonhosted.org/packages/15/57/7f0283273b69c417071bcd2f4c2ed076479ec5ffc22a647f13c21da8d071/jaxlib-0.4.38-cp313-cp313-manylinux2014_x86_64.whl", hash = "sha256:2ce77ba8cda9259a4bca97afc1c722e4291a6c463a63f8d372c6edc85117d625", size = 101791137, upload-time = "2024-12-17T23:08:10.361Z" },
+    { url = "https://files.pythonhosted.org/packages/de/de/d6c4d234cd426b97459cb070af90792b48643967a0d28641379ee9e10fc9/jaxlib-0.4.38-cp313-cp313-win_amd64.whl", hash = "sha256:4103db0b3a38a5dc132741237453c24d8547290a22079ba1b577d6c88c95300a", size = 64288459, upload-time = "2024-12-17T23:08:25.039Z" },
 ]
 
 [[package]]
@@ -1636,12 +1335,9 @@ name = "jaxmaze"
 version = "0.0.2"
 source = { editable = "libraries/jaxmaze" }
 dependencies = [
-    { name = "distrax", version = "0.1.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "distrax", version = "0.1.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "flax", version = "0.10.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "flax", version = "0.12.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "jax", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "jax", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "distrax" },
+    { name = "flax" },
+    { name = "jax" },
     { name = "matplotlib" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -1661,19 +1357,15 @@ name = "jaxneurorl"
 version = "0.0.1"
 source = { editable = "libraries/jaxneurorl" }
 dependencies = [
-    { name = "chex", version = "0.1.90", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "chex", version = "0.1.91", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "chex" },
     { name = "flashbax" },
-    { name = "flax", version = "0.10.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "flax", version = "0.12.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "flax" },
     { name = "gymnax" },
     { name = "hydra-core" },
     { name = "ipdb" },
-    { name = "mctx", version = "0.0.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "mctx", version = "0.0.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "mctx" },
     { name = "optax" },
-    { name = "rlax", version = "0.1.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "rlax", version = "0.1.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "rlax" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.17.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "tqdm" },
@@ -2286,50 +1978,14 @@ wheels = [
 name = "mctx"
 version = "0.0.5"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version < '3.11' and sys_platform == 'linux'",
-    "python_full_version < '3.11' and sys_platform != 'linux'",
-]
 dependencies = [
-    { name = "chex", version = "0.1.90", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "jax", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "jaxlib", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "chex" },
+    { name = "jax" },
+    { name = "jaxlib" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/77/03/90f4c3cd7c729422c4667fa4a6c74d8b105cae0e5fade1e7c253f11bb60c/mctx-0.0.5.tar.gz", hash = "sha256:e9f669bf4fd4c4f61837be6f9ab0ca60180945108c36bcdf5beaabc481020e21", size = 36874, upload-time = "2023-11-24T11:52:32.34Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/57/04/09a8cf47742ee18c8596ec86f0b4558548bf0ffaf0eb83506029bd9750e2/mctx-0.0.5-py3-none-any.whl", hash = "sha256:d263830a1e44a16fe2ede5ed5b37fd83626459bfccbb1ab814a6bd49bf62ffd3", size = 45285, upload-time = "2023-11-24T11:52:30.703Z" },
-]
-
-[[package]]
-name = "mctx"
-version = "0.0.6"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.14' and sys_platform == 'linux'",
-    "python_full_version == '3.13.*' and sys_platform == 'linux'",
-    "python_full_version == '3.12.*' and sys_platform == 'linux'",
-    "python_full_version == '3.11.*' and sys_platform == 'linux'",
-    "python_full_version >= '3.14' and sys_platform == 'win32'",
-    "python_full_version >= '3.14' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.12.*' and sys_platform == 'win32'",
-    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.11.*' and sys_platform == 'win32'",
-    "python_full_version == '3.11.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.11.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-]
-dependencies = [
-    { name = "chex", version = "0.1.91", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "jax", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "jaxlib", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/99/20/83393e91aa3020ed761d69480c48ffdbd2c07674556099023af568f11011/mctx-0.0.6.tar.gz", hash = "sha256:115ee45d7dc3ed5e5833b231c3ac07196bceb66673ed59039c3622ea6678a093", size = 37142, upload-time = "2025-09-02T09:59:14.913Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/4b/97/8f972707bdc3d950d048668294b41295e077d27b9c0e9345ccee4e5613e1/mctx-0.0.6-py3-none-any.whl", hash = "sha256:4b3bef10c1b51a0b62b95b60003e40177f4d1501f0168a4c1c85012c2a75dedf", size = 45471, upload-time = "2025-09-02T09:59:13.427Z" },
 ]
 
 [[package]]
@@ -2725,15 +2381,6 @@ wheels = [
 ]
 
 [[package]]
-name = "nvidia-cuda-cccl-cu12"
-version = "12.9.27"
-source = { registry = "https://pypi.org/simple" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/61/7e/82e49956b046bdc506c789235c587d9b3ef58b8bc1782258c1e247229647/nvidia_cuda_cccl_cu12-12.9.27-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:d7898b38aa68beaa234d48f0868273702342a196d6e2e9d0ef058dca2390ebea", size = 3152245, upload-time = "2025-05-01T19:32:04.802Z" },
-    { url = "https://files.pythonhosted.org/packages/18/2a/d4cd8506d2044e082f8cd921be57392e6a9b5ccd3ffdf050362430a3d5d5/nvidia_cuda_cccl_cu12-12.9.27-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:37869e17ce2e1ecec6eddf1927cca0f8c34e64fd848d40453df559091e2d7117", size = 3152243, upload-time = "2025-05-01T19:32:13.955Z" },
-]
-
-[[package]]
 name = "nvidia-cuda-cupti-cu12"
 version = "12.9.79"
 source = { registry = "https://pypi.org/simple" }
@@ -2749,15 +2396,6 @@ source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/25/48/b54a06168a2190572a312bfe4ce443687773eb61367ced31e064953dd2f7/nvidia_cuda_nvcc_cu12-12.9.86-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl", hash = "sha256:5d6a0d32fdc7ea39917c20065614ae93add6f577d840233237ff08e9a38f58f0", size = 40546229, upload-time = "2025-06-05T20:01:53.357Z" },
     { url = "https://files.pythonhosted.org/packages/d6/5c/8cc072436787104bbbcbde1f76ab4a0d89e68f7cebc758dd2ad7913a43d0/nvidia_cuda_nvcc_cu12-12.9.86-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:44e1eca4d08926193a558d2434b1bf83d57b4d5743e0c431c0c83d51da1df62b", size = 39411138, upload-time = "2025-06-05T20:01:43.182Z" },
-]
-
-[[package]]
-name = "nvidia-cuda-nvrtc-cu12"
-version = "12.9.86"
-source = { registry = "https://pypi.org/simple" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b8/85/e4af82cc9202023862090bfca4ea827d533329e925c758f0cde964cb54b7/nvidia_cuda_nvrtc_cu12-12.9.86-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl", hash = "sha256:210cf05005a447e29214e9ce50851e83fc5f4358df8b453155d5e1918094dcb4", size = 89568129, upload-time = "2025-06-05T20:02:41.973Z" },
-    { url = "https://files.pythonhosted.org/packages/64/eb/c2295044b8f3b3b08860e2f6a912b702fc92568a167259df5dddb78f325e/nvidia_cuda_nvrtc_cu12-12.9.86-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:096d4de6bda726415dfaf3198d4f5c522b8e70139c97feef5cd2ca6d4cd9cead", size = 44528905, upload-time = "2025-06-05T20:02:29.754Z" },
 ]
 
 [[package]]
@@ -2838,18 +2476,6 @@ wheels = [
 ]
 
 [[package]]
-name = "nvidia-nvshmem-cu12"
-version = "3.5.19"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "nvidia-cuda-cccl-cu12", marker = "sys_platform == 'linux'" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c7/1b/06a698b584b67670e7f108381ecdf680d3a497c0567f5183644034f4212e/nvidia_nvshmem_cu12-3.5.19-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:333d91f68038539f20a591ef4d5cee25a85d440537b31809c4e42ae1700fccce", size = 152515031, upload-time = "2026-01-02T04:24:25.119Z" },
-    { url = "https://files.pythonhosted.org/packages/64/b9/6ab941001c23cfb43499b5b0b7417b0bb4dfba3a29ffa2b06985422dad50/nvidia_nvshmem_cu12-3.5.19-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:f29a23c5ee75461ec4342e17757f9e010369ada8eb0d441070049db787d9e51b", size = 152681200, upload-time = "2026-01-02T04:24:46.524Z" },
-]
-
-[[package]]
 name = "omegaconf"
 version = "2.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2873,50 +2499,44 @@ wheels = [
 
 [[package]]
 name = "optax"
-version = "0.2.6"
+version = "0.2.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "absl-py" },
-    { name = "chex", version = "0.1.90", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "chex", version = "0.1.91", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "jax", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "jax", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "jaxlib", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "jaxlib", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "chex" },
+    { name = "jax" },
+    { name = "jaxlib" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6d/3b/90c11f740a3538200b61cd2b7d9346959cb9e31e0bdea3d2f886b7262203/optax-0.2.6.tar.gz", hash = "sha256:ba8d1e12678eba2657484d6feeca4fb281b8066bdfd5efbfc0f41b87663109c0", size = 269660, upload-time = "2025-09-15T22:41:24.76Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c0/75/1e011953c48be502d4d84fa8458e91be7c6f983002511669bddd7b1a065f/optax-0.2.5.tar.gz", hash = "sha256:b2e38c7aea376186deae758ba7a258e6ef760c6f6131e9e11bc561c65386d594", size = 258548, upload-time = "2025-06-10T17:00:47.544Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b8/ec/19c6cc6064c7fc8f0cd6d5b37c4747849e66040c6ca98f86565efc2c227c/optax-0.2.6-py3-none-any.whl", hash = "sha256:f875251a5ab20f179d4be57478354e8e21963373b10f9c3b762b94dcb8c36d91", size = 367782, upload-time = "2025-09-15T22:41:22.825Z" },
+    { url = "https://files.pythonhosted.org/packages/b9/33/f86091c706db1a5459f501830241afff2ecab3532725c188ea57be6e54de/optax-0.2.5-py3-none-any.whl", hash = "sha256:966deae936207f268ac8f564d8ed228d645ac1aaddefbbf194096d2299b24ba8", size = 354324, upload-time = "2025-06-10T17:00:46.062Z" },
 ]
 
 [[package]]
 name = "orbax-checkpoint"
-version = "0.11.32"
+version = "0.11.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "absl-py" },
-    { name = "aiofiles" },
     { name = "etils", extra = ["epath", "epy"] },
     { name = "humanize" },
-    { name = "jax", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "jax", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "jax" },
     { name = "msgpack" },
     { name = "nest-asyncio" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "protobuf" },
-    { name = "psutil" },
     { name = "pyyaml" },
     { name = "simplejson" },
     { name = "tensorstore", version = "0.1.78", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "tensorstore", version = "0.1.80", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6c/5f/1733e1143696319f311bc4de48da2e306a1f62f0925f9fe9d797b8ba8abe/orbax_checkpoint-0.11.32.tar.gz", hash = "sha256:523dcf61e93c7187c6b80fd50f3177114c0b957ea62cbb5c869c0b3e3d1a7dfc", size = 431601, upload-time = "2026-01-20T16:46:06.307Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7e/b4/262439a3fe00064b53a5182c0149447304f5a2d5a328a92d64390c18d189/orbax_checkpoint-0.11.5.tar.gz", hash = "sha256:8331ff594980a241ba43eb59dd683e5b590b339cff32a7b72d78cb5a350030b4", size = 249258, upload-time = "2025-02-11T19:33:45.364Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/24/17/aae3144258f30920741ec91dbff0ff54665e572da50e6445ef437e08ec32/orbax_checkpoint-0.11.32-py3-none-any.whl", hash = "sha256:f0bfe9f9b1ce2c32c8f5dfab63393e51de525d41352abc17c7e21f9cc731d7a9", size = 634424, upload-time = "2026-01-20T16:46:04.382Z" },
+    { url = "https://files.pythonhosted.org/packages/66/80/e659696b5b1c2ced427efedd2d9d29c1bc31d841ac8a031215aa38f6b2ae/orbax_checkpoint-0.11.5-py3-none-any.whl", hash = "sha256:b55a7a254ea0ab18237e8234a6ca8bf5522f589fcc2ac698cf6893d5e7ae3500", size = 342800, upload-time = "2025-02-11T19:33:43.507Z" },
 ]
 
 [[package]]
@@ -3103,7 +2723,7 @@ name = "pexpect"
 version = "4.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ptyprocess" },
+    { name = "ptyprocess", marker = "(python_full_version < '3.11' and sys_platform == 'emscripten') or (python_full_version < '3.11' and sys_platform == 'win32') or (sys_platform != 'emscripten' and sys_platform != 'win32')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/42/92/cc564bf6381ff43ce1f4d06852fc19a2f11d180f23dc32d9588bee2f149d/pexpect-4.9.0.tar.gz", hash = "sha256:ee7d41123f3c9911050ea2c2dac107568dc43b2d3b0c7557a33212c398ead30f", size = 166450, upload-time = "2023-11-25T09:07:26.339Z" }
 wheels = [
@@ -3250,35 +2870,30 @@ name = "preplay-ai"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "chex", version = "0.1.90", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "chex", version = "0.1.91", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "chex" },
     { name = "craftax" },
+    { name = "distrax" },
     { name = "flashbax" },
-    { name = "flax", version = "0.10.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "flax", version = "0.12.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "flax" },
     { name = "gymnax" },
     { name = "hydra-core" },
     { name = "ipdb" },
-    { name = "jax", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "jax", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12"], marker = "python_full_version < '3.11' and sys_platform == 'linux'" },
-    { name = "jax", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "jax", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12"], marker = "python_full_version >= '3.11' and sys_platform == 'linux'" },
-    { name = "jaxlib", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "jaxlib", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "jax" },
+    { name = "jax", extra = ["cuda12"], marker = "sys_platform == 'linux'" },
+    { name = "jaxlib" },
     { name = "jaxmaze" },
     { name = "jaxneurorl" },
-    { name = "mctx", version = "0.0.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "mctx", version = "0.0.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "mctx" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "omegaconf" },
     { name = "optax" },
-    { name = "rlax", version = "0.1.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "rlax", version = "0.1.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "rlax" },
     { name = "ruff" },
     { name = "safetensors" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.17.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "tensorflow-probability" },
     { name = "tqdm" },
     { name = "typing-extensions" },
     { name = "wandb" },
@@ -3300,15 +2915,16 @@ dev = [
 requires-dist = [
     { name = "chex", specifier = ">=0.1.86" },
     { name = "craftax" },
+    { name = "distrax", specifier = ">=0.1.5" },
     { name = "flashbax" },
     { name = "flax", specifier = ">=0.8.4" },
     { name = "gymnax" },
     { name = "hydra-core" },
     { name = "ipdb" },
     { name = "ipywidgets", marker = "extra == 'dev'" },
-    { name = "jax", marker = "sys_platform != 'linux'", specifier = ">=0.4.20" },
-    { name = "jax", extras = ["cuda12"], marker = "sys_platform == 'linux'", specifier = ">=0.4.20" },
-    { name = "jaxlib", specifier = ">=0.4.20" },
+    { name = "jax", marker = "sys_platform != 'linux'", specifier = ">=0.4.20,<0.5" },
+    { name = "jax", extras = ["cuda12"], marker = "sys_platform == 'linux'", specifier = ">=0.4.20,<0.5" },
+    { name = "jaxlib", specifier = ">=0.4.20,<0.5" },
     { name = "jaxmaze", editable = "libraries/jaxmaze" },
     { name = "jaxneurorl", editable = "libraries/jaxneurorl" },
     { name = "jupyter", marker = "extra == 'dev'" },
@@ -3321,6 +2937,7 @@ requires-dist = [
     { name = "ruff" },
     { name = "safetensors" },
     { name = "scipy", specifier = ">=1.12.0" },
+    { name = "tensorflow-probability", specifier = ">=0.25.0" },
     { name = "tqdm", specifier = ">=4.66.2" },
     { name = "typing-extensions", specifier = ">=4.11.0" },
     { name = "wandb" },
@@ -3869,58 +3486,19 @@ wheels = [
 name = "rlax"
 version = "0.1.7"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version < '3.11' and sys_platform == 'linux'",
-    "python_full_version < '3.11' and sys_platform != 'linux'",
-]
 dependencies = [
-    { name = "absl-py", marker = "python_full_version < '3.11'" },
-    { name = "chex", version = "0.1.90", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "distrax", version = "0.1.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "dm-env", marker = "python_full_version < '3.11'" },
-    { name = "jax", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "jaxlib", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "absl-py" },
+    { name = "chex" },
+    { name = "distrax" },
+    { name = "dm-env" },
+    { name = "jax" },
+    { name = "jaxlib" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/30/ca/7346c802607b007acc78f49511bb90fb0c71a4bc35c940d3ae59e024dc3c/rlax-0.1.7.tar.gz", hash = "sha256:15a36b23d137b847c2fb77b87c0d2a54cad4f473b14b0ff63e2bc24d2d2cdabf", size = 93908, upload-time = "2025-05-08T14:48:32.948Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/40/3d/4df7523fa808f5e6d3f307651e215b35c5c75f4fcf96edafb22bcdfa5445/rlax-0.1.7-py3-none-any.whl", hash = "sha256:962fe288d37ffaa67ba0d5dd0d9f23d8cf81a9417f5b9683792c93d7c5bb1f81", size = 132405, upload-time = "2025-05-08T14:48:31.21Z" },
-]
-
-[[package]]
-name = "rlax"
-version = "0.1.8"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.14' and sys_platform == 'linux'",
-    "python_full_version == '3.13.*' and sys_platform == 'linux'",
-    "python_full_version == '3.12.*' and sys_platform == 'linux'",
-    "python_full_version == '3.11.*' and sys_platform == 'linux'",
-    "python_full_version >= '3.14' and sys_platform == 'win32'",
-    "python_full_version >= '3.14' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.12.*' and sys_platform == 'win32'",
-    "python_full_version == '3.12.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.12.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-    "python_full_version == '3.11.*' and sys_platform == 'win32'",
-    "python_full_version == '3.11.*' and sys_platform == 'emscripten'",
-    "python_full_version == '3.11.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
-]
-dependencies = [
-    { name = "absl-py", marker = "python_full_version >= '3.11'" },
-    { name = "chex", version = "0.1.91", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "distrax", version = "0.1.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "dm-env", marker = "python_full_version >= '3.11'" },
-    { name = "jax", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "jaxlib", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/94/96/5e68f3dac7a4cc730ffa5885f9c057023daa86384dc29a8c6da0fb65c7ae/rlax-0.1.8.tar.gz", hash = "sha256:4ec5dcd3969099e8699a979b15b967187ce2536bba467ad7c1d980f1eeade541", size = 84704, upload-time = "2025-09-01T23:40:00.106Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f2/0e/04727f672ba609c4d4ed9f9be82cc1e7afb0d7355051f9f406b55defac10/rlax-0.1.8-py3-none-any.whl", hash = "sha256:c6d5c45cc6727dd7ad58baacf12b92ca53568d7d68063b8a97f3c5c36552cb8f", size = 116178, upload-time = "2025-09-01T23:39:58.593Z" },
 ]
 
 [[package]]
@@ -4400,13 +3978,14 @@ name = "tensorflow-probability"
 version = "0.25.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "absl-py", marker = "python_full_version < '3.11'" },
-    { name = "cloudpickle", marker = "python_full_version < '3.11'" },
-    { name = "decorator", marker = "python_full_version < '3.11'" },
-    { name = "dm-tree", marker = "python_full_version < '3.11'" },
-    { name = "gast", marker = "python_full_version < '3.11'" },
+    { name = "absl-py" },
+    { name = "cloudpickle" },
+    { name = "decorator" },
+    { name = "dm-tree" },
+    { name = "gast" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "six", marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "six" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fe/b6/e116761ceeb880b7ad4c6a7e1203538754dd7dda42538f08d6daaf8dfa4d/tensorflow_probability-0.25.0-py2.py3-none-any.whl", hash = "sha256:f3f4d6431656c0122906888afe1b67b4400e82bd7f254b45b92e6c5b84ea8e3e", size = 6979403, upload-time = "2024-11-08T16:25:57.238Z" },
@@ -4514,23 +4093,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/8a/11/965c6fd8e5cc254f1fe142d547387da17a8ebfd75a3455f637c663fb38a0/terminado-0.18.1.tar.gz", hash = "sha256:de09f2c4b85de4765f7714688fff57d3e75bad1f909b589fde880460c753fd2e", size = 32701, upload-time = "2024-03-12T14:34:39.026Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6a/9e/2064975477fdc887e47ad42157e214526dcad8f317a948dee17e1659a62f/terminado-0.18.1-py3-none-any.whl", hash = "sha256:a4468e1b37bb318f8a86514f65814e1afc977cf29b3992a4500d9dd305dcceb0", size = 14154, upload-time = "2024-03-12T14:34:36.569Z" },
-]
-
-[[package]]
-name = "tfp-nightly"
-version = "0.26.0.dev20260122"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "absl-py", marker = "python_full_version >= '3.11'" },
-    { name = "cloudpickle", marker = "python_full_version >= '3.11'" },
-    { name = "decorator", marker = "python_full_version >= '3.11'" },
-    { name = "dm-tree", marker = "python_full_version >= '3.11'" },
-    { name = "gast", marker = "python_full_version >= '3.11'" },
-    { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "six", marker = "python_full_version >= '3.11'" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/4b/69/1c1ee8d9daf46fd168512db8f89e1d4ca1f656b92d98c12be7accd21d53a/tfp_nightly-0.26.0.dev20260122-py2.py3-none-any.whl", hash = "sha256:aabe8751c30cb4975b6b0bf879924cfad48bf5a38e36c5b7708dc3e0c180fb65", size = 6975584, upload-time = "2026-01-22T09:44:13.574Z" },
 ]
 
 [[package]]
