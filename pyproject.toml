@@ -9,13 +9,12 @@ authors = [
 ]
 dependencies = [
     # JAX ecosystem
-    "jax[cuda12]>=0.4.20,<0.5; sys_platform == 'linux'",
-    "jax>=0.4.20,<0.5; sys_platform != 'linux'",
-    "jaxlib>=0.4.20,<0.5",
-    "flax>=0.8.4",
-    "optax>=0.2.1",
-    "chex>=0.1.86",
-    "rlax>=0.1.6",
+    "jax==0.4.22",
+    "jaxlib==0.4.22",
+    "flax==0.8.4",
+    "optax==0.2.1",
+    "chex==0.1.86",
+    "rlax==0.1.6",
     "distrax>=0.1.5",
     "tensorflow-probability>=0.25.0",
     # RL environments & utilities
@@ -30,8 +29,8 @@ dependencies = [
     "omegaconf",
     "wandb",
     # Compute utilities
-    "scipy>=1.12.0",
-    "numpy",
+    "scipy==1.12.0",
+    "numpy<2",
     # Serialization
     "safetensors",
     # Utilities
