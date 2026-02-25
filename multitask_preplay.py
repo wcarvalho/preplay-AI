@@ -491,7 +491,7 @@ class PreplayLossFn:
     mean_priority = (1 - self.max_priority_weight) * jnp.mean(abs_td_error, axis=0)
     priorities = max_priority + mean_priority
 
-    importance_weights = (1.0 / (batch.probabilities + 1e-6)).astype(jnp.float32)
+    importance_weights = (1.0 / (batch.priorities + 1e-6)).astype(jnp.float32)
     importance_weights **= self.importance_sampling_exponent
     importance_weights /= jnp.max(importance_weights)
     batch_loss = jnp.mean(importance_weights * batch_loss)
@@ -681,14 +681,14 @@ class PreplayLossFn:
         # Retrace uses clipped IS ratios to safely correct for this mismatch.
         temp = self.retrace_temperature
 
-        # Target policy: Boltzmann over off-task Q-values [T, N, A]
-        pi_t = jax.nn.softmax(online_preds_g.q_vals / temp, axis=-1)
-
         # Behavior policy: Boltzmann over on-task Q-values [T, A]
         mu_probs = jax.nn.softmax(online_preds.q_vals / temp, axis=-1)
         # Prob of the taken action under behavior policy: [T]
         original_actions = actions[:, 0]  # [T, N] -> [T] (identical across N)
         mu_t = rlax.batched_index(mu_probs, original_actions)
+
+        # Target policy: Boltzmann over off-task Q-values [T, N, A]
+        pi_t = jax.nn.softmax(online_preds_g.q_vals / temp, axis=-1)
 
         # Rewards and discounts (no episode boundaries for off-task goals)
         rewards = make_float(goal_rewards) - self.step_cost
@@ -702,23 +702,26 @@ class PreplayLossFn:
           in_axes=(1, 1, 1, 1, 1, 1, 1, None, None),
           out_axes=1,
         )
+
         ag_td_error = retrace_fn(
-          online_preds_g.q_vals,
-          target_preds_g.q_vals,
-          actions,
-          actions,
-          rewards,
-          discounts,
-          pi_t,
-          mu_t,
+          online_preds_g.q_vals[:-1],
+          target_preds_g.q_vals[1:],
+          actions[:-1],
+          actions[1:],
+          rewards[1:],
+          discounts[1:],
+          pi_t[1:],
+          mu_t[1:],
           self.all_goals_lambda,
         )
 
         # Apply loss mask and compute loss
-        ag_td_error = ag_td_error * ag_loss_mask
+        ag_td_error = ag_td_error * ag_loss_mask[:-1]
         ag_loss_per_t = 0.5 * jnp.square(ag_td_error)
         # [N] — per-goal mean loss (matches self.loss_fn return shape)
-        ag_batch_loss = (ag_loss_per_t * ag_loss_mask).sum(0) / ag_loss_mask.sum(0)
+        ag_batch_loss = (ag_loss_per_t * ag_loss_mask[:-1]).sum(0) / ag_loss_mask[
+          :-1
+        ].sum(0)
 
         ag_metrics = {
           "0.q_loss": ag_loss_per_t.mean(),
@@ -733,7 +736,8 @@ class PreplayLossFn:
           "loss_mask": ag_loss_mask,
           "q_values": online_preds_g.q_vals,
           "q_loss": ag_loss_per_t,
-          "q_target": ag_td_error + rlax.batched_index(online_preds_g.q_vals, actions),
+          "q_target": ag_td_error
+          + rlax.batched_index(online_preds_g.q_vals[:-1], actions[:-1]),
         }
         if self.make_log_extras is not None:
           extras = self.make_log_extras(timestep, goal=new_goal)
