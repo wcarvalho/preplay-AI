@@ -1008,13 +1008,13 @@ class PreplayLossFn:
 
       G_off = self.num_offtask_goals
       # [G_off, D], , [1]
-      offtask_goals, _, offtask_achievable = self.sample_preplay_goals(x_t, key, G_off)
+      offtask_goals, _, offtask_achievable_ = self.sample_preplay_goals(x_t, key, G_off)
       N_off = self.num_offtask_simulations
       total_sims = N_on + G_off * N_off
 
       # Build unified goals: [total_sims, G]
       offtask_goals = jnp.tile(offtask_goals, (N_off, 1))  # [G_off*N_off, G]
-      offtask_achievable = jnp.tile(offtask_achievable, G_off * N_off)  # [G_off*N_off]
+      offtask_achievable = jnp.tile(offtask_achievable_, G_off * N_off)  # [G_off*N_off]
       assert offtask_goals.shape == (G_off * N_off, dim_G)
       all_sim_goals = jnp.concatenate((ontask_goal, offtask_goals), axis=0)
       assert all_sim_goals.shape[0] == total_sims
@@ -1059,6 +1059,7 @@ class PreplayLossFn:
       # all_mask: [sim_length+1, total_sims]
       init_loss_mask = jnp.broadcast_to(l_mask_t, (total_sims,))
       all_t_loss_mask = simulation_finished_mask(init_loss_mask, all_t)
+
 
       # === MAIN-TASK LOSS on ALL sims ===
       # all_main_q_on: [sim_length+1, total_sims, A]
@@ -2162,7 +2163,8 @@ def make_train_jaxmaze_multigoal(**kwargs):
   num_offtask_goals = 1 if known_offtask_goal else config["NUM_OFFTASK_GOALS"]
   config["NUM_OFFTASK_GOALS"] = num_offtask_goals
 
-  vals = np.logspace(num=256, start=1, stop=3, base=0.1)
+  #vals = np.logspace(num=256, start=1, stop=3, base=0.1)
+  vals = np.linspace(0.05, 0.3, 256)
 
   num_offtask_simulations = config["NUM_OFFTASK_SIMULATIONS"]
   num_ontask_simulations = config["NUM_ONTASK_SIMULATIONS"] = 1
