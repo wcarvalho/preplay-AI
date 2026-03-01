@@ -546,7 +546,9 @@ class PreplayLossFn:
     batch_td_error = batch_td_error * loss_mask[:-1]
 
     batch_loss = 0.5 * jnp.square(batch_td_error)
-    batch_loss_mean = (batch_loss * loss_mask[:-1]).sum(0) / loss_mask[:-1].sum(0)
+    batch_loss_mean = (batch_loss * loss_mask[:-1]).sum(0) / (
+      loss_mask[:-1].sum(0) + 1e-5
+    )
 
     metrics = {
       "0.q_loss": batch_loss.mean(),
