@@ -782,27 +782,23 @@ class PreplayLossFn:
           )
           ag_td_error = target_tm1 - qa_tm1  # [T-1, N]
         elif self.all_goals_td == "qlearning":
-          rewards = make_float(goal_rewards) - self.step_cost
-          discounts = jnp.ones_like(goal_rewards) * self.discount
           ag_loss_mask = is_truncated(timestep)
 
-          # sarsa_lambda is a sequence fn ([T, A] q-values), vmap over N only
-          sarsa_fn = jax.vmap(
-            losses.sarsa_lambda,
-            in_axes=(1, 1, 1, 1, 1, 1, None),
-            out_axes=1,
+          ag_td_error, ag_batch_loss, ag_metrics, ag_log_info = self.loss_fn(
+            timestep=timestep,
+            online_preds=online_preds_g,
+            target_preds=target_preds_g,
+            actions=actions,
+            rewards=goal_rewards,
+            is_last=make_float(timestep.last()),
+            non_terminal=timestep.discount,
+            loss_mask=ag_loss_mask,
           )
+          if self.make_log_extras is not None:
+            extras = self.make_log_extras(timestep, goal=new_goal)
+            ag_log_info.update(extras)
 
-          qa_tm1, target_tm1 = sarsa_fn(
-            online_preds_g.q_vals[:-1],  # q_tm1: [T-1, N, A]
-            actions[:-1],  # a_tm1: [T-1, N]
-            rewards[1:],  # r_t:   [T-1, N]
-            discounts[1:],  # discount_t: [T-1, N]
-            target_preds_g.q_vals[1:],  # q_t:   [T-1, N, A]
-            actions[1:],  # a_t:   [T-1, N]
-            self.all_goals_lambda,
-          )
-          ag_td_error = target_tm1 - qa_tm1  # [T-1, N]
+          return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
         else:
           raise ValueError(f"Unknown all_goals_td: {self.all_goals_td}")
 
