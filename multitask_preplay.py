@@ -563,6 +563,7 @@ class PreplayLossFn:
       "q_values": online_preds.q_vals,
       "q_loss": batch_loss,
       "q_target": target_q_t,
+      "target_q_values": target_preds.q_vals,
     }
     return batch_td_error, batch_loss_mean, metrics, log_info
 
@@ -588,15 +589,15 @@ class PreplayLossFn:
     # ---- Online loss ----
     if self.online_coeff > 0.0:
       td_error, batch_loss, metrics, log_info = self.loss_fn(
-        timestep=data.timestep,
-        online_preds=online_preds,
-        target_preds=target_preds,
-        actions=data.action,
-        rewards=data.reward,
-        is_last=make_float(data.timestep.last()),
-        non_terminal=data.timestep.discount,
-        loss_mask=loss_mask,
-      )
+        timestep=data.timestep,  # [T, B, ...]
+        online_preds=online_preds,  # .q_vals: [T, B, A]
+        target_preds=target_preds,  # .q_vals: [T, B, A]
+        actions=data.action,  # [T, B]
+        rewards=data.reward,  # [T, B]
+        is_last=make_float(data.timestep.last()),  # [T, B]
+        non_terminal=data.timestep.discount,  # [T, B]
+        loss_mask=loss_mask,  # [T, B]
+      )  # returns [T-1, B], [B], dict, dict
       all_metrics.update({f"0.online/{k}": v for k, v in metrics.items()})
       # Swap [T, B, ...] -> [B, T, ...] for consistent first-batch indexing
       swap = lambda x: jnp.swapaxes(x, 0, 1)
@@ -724,16 +725,16 @@ class PreplayLossFn:
           )
 
           ag_td_error = retrace_fn(
-            online_preds_g.q_vals[:-1],
-            target_preds_g.q_vals[1:],
-            actions[:-1],
-            actions[1:],
-            rewards[1:],
-            discounts[1:],
-            pi_t[1:],
-            mu_t[1:],
-            self.all_goals_lambda,
-          )
+            online_preds_g.q_vals[:-1],  # q_tm1:      [T-1, N, A]
+            target_preds_g.q_vals[1:],  # q_t:        [T-1, N, A]
+            actions[:-1],  # a_tm1:      [T-1, N]
+            actions[1:],  # a_t:        [T-1, N]
+            rewards[1:],  # r_t:        [T-1, N]
+            discounts[1:],  # discount_t: [T-1, N]
+            pi_t[1:],  # pi_t:       [T-1, N, A]
+            mu_t[1:],  # mu_t:       [T-1]
+            self.all_goals_lambda,  # lambda:     scalar
+          )  # returns [T-1, N]
         elif self.all_goals_td == "e-sarsa":
           rewards = make_float(goal_rewards) - self.step_cost
           discounts = timestep.discount * self.discount
@@ -785,15 +786,15 @@ class PreplayLossFn:
           ag_loss_mask = is_truncated(timestep)
 
           ag_td_error, ag_batch_loss, ag_metrics, ag_log_info = self.loss_fn(
-            timestep=timestep,
-            online_preds=online_preds_g,
-            target_preds=target_preds_g,
-            actions=actions,
-            rewards=goal_rewards,
-            is_last=make_float(timestep.last()),
-            non_terminal=timestep.discount,
-            loss_mask=ag_loss_mask,
-          )
+            timestep=timestep,  # [T, N, ...]
+            online_preds=online_preds_g,  # .q_vals: [T, N, A]
+            target_preds=target_preds_g,  # .q_vals: [T, N, A]
+            actions=actions,  # [T, N]
+            rewards=goal_rewards,  # [T, N]
+            is_last=make_float(timestep.last()),  # [T, N]
+            non_terminal=timestep.discount,  # [T, N]
+            loss_mask=ag_loss_mask,  # [T, N]
+          )  # returns [T-1, N], [N], dict, dict
           if self.make_log_extras is not None:
             extras = self.make_log_extras(timestep, goal=new_goal)
             ag_log_info.update(extras)
@@ -1009,13 +1010,13 @@ class PreplayLossFn:
 
       G_off = self.num_offtask_goals
       # [G_off, D], , [1]
-      offtask_goals, _, offtask_achievable = self.sample_preplay_goals(x_t, key, G_off)
+      offtask_goals, _, offtask_achievable_ = self.sample_preplay_goals(x_t, key, G_off)
       N_off = self.num_offtask_simulations
       total_sims = N_on + G_off * N_off
 
       # Build unified goals: [total_sims, G]
       offtask_goals = jnp.tile(offtask_goals, (N_off, 1))  # [G_off*N_off, G]
-      offtask_achievable = jnp.tile(offtask_achievable, G_off * N_off)  # [G_off*N_off]
+      offtask_achievable = jnp.tile(offtask_achievable_, G_off * N_off)  # [G_off*N_off]
       assert offtask_goals.shape == (G_off * N_off, dim_G)
       all_sim_goals = jnp.concatenate((ontask_goal, offtask_goals), axis=0)
       assert all_sim_goals.shape[0] == total_sims
@@ -1060,6 +1061,8 @@ class PreplayLossFn:
       # all_mask: [sim_length+1, total_sims]
       init_loss_mask = jnp.broadcast_to(l_mask_t, (total_sims,))
       all_t_loss_mask = simulation_finished_mask(init_loss_mask, all_t)
+      all_achievable = jnp.concatenate((jnp.ones(N_on), offtask_achievable))
+      all_t_loss_mask = all_t_loss_mask * all_achievable[None]  # [S+1, total_sims]
 
       # === MAIN-TASK LOSS on ALL sims ===
       # all_main_q_on: [sim_length+1, total_sims, A]
@@ -1074,15 +1077,15 @@ class PreplayLossFn:
       all_t_is_last = make_float(all_t.last())
       ontask_reward = self.compute_rewards(all_t, ontask_goals_tiled)
       ontask_td, ontask_loss, ontask_metrics, _ = self.loss_fn(
-        timestep=all_t,
-        online_preds=Predictions(ontask_q_on, None),
-        target_preds=Predictions(ontask_q_tar, None),
-        actions=all_t_a,
-        rewards=ontask_reward,
-        is_last=all_t_is_last,
-        non_terminal=all_t.discount,
-        loss_mask=all_t_loss_mask,
-      )
+        timestep=all_t,  # [S+1, total_sims, ...]
+        online_preds=Predictions(ontask_q_on, None),  # .q_vals: [S+1, total_sims, A]
+        target_preds=Predictions(ontask_q_tar, None),  # .q_vals: [S+1, total_sims, A]
+        actions=all_t_a,  # [S+1, total_sims]
+        rewards=ontask_reward,  # [S+1, total_sims]
+        is_last=all_t_is_last,  # [S+1, total_sims]
+        non_terminal=all_t.discount,  # [S+1, total_sims]
+        loss_mask=all_t_loss_mask,  # [S+1, total_sims]
+      )  # returns [S, total_sims], [total_sims], dict, dict
 
       # === OFF-TASK GOAL LOSS (split: different goals + different rewards) ===
       # all_main_q_on: [sim_length+1, total_sims, A]
@@ -1096,35 +1099,29 @@ class PreplayLossFn:
 
       offtask_reward = self.compute_rewards(all_t, all_sim_goals)
 
-      # [T,N], [N]
       off_td, off_loss, offtask_metrics, off_log = self.loss_fn(
-        timestep=all_t,
-        online_preds=Predictions(offtask_q_on, None),
-        target_preds=Predictions(offtask_q_tar, None),
-        actions=all_t_a,
-        rewards=offtask_reward,
-        is_last=all_t_is_last,
-        non_terminal=all_t.discount,
-        loss_mask=all_t_loss_mask,
-      )
+        timestep=all_t,  # [S+1, total_sims, ...]
+        online_preds=Predictions(offtask_q_on, None),  # .q_vals: [S+1, total_sims, A]
+        target_preds=Predictions(offtask_q_tar, None),  # .q_vals: [S+1, total_sims, A]
+        actions=all_t_a,  # [S+1, total_sims]
+        rewards=offtask_reward,  # [S+1, total_sims]
+        is_last=all_t_is_last,  # [S+1, total_sims]
+        non_terminal=all_t.discount,  # [S+1, total_sims]
+        loss_mask=all_t_loss_mask,  # [S+1, total_sims]
+      )  # returns [S, total_sims], [total_sims], dict, dict
 
       # --------------------
       # zero-out all TDs corresponding to empty goals
       # --------------------
-      all_achievable = jnp.concatenate((jnp.ones(N_on), offtask_achievable))
       denominator = 2 * (N_on + offtask_achievable.sum()).astype(jnp.float32)
 
       # [T, total_sim]
-      ontask_td = all_achievable[None] * ontask_td
-      off_td = all_achievable[None] * off_td
       batch_td_error = (
         self.ontask_loss_coeff * jnp.abs(ontask_td).sum(axis=1)
         + self.offtask_loss_coeff * jnp.abs(off_td).sum(axis=1)
       ) / denominator
 
       # [total_sim]
-      ontask_loss = all_achievable * ontask_loss
-      off_loss = all_achievable * off_loss
       batch_loss_mean = (
         self.ontask_loss_coeff * ontask_loss.sum()
         + self.offtask_loss_coeff * off_loss.sum()
@@ -1209,15 +1206,15 @@ class PreplayLossFn:
       all_t_mask = simulation_finished_mask(init_mask, next_t)
 
       batch_td_error, batch_loss_mean, metrics, log_info = self.loss_fn(
-        timestep=all_t,
-        online_preds=online_preds,
-        target_preds=target_preds,
-        actions=all_a,
-        rewards=reward,
-        is_last=make_float(all_t.last()),
-        non_terminal=all_t.discount,
-        loss_mask=all_t_mask,
-      )
+        timestep=all_t,  # [S+1, num_sims, ...]
+        online_preds=online_preds,  # .q_vals: [S+1, num_sims, A]
+        target_preds=target_preds,  # .q_vals: [S+1, num_sims, A]
+        actions=all_a,  # [S+1, num_sims]
+        rewards=reward,  # [S+1, num_sims]
+        is_last=make_float(all_t.last()),  # [S+1, num_sims]
+        non_terminal=all_t.discount,  # [S+1, num_sims]
+        loss_mask=all_t_mask,  # [S+1, num_sims]
+      )  # returns [S, num_sims], [num_sims], dict, dict
       return batch_td_error, batch_loss_mean, metrics, log_info
 
     # Vmap over timesteps T
@@ -2163,7 +2160,8 @@ def make_train_jaxmaze_multigoal(**kwargs):
   num_offtask_goals = 1 if known_offtask_goal else config["NUM_OFFTASK_GOALS"]
   config["NUM_OFFTASK_GOALS"] = num_offtask_goals
 
-  vals = np.logspace(num=256, start=1, stop=3, base=0.1)
+  # vals = np.logspace(num=256, start=1, stop=3, base=0.1)
+  vals = np.linspace(0.05, 0.3, 256)
 
   num_offtask_simulations = config["NUM_OFFTASK_SIMULATIONS"]
   num_ontask_simulations = config["NUM_ONTASK_SIMULATIONS"] = 1
@@ -2357,207 +2355,6 @@ def jaxmaze_learner_log_extra(
     object_idx = task_objects[task_idx]
     return image_keys[int(object_idx)]
 
-  def plot_online_data(d):
-    """Plot online + all_goals columns (mimics her.py plot_unified)."""
-    columns = ["online", "all_goals"]
-    col_data = {c: d[c] for c in columns if c in d}
-
-    if not col_data:
-      return
-
-    n_cols = len(col_data)
-    col_names = list(col_data.keys())
-
-    # Use first available column to get dimensions
-    first_d = col_data[col_names[0]]
-    timesteps = first_d["timesteps"]
-    nT = len(timesteps.reward)
-    maze_height, maze_width, _ = timesteps.state.grid[0].shape
-
-    # Detect episodes in T dimension
-    is_first = timesteps.first()
-    episode_starts = list(jnp.where(is_first)[0])
-    if not episode_starts or episode_starts[0] != 0:
-      episode_starts = [0] + episode_starts
-    episode_ranges = []
-    for i, start in enumerate(episode_starts):
-      end = episode_starts[i + 1] if i + 1 < len(episode_starts) else nT
-      episode_ranges.append((int(start), int(end)))
-
-    n_episodes = len(episode_ranges)
-    n_traj_rows = ceil(n_episodes / n_cols)
-
-    # Layout: 3 data rows + n_traj_rows trajectory rows
-    n_rows = 3 + n_traj_rows
-    fig, axes = plt.subplots(
-      n_rows,
-      n_cols,
-      figsize=(10.4 * n_cols, 5.2 * n_rows),  # 30% larger
-      gridspec_kw={"hspace": 0.4, "wspace": 0.3},
-    )
-    fig.set_dpi(150)
-    if n_cols == 1:
-      axes = axes[:, None]
-
-    # Row 0: Reward, Q-values, Q-targets
-    for ci, col_name in enumerate(col_names):
-      ax = axes[0, ci]
-      cd = col_data[col_name]
-      loss_mask = cd.get("loss_mask")
-      goal_reward = cd.get("goal_reward")
-
-      if goal_reward is not None:
-        ax.plot(goal_reward, label="Goal Reward")
-
-      actions = cd["actions"]
-      q_values = cd["q_values"]
-      q_target = cd["q_target"]
-      q_values_taken = rlax.batched_index(q_values, actions)
-      ax.plot(q_values_taken, label="Q-Values")
-      ax.plot(q_values.max(axis=-1), label="Q-Max")
-      ax.plot(q_target, label="Q-Targets")
-      target_q_values = cd.get("target_q_values")
-      if target_q_values is not None:
-        target_q_taken = rlax.batched_index(target_q_values, actions)
-        ax.plot(target_q_taken, label="Target-Net Q")
-      ax.set_title(f"{col_name} - Q-Values", fontsize=22)
-      if ci == 1:
-        ax.legend(fontsize=12)
-      ax.grid(True)
-      ax.set_xticks(range(nT))
-      # ax.set_ylim(-0.1, 1.5)
-
-    # Row 1: Combined heatmap (task_vector + achievements)
-    for ci, col_name in enumerate(col_names):
-      ax = axes[1, ci]
-      cd = col_data[col_name]
-
-      goal_tv = cd.get("goal_task_vector")
-      goal_ach = cd.get("goal_achievements")
-      if goal_tv is not None and goal_ach is not None:
-        combined = (goal_tv + goal_ach).T  # [D, T]
-        ax.imshow(
-          combined,
-          aspect="auto",
-          cmap="viridis",
-          interpolation="nearest",
-          vmin=0,
-          vmax=2,
-        )
-        ax.set_title(f"{col_name} — Task+Ach", fontsize=22)
-        ax.set_ylabel("Dims", fontsize=16)
-        ax.set_yticks(range(combined.shape[0]))
-        ax.set_xticks(range(nT))
-        ax.grid(True, axis="x", alpha=0.3, color="white")
-        loss_mask = cd.get("loss_mask")
-        if loss_mask is not None:
-          mask_diff = np.diff(np.concatenate([[0], loss_mask, [0]]))
-          starts = np.where(mask_diff == 1)[0]
-          ends = np.where(mask_diff == -1)[0] - 1
-          for s in starts:
-            ax.axvline(s - 0.5, color="red", linestyle="-", linewidth=1.5)
-          for e in ends:
-            ax.axvline(e + 0.5, color="red", linestyle="-", linewidth=1.5)
-        # Draw white vertical lines at episode boundaries
-        for ep_start in episode_starts[1:]:
-          ax.axvline(ep_start - 0.5, color="white", linestyle="-", linewidth=2)
-      else:
-        ax.set_visible(False)
-
-    # Row 2: π/μ for all_goals, episode markers for online
-    for ci, col_name in enumerate(col_names):
-      ax = axes[2, ci]
-      cd = col_data[col_name]
-
-      behavior_q = cd.get("behavior_q_values")
-      if behavior_q is not None:
-        # All_goals: show π/μ at multiple temps
-        temps = [0.1, 1.0]
-        row_colors = ["tab:blue", "tab:orange", "tab:green", "tab:red"]
-        q_values = cd["q_values"]  # off-task Q [T, A]
-        actions = cd["actions"]
-        greedy_a = jnp.argmax(q_values, axis=-1)
-
-        # Precompute all values
-        pi_data = []
-        mu_data = []
-        color_idx = 0
-        for temp in temps:
-          pi_probs = jax.nn.softmax(q_values / temp, axis=-1)
-          mu_probs = jax.nn.softmax(behavior_q / temp, axis=-1)
-          pi_taken = rlax.batched_index(pi_probs, actions)
-          mu_taken = rlax.batched_index(mu_probs, actions)
-          pi_greedy = rlax.batched_index(pi_probs, greedy_a)
-          mu_greedy = rlax.batched_index(mu_probs, greedy_a)
-          c_taken = row_colors[color_idx]
-          c_greedy = row_colors[color_idx + 1]
-          pi_data.append((pi_taken, f"π(a) τ={temp}", c_taken, {}))
-          pi_data.append(
-            (pi_greedy, f"π(a*) τ={temp}", c_greedy, {"marker": "o", "markersize": 3})
-          )
-          mu_data.append((mu_taken, f"μ(a) τ={temp}", c_taken, {}))
-          mu_data.append(
-            (mu_greedy, f"μ(a*) τ={temp}", c_greedy, {"marker": "o", "markersize": 3})
-          )
-          color_idx += 2
-
-        # Plot all π (col 0) then all μ (col 1) for column-first legend
-        for vals, label, c, kw in pi_data:
-          ax.plot(vals, label=label, color=c, linestyle="-", **kw)
-        for vals, label, c, kw in mu_data:
-          ax.plot(vals, label=label, color=c, linestyle="--", **kw)
-
-        ax.set_title(f"{col_name} — π/μ (solid=π, dashed=μ, ●=greedy)", fontsize=22)
-        ax.legend(fontsize=27, ncol=2)
-      else:
-        # Online: existing episode markers
-        timesteps = cd["timesteps"]
-        loss_mask = cd.get("loss_mask")
-        ax.plot(timesteps.discount, label="Discounts")
-        if loss_mask is not None:
-          ax.plot(loss_mask, label="mask")
-        ax.plot(timesteps.last(), label="is_last")
-        ax.set_title(f"{col_name} — Episode markers", fontsize=22)
-        ax.legend(fontsize=16)
-      ax.grid(True)
-      ax.set_xticks(range(nT))
-
-    # Rows 3+: Trajectory renders with arrows
-    for ep_idx, (ep_start, ep_end) in enumerate(episode_ranges):
-      row_idx = 3 + ep_idx // n_cols
-      col_idx = ep_idx % n_cols
-      ax = axes[row_idx, col_idx]
-
-      initial_state = jax.tree_util.tree_map(lambda x: x[ep_start], timesteps.state)
-      img = render_fn(initial_state)
-
-      ep_positions = jax.tree_util.tree_map(
-        lambda x: x[ep_start : ep_end - 1], timesteps.state.agent_pos
-      )
-      ep_actions = first_d["actions"][ep_start : ep_end - 1]
-
-      renderer.place_arrows_on_image(
-        img, ep_positions, ep_actions, maze_height, maze_width, arrow_scale=5, ax=ax
-      )
-      total_reward = float(timesteps.reward[ep_start:ep_end].sum())
-      ep_timestep = jax.tree_util.tree_map(lambda x: x[ep_start], timesteps)
-      goal_name = task_object_to_name(ep_timestep.state.task_object)
-      ax.set_title(f"Ep {ep_idx} ({goal_name}, r={total_reward:.1f})", fontsize=22)
-      ax.axis("off")
-
-    # Hide unused trajectory subplots
-    total_traj_slots = n_traj_rows * n_cols
-    for slot_idx in range(n_episodes, total_traj_slots):
-      row_idx = 3 + slot_idx // n_cols
-      col_idx = slot_idx % n_cols
-      axes[row_idx, col_idx].set_visible(False)
-
-    fig.tight_layout()
-
-    if wandb.run is not None:
-      wandb.log({"learner_example/online": wandb.Image(fig)})
-    plt.close(fig)
-
   # Dyna: [B, T, sim_len, sims, ...] -> batch=0, T=0, all sim_len, sim=0/1
   if "dyna" in data:
     dyna = data["dyna"]
@@ -2582,153 +2379,333 @@ def jaxmaze_learner_log_extra(
     callback_data["preplay"]["offtask_q_values"] = offtask_q_values[:, PREPLAY_IDX]
     callback_data["preplay"]["goal"] = simulation_goals[PREPLAY_IDX]
 
-  def plot_simulation_data(d):
-    """Plot dyna + preplay columns."""
-    columns = ["dyna", "preplay"]
-    col_data = {c: d[c] for c in columns if c in d}
+  def plot_q_heatmap(ax, q_values, actions, title, nT, action_names=None):
+    """Draw Q-value heatmap [A, T] with argmax (red) and taken (white) rectangles."""
+    from matplotlib.patches import Rectangle
 
-    if not col_data:
+    q_T = np.array(q_values[:nT]).T  # [A, T]
+    ax.imshow(q_T, aspect="auto", cmap="coolwarm", interpolation="nearest")
+    n_actions = q_T.shape[0]
+    for t in range(nT):
+      # Text annotations with 2 sig figs
+      for a in range(n_actions):
+        ax.text(
+          t,
+          a,
+          f"{q_T[a, t]:.2f}",
+          ha="center",
+          va="center",
+          fontsize=14,
+          color="black",
+        )
+      # Black rectangle: argmax action (slightly larger)
+      best_a = int(np.argmax(q_values[t]))
+      ax.add_patch(
+        Rectangle(
+          (t - 0.45, best_a - 0.45),
+          0.9,
+          0.9,
+          linewidth=2,
+          edgecolor="black",
+          facecolor="none",
+        )
+      )
+      # Cyan rectangle: taken action (slightly smaller)
+      taken_a = int(actions[t])
+      ax.add_patch(
+        Rectangle(
+          (t - 0.35, taken_a - 0.35),
+          0.7,
+          0.7,
+          linewidth=3,
+          edgecolor="cyan",
+          facecolor="none",
+        )
+      )
+    ax.set_title(title, fontsize=22)
+    ax.set_ylabel("Action", fontsize=18)
+    ax.set_yticks(range(q_T.shape[0]))
+    if action_names:
+      ax.set_yticklabels([action_names.get(i, str(i)) for i in range(q_T.shape[0])])
+    ax.set_xticks(range(nT))
+
+  def plot_unified(d):
+    """Unified figure: up to 4 columns (online, all_goals, preplay, dyna) x 5 rows."""
+    column_order = ["online", "all_goals", "preplay", "dyna"]
+    col_names = [c for c in column_order if c in d]
+    if not col_names:
       return
 
-    n_cols = len(col_data)
-    col_names = list(col_data.keys())
-
+    col_data = {c: d[c] for c in col_names}
+    n_cols = len(col_names)
     n_rows = 5
+
     fig, axes = plt.subplots(
       n_rows,
       n_cols,
-      figsize=(10.4 * n_cols, 5.2 * n_rows),  # 30% larger
+      figsize=(10.4 * n_cols, 5.2 * n_rows),
       gridspec_kw={"hspace": 0.4, "wspace": 0.3},
     )
     fig.set_dpi(150)
     if n_cols == 1:
       axes = axes[:, None]
+    if n_rows == 1:
+      axes = axes[None, :]
 
+    # Set tick label size on all axes
+    for ax_row in axes:
+      for ax in ax_row:
+        ax.tick_params(labelsize=18)
+
+    # Detect episodes from online timesteps (for trajectory rendering)
+    online_timesteps = None
+    online_episode_ranges = []
+    online_episode_starts = []
+    if "online" in col_data:
+      online_timesteps = col_data["online"]["timesteps"]
+      nT_online = len(online_timesteps.reward)
+      is_first = online_timesteps.first()
+      online_episode_starts = list(jnp.where(is_first)[0])
+      if not online_episode_starts or online_episode_starts[0] != 0:
+        online_episode_starts = [0] + online_episode_starts
+      for i, start in enumerate(online_episode_starts):
+        end = (
+          online_episode_starts[i + 1]
+          if i + 1 < len(online_episode_starts)
+          else nT_online
+        )
+        online_episode_ranges.append((int(start), int(end)))
+
+    # --- Row 0: Q-values line plot ---
     for ci, col_name in enumerate(col_names):
+      ax = axes[0, ci]
       cd = col_data[col_name]
-      timesteps = cd["timesteps"]
       actions = cd["actions"]
       q_values = cd["q_values"]
       q_target = cd["q_target"]
-      td_errors = cd["td_errors"]
-      loss_mask = cd.get("loss_mask")
-      # online_rewards = timesteps.reward
-      simulation_reward = cd["simulation_reward"]
-
-      nT = len(simulation_reward)
+      nT = len(actions)
       q_values_taken = rlax.batched_index(q_values, actions)
 
-      # Row 0: Rewards, Q-values, Q-targets
-      ax = axes[0, ci]
-      ax.plot(simulation_reward, label="Sim rewards")
-      ax.plot(q_values_taken, label="Q-Values")
-      ax.plot(q_target, label="Q-Targets")
-      if loss_mask is not None:
-        ax.plot(loss_mask * 0.5, label="Loss Mask", linestyle="--", color="black")
-      ax.set_title(f"{col_name} — Rewards and Q-Values", fontsize=22)
+      if col_name in ("online", "all_goals"):
+        goal_reward = cd.get("goal_reward")
+        if goal_reward is not None:
+          ax.plot(goal_reward, label="Goal Reward")
+        ax.plot(q_values_taken, label="Q-Values")
+        ax.plot(q_values.max(axis=-1), label="Q-Max")
+        ax.plot(q_target, label="Q-Targets")
+        target_q_values = cd.get("target_q_values")
+        if target_q_values is not None:
+          target_q_taken = rlax.batched_index(target_q_values, actions)
+          ax.plot(target_q_taken, label="Target-Net Q")
+      else:
+        # preplay/dyna
+        simulation_reward = cd.get("simulation_reward")
+        if simulation_reward is not None:
+          ax.plot(simulation_reward, label="Sim rewards")
+        ax.plot(q_values_taken, label="Q-Values")
+        ax.plot(q_target, label="Q-Targets")
+        loss_mask = cd.get("loss_mask")
+        if loss_mask is not None:
+          ax.plot(loss_mask * 0.5, label="Loss Mask", linestyle="--", color="black")
+
+      ax.set_title(f"{col_name} — Q-Values", fontsize=22)
       if ci == 0:
-        ax.legend(fontsize=16)
+        ax.legend(fontsize=18)
       ax.grid(True)
       ax.set_xticks(range(nT))
 
-      # Row 1: Ontask and Offtask Q-values (action taken)
+    # --- Row 1: Environment path image ---
+    for ci, col_name in enumerate(col_names):
       ax = axes[1, ci]
-      ontask_q = cd.get("ontask_q_values")
-      offtask_q = cd.get("offtask_q_values")
-      if ontask_q is not None and offtask_q is not None:
-        ontask_q_taken = rlax.batched_index(ontask_q, actions)
-        offtask_q_taken = rlax.batched_index(offtask_q, actions)
-        ax.plot(ontask_q_taken, label="Ontask Q")
-        ax.plot(offtask_q_taken, label="Offtask Q")
-        # Star where action matches max for ontask
-        ontask_max_a = jnp.argmax(ontask_q, axis=-1)
-        ontask_is_max = actions == ontask_max_a
-        ontask_max_idx = jnp.where(ontask_is_max)[0]
-        if len(ontask_max_idx) > 0:
-          ax.plot(
-            ontask_max_idx,
-            ontask_q_taken[ontask_max_idx],
-            "*",
-            color="gold",
-            markersize=8,
-            label="Ontask=Max",
-          )
-        # Star where action matches max for offtask
-        offtask_max_a = jnp.argmax(offtask_q, axis=-1)
-        offtask_is_max = actions == offtask_max_a
-        offtask_max_idx = jnp.where(offtask_is_max)[0]
-        if len(offtask_max_idx) > 0:
-          ax.plot(
-            offtask_max_idx,
-            offtask_q_taken[offtask_max_idx],
-            "*",
-            color="cyan",
-            markersize=8,
-            label="Offtask=Max",
-          )
-      ax.set_title(f"{col_name} — Ontask/Offtask Q-Values", fontsize=22)
-      if ci == 0:
-        ax.legend(fontsize=16)
-      ax.grid(True)
-      ax.set_xticks(range(nT))
+      cd = col_data[col_name]
 
-      # Row 2: TD errors
+      if col_name == "online" and online_timesteps is not None:
+        # Render episode 0 (first episode)
+        if len(online_episode_ranges) >= 1:
+          ep_start, ep_end = online_episode_ranges[0]
+          maze_height, maze_width, _ = online_timesteps.state.grid[0].shape
+          initial_state = jax.tree_util.tree_map(
+            lambda x: x[ep_start], online_timesteps.state
+          )
+          img = render_fn(initial_state)
+          ep_positions = jax.tree_util.tree_map(
+            lambda x: x[ep_start : ep_end - 1], online_timesteps.state.agent_pos
+          )
+          ep_actions = col_data["online"]["actions"][ep_start : ep_end - 1]
+          renderer.place_arrows_on_image(
+            img, ep_positions, ep_actions, maze_height, maze_width, arrow_scale=5, ax=ax
+          )
+          ep_ts = jax.tree_util.tree_map(lambda x: x[ep_start], online_timesteps)
+          goal_name = task_object_to_name(ep_ts.state.task_object)
+          total_reward = float(online_timesteps.reward[ep_start:ep_end].sum())
+          ax.set_title(
+            f"online — Ep 0 ({goal_name}, r={total_reward:.1f})", fontsize=22
+          )
+          ax.axis("off")
+        else:
+          ax.set_visible(False)
+
+      elif col_name == "all_goals" and online_timesteps is not None:
+        # Render episode 1 (second episode) from online timesteps
+        if len(online_episode_ranges) >= 2:
+          ep_start, ep_end = online_episode_ranges[1]
+          maze_height, maze_width, _ = online_timesteps.state.grid[0].shape
+          initial_state = jax.tree_util.tree_map(
+            lambda x: x[ep_start], online_timesteps.state
+          )
+          img = render_fn(initial_state)
+          ep_positions = jax.tree_util.tree_map(
+            lambda x: x[ep_start : ep_end - 1], online_timesteps.state.agent_pos
+          )
+          ep_actions = col_data["online"]["actions"][ep_start : ep_end - 1]
+          renderer.place_arrows_on_image(
+            img, ep_positions, ep_actions, maze_height, maze_width, arrow_scale=5, ax=ax
+          )
+          ep_ts = jax.tree_util.tree_map(lambda x: x[ep_start], online_timesteps)
+          goal_name = task_object_to_name(ep_ts.state.task_object)
+          total_reward = float(online_timesteps.reward[ep_start:ep_end].sum())
+          ax.set_title(
+            f"online_simulated — Ep 1 ({goal_name}, r={total_reward:.1f})", fontsize=22
+          )
+          ax.axis("off")
+        else:
+          ax.set_visible(False)
+
+      elif col_name in ("preplay", "dyna"):
+        # Simulation trajectory rendering
+        timesteps = cd["timesteps"]
+        actions = cd["actions"]
+        goal = cd.get("goal")
+        maze_height, maze_width, _ = timesteps.state.grid[0].shape
+        initial_state = jax.tree_util.tree_map(lambda x: x[0], timesteps.state)
+        img = render_fn(initial_state)
+        in_episode = get_in_episode(timesteps)
+        ep_actions = actions[in_episode][:-1]
+        ep_positions = jax.tree_util.tree_map(
+          lambda x: x[in_episode][:-1], timesteps.state.agent_pos
+        )
+        renderer.place_arrows_on_image(
+          img, ep_positions, ep_actions, maze_height, maze_width, arrow_scale=5, ax=ax
+        )
+        initial_timestep = jax.tree_util.tree_map(lambda x: x[0], timesteps)
+        t_goal_name = task_object_to_name(initial_timestep.state.task_object)
+        if goal is not None:
+          task_objects = initial_timestep.state.objects
+          sim_goal_name = task_w__to__object(task_objects, goal)
+          ax.set_title(
+            f"{col_name} — Traj (sim={sim_goal_name}, t={t_goal_name})", fontsize=22
+          )
+        else:
+          ax.set_title(f"{col_name} — Trajectory ({t_goal_name})", fontsize=22)
+        ax.axis("off")
+      else:
+        ax.set_visible(False)
+
+    # --- Row 2: Q-value heatmap [A, T] ---
+    for ci, col_name in enumerate(col_names):
       ax = axes[2, ci]
-      ax.plot(td_errors)
-      ax.set_title(f"{col_name} — TD Errors", fontsize=22)
-      ax.grid(True)
-      ax.set_xticks(range(len(td_errors)))
+      cd = col_data[col_name]
+      actions = cd["actions"]
+      q_values = cd["q_values"]
+      nT = len(actions)
+      plot_q_heatmap(
+        ax,
+        q_values,
+        actions,
+        f"{col_name} — Q-values",
+        nT,
+        action_names=action_names if ci == 0 else None,
+      )
 
-      # Row 3: Goal vector heatmap
+    # --- Row 3: Target-net Q-value heatmap [A, T] ---
+    for ci, col_name in enumerate(col_names):
       ax = axes[3, ci]
-      goal = cd.get("goal")
-      # Goal is (D,), tile to (T, D) then transpose to (D, T) for imshow
-      goal_2d = jnp.tile(goal[None, :], (nT, 1)).T  # [D, T]
-      ax.imshow(
-        goal_2d,
-        aspect="auto",
-        cmap="viridis",
-        interpolation="nearest",
-        vmin=0,
-        vmax=1,
-      )
-      ax.set_title(f"{col_name} — Goal Vector", fontsize=22)
-      ax.set_ylabel("Dims", fontsize=16)
-      ax.set_yticks(range(goal_2d.shape[0]))
-      ax.set_xticks(range(nT))
-      ax.grid(True, axis="x", alpha=0.3, color="white")
+      cd = col_data[col_name]
+      target_q = cd.get("target_q_values")
+      if target_q is not None:
+        actions = cd["actions"]
+        nT = len(actions)
+        plot_q_heatmap(
+          ax,
+          target_q,
+          actions,
+          f"{col_name} — Target Q",
+          nT,
+          action_names=action_names if ci == 0 else None,
+        )
+      else:
+        ax.set_visible(False)
 
-      # Row 4: Environment image + path
+    # --- Row 4: Goal vectors ---
+    for ci, col_name in enumerate(col_names):
       ax = axes[4, ci]
-      maze_height, maze_width, _ = timesteps.state.grid[0].shape
-      initial_state = jax.tree_util.tree_map(lambda x: x[0], timesteps.state)
-      img = render_fn(initial_state)
-      in_episode = get_in_episode(timesteps)
-      ep_actions = actions[in_episode][:-1]
-      ep_positions = jax.tree_util.tree_map(
-        lambda x: x[in_episode][:-1], timesteps.state.agent_pos
-      )
-      renderer.place_arrows_on_image(
-        img, ep_positions, ep_actions, maze_height, maze_width, arrow_scale=5, ax=ax
-      )
-      initial_timestep = jax.tree_util.tree_map(lambda x: x[0], timesteps)
-      task_objects = initial_timestep.state.objects
-      t_goal_name = task_object_to_name(initial_timestep.state.task_object)
-      sim_goal_name = task_w__to__object(task_objects, goal)
-      ax.set_title(
-        f"{col_name} — Trajectory (sim={sim_goal_name}, t={t_goal_name})", fontsize=27
-      )
-      ax.axis("off")
+      cd = col_data[col_name]
+      nT = len(cd["actions"])
+
+      if col_name in ("online", "all_goals"):
+        goal_tv = cd.get("goal_task_vector")
+        goal_ach = cd.get("goal_achievements")
+        if goal_tv is not None and goal_ach is not None:
+          combined = (goal_tv + goal_ach).T  # [D, T]
+          ax.imshow(
+            combined,
+            aspect="auto",
+            cmap="viridis",
+            interpolation="nearest",
+            vmin=0,
+            vmax=2,
+          )
+          ax.set_title(f"{col_name} — Task+Ach", fontsize=22)
+          ax.set_ylabel("Dims", fontsize=18)
+          ax.set_yticks(range(combined.shape[0]))
+          ax.set_xticks(range(nT))
+          ax.grid(True, axis="x", alpha=0.3, color="white")
+          loss_mask = cd.get("loss_mask")
+          if loss_mask is not None:
+            mask_diff = np.diff(np.concatenate([[0], loss_mask, [0]]))
+            starts = np.where(mask_diff == 1)[0]
+            ends = np.where(mask_diff == -1)[0] - 1
+            for s in starts:
+              ax.axvline(s - 0.5, color="red", linestyle="-", linewidth=1.5)
+            for e in ends:
+              ax.axvline(e + 0.5, color="red", linestyle="-", linewidth=1.5)
+          # Draw white vertical lines at episode boundaries
+          if col_name == "online" and online_episode_starts:
+            for ep_start in online_episode_starts[1:]:
+              ax.axvline(ep_start - 0.5, color="white", linestyle="-", linewidth=2)
+        else:
+          ax.set_visible(False)
+
+      elif col_name in ("preplay", "dyna"):
+        goal = cd.get("goal")
+        if goal is not None:
+          goal_2d = jnp.tile(goal[None, :], (nT, 1)).T  # [D, T]
+          ax.imshow(
+            goal_2d,
+            aspect="auto",
+            cmap="viridis",
+            interpolation="nearest",
+            vmin=0,
+            vmax=1,
+          )
+          ax.set_title(f"{col_name} — Goal Vector", fontsize=22)
+          ax.set_ylabel("Dims", fontsize=18)
+          ax.set_yticks(range(goal_2d.shape[0]))
+          ax.set_xticks(range(nT))
+          ax.grid(True, axis="x", alpha=0.3, color="white")
+        else:
+          ax.set_visible(False)
+      else:
+        ax.set_visible(False)
 
     fig.tight_layout()
 
     if wandb.run is not None:
-      wandb.log({"learner_example/preplay": wandb.Image(fig)})
+      wandb.log({"learner_example/unified": wandb.Image(fig)})
     plt.close(fig)
 
   def callback(d):
-    plot_online_data(d)
-    plot_simulation_data(d)
+    plot_unified(d)
 
   n_updates = data["n_updates"] + 1
   if config["LEARNER_EXTRA_LOG_PERIOD"] > 0:

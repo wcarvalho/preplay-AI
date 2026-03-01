@@ -7,7 +7,7 @@ HYDRA_FULL_ERROR=1 \
 RL_RESULTS_DIR=/tmp/rl_results \
 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue jaxmaze_trainer.py \
   app.debug=True \
-  app.wandb=False \
+  app.wandb=True \
   app.search=preplay
 
 RUNNING ON SLURM:
@@ -511,31 +511,17 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [1]},
-        # "ALL_GOALS_COEFF": {"values": [.1, 1.]},
-        # "ALL_GOALS_LAMBDA": {"values": [0.0, .7, .6]},
-        # "TASK_DROPOUT_RATE": {"values": [.5, .7, .9]},
-        # "QHEAD_TYPE": {"values": ["dot", "duelling"]},
-        # "GAMMA": {"values": [.99]},
-        # "LR": {"values": [0.0001]},
-        "env.exp": {"values": ["preplay_test_small"]},
+        "ALL_GOALS_LAMBDA": {"values": [.6, .9]},
+        "GAMMA": {"values": [.99]},
+        "TARGET_UPDATE_INTERVAL": {"values": [200, 1000]},
+        "LR": {"values": [0.001, 0.0003, 0.0001]},
+        "ALL_GOALS_COEFF": {"values": [.1, .01, .001]},
+        "ALL_GOALS_TD": {"values": ['qlearning']},
+        "env.exp": {"values": ["preplay_test_big"]},
+        "TOTAL_TIMESTEPS": {"values": [2_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-test-12-task-dropout",
-    }
-  elif search == "preplay_debug":
-    sweep_config = {
-      "metric": {
-        "name": "evaluator_performance/0.0 avg_episode_return",
-        "goal": "maximize",
-      },
-      "parameters": {
-        "ALG": {"values": ["preplay"]},
-        "SEED": {"values": [1]},
-        "ALL_GOALS_RNN": {"values": [True]},
-        "env.exp": {"values": ["preplay_test_small"]},
-      },
-      "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-debug-qvalue",
+      "group": "preplay-search-3",
     }
   elif search == "preplay2":
     sweep_config = {
@@ -547,14 +533,14 @@ def sweep(search: str = ""):
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [2]},
         "ALL_GOALS_RNN": {"values": [True, False]},
-        "TASK_DROPOUT_RATE": {"values": [.6, .9]},
+        "TASK_DROPOUT_RATE": {"values": [.7]},
         "ALL_GOALS_LAMBDA": {"values": [.6, .9]},
         "env.exp": {"values": ["preplay_test_big"]},
-        "ALL_GOALS_TD": {"values": ["tree"]},
+        "ALL_GOALS_TD": {"values": ["tree", 'retrace']},
         "RETRACE_TEMPERATURE": {"values": [0.1]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-test-20-retrace-short",
+      "group": "preplay-test-22-retrace-short",
     }
 
   elif search == "her":
