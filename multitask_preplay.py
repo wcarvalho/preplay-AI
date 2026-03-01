@@ -788,7 +788,7 @@ class PreplayLossFn:
 
           # sarsa_lambda is a sequence fn ([T, A] q-values), vmap over N only
           sarsa_fn = jax.vmap(
-            losses.sarsa_lambda,
+            self.loss_fn,
             in_axes=(1, 1, 1, 1, 1, 1, None),
             out_axes=1,
           )

@@ -513,16 +513,16 @@ def sweep(search: str = ""):
         "SEED": {"values": [1]},
         "ALL_GOALS_LAMBDA": {"values": [.6, .9]},
         "GAMMA": {"values": [.99]},
-        "TARGET_UPDATE_INTERVAL": {"values": [200, 2000]},
+        "TARGET_UPDATE_INTERVAL": {"values": [200, 1000]},
         "LR": {"values": [0.0003, 0.0001]},
-        "ALL_GOALS_COEFF": {"values": [10.0, 1, .1]},
+        "ALL_GOALS_COEFF": {"values": [1, .1, .01]},
         "ALL_GOALS_TD": {"values": ['retrace']},
         "env.exp": {"values": ["preplay_test_big"]},
         "TOTAL_TIMESTEPS": {"values": [2_000_000]},
         "RETRACE_TEMPERATURE": {"values": [0.1]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-search-2",
+      "group": "preplay-search-3",
     }
   elif search == "preplay2":
     sweep_config = {
