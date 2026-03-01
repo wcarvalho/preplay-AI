@@ -2424,7 +2424,7 @@ def jaxmaze_learner_log_extra(
       if target_q_values is not None:
         target_q_taken = rlax.batched_index(target_q_values, actions)
         ax.plot(target_q_taken, label="Target-Net Q")
-      ax.set_title(f"{col_name} - Q-Values", fontsize=13.5)
+      ax.set_title(f"{col_name} - Q-Values", fontsize=22)
       if ci == 1:
         ax.legend(fontsize=12)
       ax.grid(True)
@@ -2448,8 +2448,8 @@ def jaxmaze_learner_log_extra(
           vmin=0,
           vmax=2,
         )
-        ax.set_title(f"{col_name} — Task+Ach", fontsize=13.5)
-        ax.set_ylabel("Dims")
+        ax.set_title(f"{col_name} — Task+Ach", fontsize=22)
+        ax.set_ylabel("Dims", fontsize=16)
         ax.set_yticks(range(combined.shape[0]))
         ax.set_xticks(range(nT))
         ax.grid(True, axis="x", alpha=0.3, color="white")
@@ -2511,8 +2511,8 @@ def jaxmaze_learner_log_extra(
         for vals, label, c, kw in mu_data:
           ax.plot(vals, label=label, color=c, linestyle="--", **kw)
 
-        ax.set_title(f"{col_name} — π/μ (solid=π, dashed=μ, ●=greedy)", fontsize=13.5)
-        ax.legend(fontsize=7, ncol=2)
+        ax.set_title(f"{col_name} — π/μ (solid=π, dashed=μ, ●=greedy)", fontsize=22)
+        ax.legend(fontsize=27, ncol=2)
       else:
         # Online: existing episode markers
         timesteps = cd["timesteps"]
@@ -2521,8 +2521,8 @@ def jaxmaze_learner_log_extra(
         if loss_mask is not None:
           ax.plot(loss_mask, label="mask")
         ax.plot(timesteps.last(), label="is_last")
-        ax.set_title(f"{col_name} — Episode markers", fontsize=13.5)
-        ax.legend(fontsize=10)
+        ax.set_title(f"{col_name} — Episode markers", fontsize=22)
+        ax.legend(fontsize=16)
       ax.grid(True)
       ax.set_xticks(range(nT))
 
@@ -2546,7 +2546,7 @@ def jaxmaze_learner_log_extra(
       total_reward = float(timesteps.reward[ep_start:ep_end].sum())
       ep_timestep = jax.tree_util.tree_map(lambda x: x[ep_start], timesteps)
       goal_name = task_object_to_name(ep_timestep.state.task_object)
-      ax.set_title(f"Ep {ep_idx} ({goal_name}, r={total_reward:.1f})", fontsize=8)
+      ax.set_title(f"Ep {ep_idx} ({goal_name}, r={total_reward:.1f})", fontsize=22)
       ax.axis("off")
 
     # Hide unused trajectory subplots
@@ -2629,9 +2629,9 @@ def jaxmaze_learner_log_extra(
       ax.plot(q_target, label="Q-Targets")
       if loss_mask is not None:
         ax.plot(loss_mask * 0.5, label="Loss Mask", linestyle="--", color="black")
-      ax.set_title(f"{col_name} — Rewards and Q-Values")
+      ax.set_title(f"{col_name} — Rewards and Q-Values", fontsize=22)
       if ci == 0:
-        ax.legend(fontsize=10)
+        ax.legend(fontsize=16)
       ax.grid(True)
       ax.set_xticks(range(nT))
 
@@ -2670,16 +2670,16 @@ def jaxmaze_learner_log_extra(
             markersize=8,
             label="Offtask=Max",
           )
-      ax.set_title(f"{col_name} — Ontask/Offtask Q-Values")
+      ax.set_title(f"{col_name} — Ontask/Offtask Q-Values", fontsize=22)
       if ci == 0:
-        ax.legend(fontsize=10)
+        ax.legend(fontsize=16)
       ax.grid(True)
       ax.set_xticks(range(nT))
 
       # Row 2: TD errors
       ax = axes[2, ci]
       ax.plot(td_errors)
-      ax.set_title(f"{col_name} — TD Errors")
+      ax.set_title(f"{col_name} — TD Errors", fontsize=22)
       ax.grid(True)
       ax.set_xticks(range(len(td_errors)))
 
@@ -2696,8 +2696,8 @@ def jaxmaze_learner_log_extra(
         vmin=0,
         vmax=1,
       )
-      ax.set_title(f"{col_name} — Goal Vector")
-      ax.set_ylabel("Dims")
+      ax.set_title(f"{col_name} — Goal Vector", fontsize=22)
+      ax.set_ylabel("Dims", fontsize=16)
       ax.set_yticks(range(goal_2d.shape[0]))
       ax.set_xticks(range(nT))
       ax.grid(True, axis="x", alpha=0.3, color="white")
@@ -2719,7 +2719,9 @@ def jaxmaze_learner_log_extra(
       task_objects = initial_timestep.state.objects
       t_goal_name = task_object_to_name(initial_timestep.state.task_object)
       sim_goal_name = task_w__to__object(task_objects, goal)
-      ax.set_title(f"{col_name} — Trajectory (sim={sim_goal_name}, t={t_goal_name})")
+      ax.set_title(
+        f"{col_name} — Trajectory (sim={sim_goal_name}, t={t_goal_name})", fontsize=27
+      )
       ax.axis("off")
 
     fig.tight_layout()
