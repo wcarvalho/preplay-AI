@@ -2381,25 +2381,38 @@ def jaxmaze_learner_log_extra(
     callback_data["preplay"]["offtask_q_values"] = offtask_q_values[:, PREPLAY_IDX]
     callback_data["preplay"]["goal"] = simulation_goals[PREPLAY_IDX]
 
-  def plot_q_heatmap(ax, q_values, actions, title, nT, action_names=None):
+  def plot_q_heatmap(
+    ax,
+    q_values,
+    actions,
+    title,
+    nT,
+    action_names=None,
+    show_numbers=True,
+    vmin=None,
+    vmax=None,
+  ):
     """Draw Q-value heatmap [A, T] with argmax (red) and taken (white) rectangles."""
     from matplotlib.patches import Rectangle
 
     q_T = np.array(q_values[:nT]).T  # [A, T]
-    ax.imshow(q_T, aspect="auto", cmap="coolwarm", interpolation="nearest")
+    ax.imshow(
+      q_T, aspect="auto", cmap="coolwarm", interpolation="nearest", vmin=vmin, vmax=vmax
+    )
     n_actions = q_T.shape[0]
     for t in range(nT):
       # Text annotations with 2 sig figs
-      for a in range(n_actions):
-        ax.text(
-          t,
-          a,
-          f"{q_T[a, t]:.2f}",
-          ha="center",
-          va="center",
-          fontsize=14,
-          color="black",
-        )
+      if show_numbers:
+        for a in range(n_actions):
+          ax.text(
+            t,
+            a,
+            f"{q_T[a, t]:.1f}",
+            ha="center",
+            va="center",
+            fontsize=10,
+            color="black",
+          )
       # Black rectangle: argmax action (slightly larger)
       best_a = int(np.argmax(q_values[t]))
       ax.add_patch(
@@ -2425,7 +2438,6 @@ def jaxmaze_learner_log_extra(
         )
       )
     ax.set_title(title, fontsize=22)
-    ax.set_ylabel("Action", fontsize=18)
     ax.set_yticks(range(q_T.shape[0]))
     if action_names:
       ax.set_yticklabels([action_names.get(i, str(i)) for i in range(q_T.shape[0])])
@@ -2603,6 +2615,18 @@ def jaxmaze_learner_log_extra(
       else:
         ax.set_visible(False)
 
+    # --- Shared color scale for Q-value rows ---
+    all_q = []
+    for col_name in col_names:
+      cd = col_data[col_name]
+      nT = len(cd["actions"])
+      all_q.append(np.array(cd["q_values"][:nT]))
+      target_q = cd.get("target_q_values")
+      if target_q is not None:
+        all_q.append(np.array(target_q[:nT]))
+    all_q_flat = np.concatenate([q.ravel() for q in all_q])
+    q_vmin, q_vmax = float(all_q_flat.min()), float(all_q_flat.max())
+
     # --- Row 2: Q-value heatmap [A, T] ---
     for ci, col_name in enumerate(col_names):
       ax = axes[2, ci]
@@ -2616,7 +2640,10 @@ def jaxmaze_learner_log_extra(
         actions,
         f"{col_name} — Q-values",
         nT,
-        action_names=action_names if ci == 0 else None,
+        action_names=action_names,
+        show_numbers=col_name in ("preplay", "dyna"),
+        vmin=q_vmin,
+        vmax=q_vmax,
       )
 
     # --- Row 3: Target-net Q-value heatmap [A, T] ---
@@ -2633,7 +2660,10 @@ def jaxmaze_learner_log_extra(
           actions,
           f"{col_name} — Target Q",
           nT,
-          action_names=action_names if ci == 0 else None,
+          action_names=action_names,
+          show_numbers=col_name in ("preplay", "dyna"),
+          vmin=q_vmin,
+          vmax=q_vmax,
         )
       else:
         ax.set_visible(False)
