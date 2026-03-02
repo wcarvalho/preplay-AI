@@ -2396,7 +2396,7 @@ def jaxmaze_learner_log_extra(
     from matplotlib.patches import Rectangle
 
     q_T = np.array(q_values[:nT]).T  # [A, T]
-    ax.imshow(
+    im = ax.imshow(
       q_T, aspect="auto", cmap="coolwarm", interpolation="nearest", vmin=vmin, vmax=vmax
     )
     n_actions = q_T.shape[0]
@@ -2442,6 +2442,7 @@ def jaxmaze_learner_log_extra(
     if action_names:
       ax.set_yticklabels([action_names.get(i, str(i)) for i in range(q_T.shape[0])])
     ax.set_xticks(range(nT))
+    return im
 
   def plot_unified(d):
     """Unified figure: up to 4 columns (online, all_goals, preplay, dyna) x 5 rows."""
@@ -2503,21 +2504,21 @@ def jaxmaze_learner_log_extra(
       if col_name in ("online", "all_goals"):
         goal_reward = cd.get("goal_reward")
         if goal_reward is not None:
-          ax.plot(goal_reward, label="Goal Reward")
-        ax.plot(q_values_taken, label="Q-Values")
-        ax.plot(q_values.max(axis=-1), label="Q-Max")
-        ax.plot(q_target, label="Q-Targets")
+          ax.plot(goal_reward, label="Goal Reward", color="tab:blue")
+        ax.plot(q_values_taken, label="Q-Values", color="tab:orange")
+        ax.plot(q_values.max(axis=-1), label="Q-Max", color="tab:green")
+        ax.plot(q_target, label="Q-Targets", color="tab:red")
         target_q_values = cd.get("target_q_values")
         if target_q_values is not None:
           target_q_taken = rlax.batched_index(target_q_values, actions)
-          ax.plot(target_q_taken, label="Target-Net Q")
+          ax.plot(target_q_taken, label="Target-Net Q", color="tab:purple")
       else:
         # preplay/dyna
         simulation_reward = cd.get("simulation_reward")
         if simulation_reward is not None:
-          ax.plot(simulation_reward, label="Sim rewards")
-        ax.plot(q_values_taken, label="Q-Values")
-        ax.plot(q_target, label="Q-Targets")
+          ax.plot(simulation_reward, label="Sim rewards", color="tab:blue")
+        ax.plot(q_values_taken, label="Q-Values", color="tab:orange")
+        ax.plot(q_target, label="Q-Targets", color="tab:red")
         loss_mask = cd.get("loss_mask")
         if loss_mask is not None:
           ax.plot(loss_mask * 0.5, label="Loss Mask", linestyle="--", color="black")
@@ -2628,13 +2629,14 @@ def jaxmaze_learner_log_extra(
     q_vmin, q_vmax = float(all_q_flat.min()), float(all_q_flat.max())
 
     # --- Row 2: Q-value heatmap [A, T] ---
+    im_q = None
     for ci, col_name in enumerate(col_names):
       ax = axes[2, ci]
       cd = col_data[col_name]
       actions = cd["actions"]
       q_values = cd["q_values"]
       nT = len(actions)
-      plot_q_heatmap(
+      im_q = plot_q_heatmap(
         ax,
         q_values,
         actions,
@@ -2645,8 +2647,11 @@ def jaxmaze_learner_log_extra(
         vmin=q_vmin,
         vmax=q_vmax,
       )
+    if im_q is not None:
+      fig.colorbar(im_q, ax=axes[2, :].tolist(), shrink=0.8, pad=0.02)
 
     # --- Row 3: Target-net Q-value heatmap [A, T] ---
+    im_tq = None
     for ci, col_name in enumerate(col_names):
       ax = axes[3, ci]
       cd = col_data[col_name]
@@ -2654,7 +2659,7 @@ def jaxmaze_learner_log_extra(
       if target_q is not None:
         actions = cd["actions"]
         nT = len(actions)
-        plot_q_heatmap(
+        im_tq = plot_q_heatmap(
           ax,
           target_q,
           actions,
@@ -2667,6 +2672,8 @@ def jaxmaze_learner_log_extra(
         )
       else:
         ax.set_visible(False)
+    if im_tq is not None:
+      fig.colorbar(im_tq, ax=axes[3, :].tolist(), shrink=0.8, pad=0.02)
 
     # --- Row 4: Goal vectors ---
     for ci, col_name in enumerate(col_names):
