@@ -652,10 +652,10 @@ class PreplayLossFn:
             place_goal_in_timestep = jax.vmap(self.place_goal_in_timestep, (None, 0), 0)
             place_goal_in_timestep = jax.vmap(place_goal_in_timestep, (0, None), 0)
             # [T, N, D] <- [T, D], [N, G]
-            timestep = place_goal_in_timestep(timestep, new_goal)
+            timestep_w_g = place_goal_in_timestep(timestep, new_goal)
           else:
             # [T, N, D] <- [T, D]
-            timestep = add_goal_dim(timestep, 1)
+            timestep_w_g = add_goal_dim(timestep, 1)
 
           online_h = add_goal_dim(online_h, 0)  # [D] --> [N, D]
           target_h = add_goal_dim(target_h, 0)  # [D] --> [N, D]
@@ -663,13 +663,13 @@ class PreplayLossFn:
           unroll = functools.partial(self.network.apply, method=self.network.unroll)
           key_grad, rng_1, rng_2 = jax.random.split(key_grad, 3)
           online_preds_g, _ = unroll(
-            params, online_h, timestep, rng_1, task_dropout=False
+            params, online_h, timestep_w_g, rng_1, task_dropout=False
           )
           target_preds_g, _ = unroll(
-            target_params, target_h, timestep, rng_2, task_dropout=False
+            target_params, target_h, timestep_w_g, rng_2, task_dropout=False
           )
 
-          goal_rewards = self.compute_rewards(timestep, new_goal)
+          goal_rewards = self.compute_rewards(timestep_w_g, new_goal)
 
         else:
           length = actions.shape[0]
@@ -691,8 +691,8 @@ class PreplayLossFn:
           online_preds_g = Predictions(q_vals=online_q, state=None)
           target_preds_g = Predictions(q_vals=target_q, state=None)
 
-          timestep = add_goal_dim(timestep, 1)  # [T, N, D] <- [T, D]
-          goal_rewards = self.compute_rewards(timestep, new_goal)
+          timestep_w_g = add_goal_dim(timestep_w_g, 1)  # [T, N, D] <- [T, D]
+          goal_rewards = self.compute_rewards(timestep_w_g, new_goal)
 
         if self.all_goals_td in ("retrace", "tree"):
           # Retrace off-policy correction (Munos et al., 2016)
@@ -715,9 +715,9 @@ class PreplayLossFn:
 
           # Rewards and discounts
           rewards = make_float(goal_rewards) - self.step_cost
-          discounts = timestep.discount * self.discount
+          discounts = timestep_w_g.discount * self.discount
 
-          ag_loss_mask = is_truncated(timestep)
+          ag_loss_mask = is_truncated(timestep_w_g)
 
           # vmap retrace over N (goal dimension = axis 1)
           retrace_fn = jax.vmap(
@@ -739,8 +739,8 @@ class PreplayLossFn:
           )  # returns [T-1, N]
         elif self.all_goals_td == "e-sarsa":
           rewards = make_float(goal_rewards) - self.step_cost
-          discounts = timestep.discount * self.discount
-          ag_loss_mask = is_truncated(timestep)
+          discounts = timestep_w_g.discount * self.discount
+          ag_loss_mask = is_truncated(timestep_w_g)
 
           temp = self.retrace_temperature
           # probs_a_t: softmax over off-task Q-values at t+1 [T, N, A]
@@ -764,8 +764,8 @@ class PreplayLossFn:
           )  # returns [T-1, N]
         elif self.all_goals_td == "sarsa":
           rewards = make_float(goal_rewards) - self.step_cost
-          discounts = timestep.discount * self.discount
-          ag_loss_mask = is_truncated(timestep)
+          discounts = timestep_w_g.discount * self.discount
+          ag_loss_mask = is_truncated(timestep_w_g)
 
           # sarsa_lambda is a sequence fn ([T, A] q-values), vmap over N only
           sarsa_fn = jax.vmap(
@@ -785,20 +785,20 @@ class PreplayLossFn:
           )
           ag_td_error = target_tm1 - qa_tm1  # [T-1, N]
         elif self.all_goals_td == "qlearning":
-          ag_loss_mask = is_truncated(timestep)
+          ag_loss_mask = is_truncated(timestep_w_g)
 
           ag_td_error, ag_batch_loss, ag_metrics, ag_log_info = self.loss_fn(
-            timestep=timestep,  # [T, N, ...]
+            timestep=timestep_w_g,  # [T, N, ...]
             online_preds=online_preds_g,  # .q_vals: [T, N, A]
             target_preds=target_preds_g,  # .q_vals: [T, N, A]
             actions=actions,  # [T, N]
             rewards=goal_rewards,  # [T, N]
-            is_last=make_float(timestep.last()),  # [T, N]
-            non_terminal=timestep.discount,  # [T, N]
+            is_last=make_float(timestep_w_g.last()),  # [T, N]
+            non_terminal=timestep_w_g.discount,  # [T, N]
             loss_mask=ag_loss_mask,  # [T, N]
           )  # returns [T-1, N], [N], dict, dict
           if self.make_log_extras is not None:
-            extras = self.make_log_extras(timestep, goal=new_goal)
+            extras = self.make_log_extras(timestep_w_g, goal=new_goal)
             ag_log_info.update(extras)
 
           return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
@@ -819,10 +819,10 @@ class PreplayLossFn:
           "1.reward": rewards.mean(),
         }
         ag_log_info = {
-          "timesteps": timestep,
+          "timesteps": timestep_w_g,
           "actions": actions,
           "td_errors": ag_td_error,
-          "non_terminal": timestep.discount,
+          "non_terminal": timestep_w_g.discount,
           "loss_mask": ag_loss_mask,
           "q_values": online_preds_g.q_vals,
           "q_loss": ag_loss_per_t,
@@ -835,7 +835,7 @@ class PreplayLossFn:
           ),  # [T, N, A] (on-task Q-values, broadcast over goals)
         }
         if self.make_log_extras is not None:
-          extras = self.make_log_extras(timestep, goal=new_goal)
+          extras = self.make_log_extras(timestep_w_g, goal=new_goal)
           ag_log_info.update(extras)
 
         return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
