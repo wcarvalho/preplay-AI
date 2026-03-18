@@ -511,19 +511,19 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [1]},
-        "ALL_GOALS_LAMBDA": {"values": [.6]},
+        "ALL_GOALS_LAMBDA": {"values": [.6, .9]},
         "GAMMA": {"values": [.99]},
         "TARGET_UPDATE_INTERVAL": {"values": [200, 1000]},
-        "LR": {"values": [0.0003, 0.0001, 0.00001]},
-        "ALL_GOALS_COEFF": {"values": [.1, .01, .001]},
+        "LR": {"values": [0.0003, 0.0001]},
+        "ALL_GOALS_COEFF": {"values": [.001]},
+        "SIM_EPSILON_SETTING": {"values": [1, 2]},
         "ALL_GOALS_TD": {"values": ['qlearning']},
         "env.exp": {"values": ["preplay_test_big"]},
-        "TOTAL_TIMESTEPS": {"values": [3_000_000]},
-        "IMPORTANCE_SAMPLING_EXPONENT": {"values": [0.0]},
+        "TOTAL_TIMESTEPS": {"values": [4_000_000]},
         "PRIORITY_EXPONENT": {"values": [0.0, 0.6]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-search-6-no-preiority-sampling",
+      "group": "preplay-search-8-no-priority-sampling-low",
     }
   elif search == "preplay2":
     sweep_config = {
