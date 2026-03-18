@@ -1137,6 +1137,7 @@ class PreplayLossFn:
       }
       log_info = off_log
       log_info["goal"] = all_sim_goals
+      log_info["epsilon_values"] = all_eps
       log_info["simulation_reward"] = offtask_reward
       log_info["sim_ontask_q_values"] = ontask_q_on
       log_info["sim_offtask_q_values"] = offtask_q_on
@@ -2370,16 +2371,19 @@ def jaxmaze_learner_log_extra(
     simulation_goals = dyna.pop("goal")
     ontask_q_values = dyna.pop("sim_ontask_q_values")
     offtask_q_values = dyna.pop("sim_offtask_q_values")
+    epsilon_values = dyna.pop("epsilon_values")
 
     callback_data["dyna"] = jax.tree_util.tree_map(lambda x: x[:, DYNA_IDX], dyna)
     callback_data["dyna"]["ontask_q_values"] = ontask_q_values[:, DYNA_IDX]
     callback_data["dyna"]["offtask_q_values"] = offtask_q_values[:, DYNA_IDX]
     callback_data["dyna"]["goal"] = simulation_goals[DYNA_IDX]
+    callback_data["dyna"]["epsilon"] = epsilon_values[DYNA_IDX]
 
     callback_data["preplay"] = jax.tree_util.tree_map(lambda x: x[:, PREPLAY_IDX], dyna)
     callback_data["preplay"]["ontask_q_values"] = ontask_q_values[:, PREPLAY_IDX]
     callback_data["preplay"]["offtask_q_values"] = offtask_q_values[:, PREPLAY_IDX]
     callback_data["preplay"]["goal"] = simulation_goals[PREPLAY_IDX]
+    callback_data["preplay"]["epsilon"] = epsilon_values[PREPLAY_IDX]
 
   def plot_q_heatmap(
     ax,
