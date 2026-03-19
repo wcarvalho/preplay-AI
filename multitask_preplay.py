@@ -2260,10 +2260,11 @@ def make_train_jaxmaze_multigoal(**kwargs):
 
   def compute_goal_object_distances(timestep):
     # get agent position [T, B, 2] --> [T, B, 1, 2]
-    player_position = jnp.expand_dims(timestep.observation.player_position, -2)
+    player_position = jnp.expand_dims(
+        timestep.observation.player_position, -2).astype(jnp.float32)
 
     # get object position # [T, B, N, 2]
-    obj_pos = timestep.observation.object_positions
+    obj_pos = timestep.observation.object_positions.astype(jnp.float32)
 
     # compute distance [T, B, N]
     distance = jnp.sqrt(jnp.square(player_position - obj_pos).sum(-1))
