@@ -2811,7 +2811,6 @@ def jaxmaze_learner_log_extra(
 
     if wandb.run is not None:
       wandb.log({"learner_example/unified": wandb.Image(fig)})
-    fig.savefig("/tmp/unified_plot.png", dpi=100, bbox_inches="tight")  # DEBUG
     plt.close(fig)
 
   def callback(d):
