@@ -591,11 +591,8 @@ class PreplayLossFn:
     # ---- Online loss ----
     if self.online_coeff > 0.0:
       # [T, B, G]
-      goal = self.get_main_goal(
-        data.timestep, expand_across_simulations=False)
-      rewards = self.compute_rewards(
-        data.timestep, goal,
-        expand_g_across_time=False)
+      goal = self.get_main_goal(data.timestep, expand_across_simulations=False)
+      rewards = self.compute_rewards(data.timestep, goal, expand_g_across_time=False)
 
       td_error, batch_loss, metrics, log_info = self.loss_fn(
         timestep=data.timestep,  # [T, B, ...]
@@ -702,6 +699,11 @@ class PreplayLossFn:
           timestep_w_g = add_goal_dim(timestep_w_g, 1)  # [T, N, D] <- [T, D]
           goal_rewards = self.compute_rewards(timestep_w_g, new_goal)
 
+        # Rewards and discounts
+        rewards = make_float(goal_rewards) - self.step_cost
+        discounts = timestep.discount * self.discount
+        loss_mask = is_truncated(timestep)
+
         if self.all_goals_td in ("retrace", "tree"):
           # Retrace off-policy correction (Munos et al., 2016)
           # The trajectory was collected under the main-task policy (behavior),
@@ -720,12 +722,6 @@ class PreplayLossFn:
 
           # Target policy: Boltzmann over off-task Q-values [T, N, A]
           pi_t = jax.nn.softmax(online_preds_g.q_vals / temp, axis=-1)
-
-          # Rewards and discounts
-          rewards = make_float(goal_rewards) - self.step_cost
-          discounts = timestep.discount * self.discount
-
-          loss_mask = is_truncated(timestep)
 
           # vmap retrace over N (goal dimension = axis 1)
           retrace_fn = jax.vmap(
@@ -754,10 +750,6 @@ class PreplayLossFn:
           target_tm1 = target_tm1 * timestep.discount[:-1]  # [T-1, N]
           ag_td_error = target_tm1 - qa_tm1  # [T-1, N]
         elif self.all_goals_td == "e-sarsa":
-          rewards = make_float(goal_rewards) - self.step_cost
-          discounts = timestep.discount * self.discount
-          loss_mask = is_truncated(timestep_w_g)
-
           temp = self.retrace_temperature
           # probs_a_t: softmax over off-task Q-values at t+1 [T, N, A]
           probs_a_t = jax.nn.softmax(online_preds_g.q_vals / temp, axis=-1)
@@ -787,10 +779,6 @@ class PreplayLossFn:
           target_tm1 = target_tm1 * timestep.discount[:-1]  # [T-1, N]
           ag_td_error = target_tm1 - qa_tm1  # [T-1, N]
         elif self.all_goals_td == "sarsa":
-          rewards = make_float(goal_rewards) - self.step_cost
-          discounts = timestep.discount * self.discount
-          loss_mask = is_truncated(timestep_w_g)
-
           # sarsa_lambda is a sequence fn ([T, A] q-values), vmap over N only
           sarsa_fn = jax.vmap(
             losses.sarsa_lambda,
@@ -849,8 +837,7 @@ class PreplayLossFn:
           "loss_mask": loss_mask,
           "q_values": online_preds_g.q_vals,
           "q_loss": ag_loss_per_t,
-          "q_target": ag_td_error
-          + rlax.batched_index(online_preds_g.q_vals[:-1], actions[:-1]),
+          "q_target": target_tm1,
           "target_q_values": target_preds_g.q_vals,  # [T, N, A]
           "behavior_q_values": jnp.broadcast_to(
             online_preds.q_vals[:, None, :],
@@ -2258,10 +2245,11 @@ def make_train_jaxmaze_multigoal(**kwargs):
     any_achievable = jnp.bool_(True)
     return goals, achievable, any_achievable
 
-  def compute_goal_object_distances(timestep):
+  def compute_goal_distance_reward(timestep):
     # get agent position [T, B, 2] --> [T, B, 1, 2]
-    player_position = jnp.expand_dims(
-        timestep.observation.player_position, -2).astype(jnp.float32)
+    player_position = jnp.expand_dims(timestep.observation.player_position, -2).astype(
+      jnp.float32
+    )
 
     # get object position # [T, B, N, 2]
     obj_pos = timestep.observation.object_positions.astype(jnp.float32)
@@ -2271,7 +2259,18 @@ def make_train_jaxmaze_multigoal(**kwargs):
 
     assert distance.shape == obj_pos.shape[:-1]
 
-    return distance
+    # [T-1, B, G]
+    improvements = distance[1:] - distance[:-1]
+
+    # [T, B, G], should be safe since last step is always ignored
+    improvements = jnp.concatenate((improvements, jnp.zeros_like(improvements[:1])))
+
+    # mask out improvements for objects already collected
+    # object_positions == -1 when collected (see craftax_web_env.py:766)
+    collected = (timestep.observation.object_positions == -1).all(axis=-1)  # [T, B, N]
+    improvements = improvements * (~collected).astype(improvements.dtype)
+
+    return improvements
 
   def compute_rewards(timesteps, goal_onehot, expand_g_across_time=True):
     """Compute rewards using state features and goal vectors.
@@ -2299,10 +2298,11 @@ def make_train_jaxmaze_multigoal(**kwargs):
       reward = (state_features * goal_onehot.astype(jnp.float32)).sum(-1)
 
     # [T, B, G]
-    goal_distances = compute_goal_object_distances(timesteps)
+    distance_reward = compute_goal_distance_reward(timesteps)
 
     # [T, B]
-    distance_penalty = (goal_distances * goal_onehot).sum(-1)
+    distance_penalty = (distance_reward * goal_onehot).sum(-1)
+
     reward = reward - distance_coeff * distance_penalty
 
     return reward
@@ -2628,31 +2628,8 @@ def jaxmaze_learner_log_extra(
         else:
           ax.set_visible(False)
 
-      elif col_name == "all_goals" and online_timesteps is not None:
-        # Render episode 1 (second episode) from online timesteps
-        if len(online_episode_ranges) >= 2:
-          ep_start, ep_end = online_episode_ranges[1]
-          maze_height, maze_width, _ = online_timesteps.state.grid[0].shape
-          initial_state = jax.tree_util.tree_map(
-            lambda x: x[ep_start], online_timesteps.state
-          )
-          img = render_fn(initial_state)
-          ep_positions = jax.tree_util.tree_map(
-            lambda x: x[ep_start : ep_end - 1], online_timesteps.state.agent_pos
-          )
-          ep_actions = col_data["online"]["actions"][ep_start : ep_end - 1]
-          renderer.place_arrows_on_image(
-            img, ep_positions, ep_actions, maze_height, maze_width, arrow_scale=5, ax=ax
-          )
-          ep_ts = jax.tree_util.tree_map(lambda x: x[ep_start], online_timesteps)
-          goal_name = task_object_to_name(ep_ts.state.task_object)
-          total_reward = float(online_timesteps.reward[ep_start:ep_end].sum())
-          ax.set_title(
-            f"online_simulated — Ep 1 ({goal_name}, r={total_reward:.1f})", fontsize=22
-          )
-          ax.axis("off")
-        else:
-          ax.set_visible(False)
+      elif col_name == "all_goals":
+        ax.set_visible(False)
 
       elif col_name in ("preplay", "dyna"):
         # Simulation trajectory rendering
@@ -2704,6 +2681,8 @@ def jaxmaze_learner_log_extra(
       actions = cd["actions"]
       q_values = cd["q_values"]
       nT = len(actions)
+      if col_name in ("online", "all_goals"):
+        nT = min(nT, 20)
       im_q = plot_q_heatmap(
         ax,
         q_values,
@@ -2727,6 +2706,8 @@ def jaxmaze_learner_log_extra(
       if target_q is not None:
         actions = cd["actions"]
         nT = len(actions)
+        if col_name in ("online", "all_goals"):
+          nT = min(nT, 20)
         im_tq = plot_q_heatmap(
           ax,
           target_q,
