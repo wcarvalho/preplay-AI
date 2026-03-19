@@ -516,7 +516,7 @@ def sweep(search: str = ""):
         "SEED": {"values": [1]},
         #"ALL_GOALS_LAMBDA": {"values": [.3, .6, .7]},
         "GAMMA": {"values": [.99]},
-        "TARGET_UPDATE_INTERVAL": {"values": [2_000]},
+        "TARGET_UPDATE_INTERVAL": {"values": [200, 1_000]},
         "DISTANCE_COEFF": {"values": [0, 1e-2, 1e-3]},
         "ALL_GOALS_COEFF": {"values": [1e-3]},
         "ALL_GOALS_TD": {"values": ["sarsa", 'retrace', 'qlearning']},
