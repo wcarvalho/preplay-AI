@@ -2682,7 +2682,7 @@ def jaxmaze_learner_log_extra(
       q_values = cd["q_values"]
       nT = len(actions)
       if col_name in ("online", "all_goals"):
-        nT = min(nT, 20)
+        nT = min(nT, 15)
       im_q = plot_q_heatmap(
         ax,
         q_values,
@@ -2707,7 +2707,7 @@ def jaxmaze_learner_log_extra(
         actions = cd["actions"]
         nT = len(actions)
         if col_name in ("online", "all_goals"):
-          nT = min(nT, 20)
+          nT = min(nT, 15)
         im_tq = plot_q_heatmap(
           ax,
           target_q,
