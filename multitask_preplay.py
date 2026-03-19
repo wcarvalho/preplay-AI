@@ -591,11 +591,8 @@ class PreplayLossFn:
     # ---- Online loss ----
     if self.online_coeff > 0.0:
       # [T, B, G]
-      goal = self.get_main_goal(
-        data.timestep, expand_across_simulations=False)
-      rewards = self.compute_rewards(
-        data.timestep, goal,
-        expand_g_across_time=False)
+      goal = self.get_main_goal(data.timestep, expand_across_simulations=False)
+      rewards = self.compute_rewards(data.timestep, goal, expand_g_across_time=False)
 
       td_error, batch_loss, metrics, log_info = self.loss_fn(
         timestep=data.timestep,  # [T, B, ...]
@@ -2258,10 +2255,11 @@ def make_train_jaxmaze_multigoal(**kwargs):
     any_achievable = jnp.bool_(True)
     return goals, achievable, any_achievable
 
-  def compute_goal_object_distances(timestep):
+  def compute_goal_distance_reward(timestep):
     # get agent position [T, B, 2] --> [T, B, 1, 2]
-    player_position = jnp.expand_dims(
-        timestep.observation.player_position, -2).astype(jnp.float32)
+    player_position = jnp.expand_dims(timestep.observation.player_position, -2).astype(
+      jnp.float32
+    )
 
     # get object position # [T, B, N, 2]
     obj_pos = timestep.observation.object_positions.astype(jnp.float32)
@@ -2271,7 +2269,19 @@ def make_train_jaxmaze_multigoal(**kwargs):
 
     assert distance.shape == obj_pos.shape[:-1]
 
-    return distance
+    # [T-1, B, G]
+    improvements = distance[1:] - distance[:-1]
+
+    # [T, B, G], should be safe since last step is always ignored
+    improvements = jnp.concatenate(
+      (improvements, jnp.zeros_like(improvements[:1])))
+
+    # mask out improvements for objects already collected
+    # object_positions == -1 when collected (see craftax_web_env.py:766)
+    collected = (timestep.observation.object_positions == -1).all(axis=-1)  # [T, B, N]
+    improvements = improvements * (~collected).astype(improvements.dtype)
+
+    return improvements
 
   def compute_rewards(timesteps, goal_onehot, expand_g_across_time=True):
     """Compute rewards using state features and goal vectors.
@@ -2299,10 +2309,11 @@ def make_train_jaxmaze_multigoal(**kwargs):
       reward = (state_features * goal_onehot.astype(jnp.float32)).sum(-1)
 
     # [T, B, G]
-    goal_distances = compute_goal_object_distances(timesteps)
+    distance_reward = compute_goal_distance_reward(timesteps)
 
     # [T, B]
-    distance_penalty = (goal_distances * goal_onehot).sum(-1)
+    distance_penalty = (distance_reward * goal_onehot).sum(-1)
+
     reward = reward - distance_coeff * distance_penalty
 
     return reward
