@@ -862,11 +862,11 @@ class PreplayLossFn:
       # Default 2 groups: idx 0=microwave, 1=fork, 2=stove, 3=knife
       # Take goal index 2 (stove): [B, T, N, ...] -> [B, T, ...]
       all_log_info["all_goals"] = jax.tree_util.tree_map(
-        lambda x: x[:, :, 2], all_goals_log_info
+        lambda x: x[:, 2], all_goals_log_info
       )
       # Take goal index 0 (microwave): [B, T, N, ...] -> [B, T, ...]
       all_log_info["all_goals_microwave"] = jax.tree_util.tree_map(
-        lambda x: x[:, :, 0], all_goals_log_info
+        lambda x: x[:, 0], all_goals_log_info
       )
 
       batch_loss += self.all_goals_coeff * all_goals_batch_loss.mean(1)
