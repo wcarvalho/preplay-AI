@@ -18,7 +18,7 @@ import flax
 from flax import struct
 from gymnax.environments import environment
 
-from jaxneurorl import losses
+import losses
 from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
 
@@ -306,7 +306,7 @@ class UsfaAgent(nn.Module):
     new_rnn_state, rnn_out = self.rnn(rnn_state, rnn_in, _rng)
 
     if evaluate:
-      predictions = jax.vmap(self.sf_head.evaluate, (0,0,None))(
+      predictions = jax.vmap(self.sf_head.evaluate, (0, 0, None))(
         rnn_out, x.observation.task_w, self.train_tasks
       )
     else:

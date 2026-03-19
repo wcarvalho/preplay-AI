@@ -31,7 +31,7 @@ import craftax_env
 import craftax_web_env
 from craftax_web_env import Achiement_to_idx
 
-from jaxneurorl import losses
+import losses
 from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
 from jaxneurorl.agents import qlearning as base_agent

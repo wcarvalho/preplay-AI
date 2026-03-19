@@ -28,7 +28,7 @@ import craftax_env
 import craftax_web_env
 from craftax_web_env import Achiement_to_idx
 
-from jaxneurorl import losses
+import losses
 from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
 from jaxneurorl.agents import qlearning as base_agent
@@ -723,14 +723,15 @@ class PreplayLossFn:
           # Target policy: Boltzmann over off-task Q-values [T, N, A]
           pi_t = jax.nn.softmax(online_preds_g.q_vals / temp, axis=-1)
 
+          is_last = make_float(timestep.last())
           # vmap retrace over N (goal dimension = axis 1)
           retrace_fn = jax.vmap(
-            rlax.retrace,
-            in_axes=(1, 1, 1, 1, 1, 1, 1, None, None),
+            losses.retrace,
+            in_axes=(1, 1, 1, 1, 1, 1, 1, None, None, 1),
             out_axes=1,
           )
 
-          ag_td_error = retrace_fn(
+          qa_tm1, target_tm1 = retrace_fn(
             online_preds_g.q_vals[:-1],  # q_tm1:      [T-1, N, A]
             target_preds_g.q_vals[1:],  # q_t:        [T-1, N, A]
             actions[:-1],  # a_tm1:      [T-1, N]
@@ -740,49 +741,19 @@ class PreplayLossFn:
             pi_t[1:],  # pi_t:       [T-1, N, A]
             mu_t[1:],  # mu_t:       [T-1]
             self.all_goals_lambda,  # lambda:     scalar
-          )  # returns [T-1, N]
+            is_last[1:],  # is_last_t:  [T-1]
+          )  # returns [T-1, N], [T-1, N]
           # Force targets to 0 at episode termination (Q(terminal, a) = 0).
           # Use original episode termination (timestep), not imaginary goal's (timestep_w_g).
-          qa_tm1 = rlax.batched_index(
-            online_preds_g.q_vals[:-1], actions[:-1]
-          )  # [T-1, N]
-          target_tm1 = ag_td_error + qa_tm1  # [T-1, N]
           target_tm1 = target_tm1 * timestep.discount[:-1]  # [T-1, N]
           ag_td_error = target_tm1 - qa_tm1  # [T-1, N]
-        elif self.all_goals_td == "e-sarsa":
-          temp = self.retrace_temperature
-          # probs_a_t: softmax over off-task Q-values at t+1 [T, N, A]
-          probs_a_t = jax.nn.softmax(online_preds_g.q_vals / temp, axis=-1)
 
-          # vmap over T (time), then over N (goals)
-          esarsa_single = jax.vmap(rlax.expected_sarsa)  # vmap over T
-          esarsa_fn = jax.vmap(
-            esarsa_single,  # vmap over N
-            in_axes=(1, 1, 1, 1, 1, 1),
-            out_axes=1,
-          )
-
-          ag_td_error = esarsa_fn(
-            online_preds_g.q_vals[:-1],  # q_tm1: [T-1, N, A]
-            actions[:-1],  # a_tm1: [T-1, N]
-            rewards[1:],  # r_t:   [T-1, N]
-            discounts[1:],  # discount_t: [T-1, N]
-            target_preds_g.q_vals[1:],  # q_t:   [T-1, N, A]
-            probs_a_t[1:],  # probs_a_t: [T-1, N, A]
-          )  # returns [T-1, N]
-          # Force targets to 0 at episode termination (Q(terminal, a) = 0).
-          # Use original episode termination (timestep), not imaginary goal's (timestep_w_g).
-          qa_tm1 = rlax.batched_index(
-            online_preds_g.q_vals[:-1], actions[:-1]
-          )  # [T-1, N]
-          target_tm1 = ag_td_error + qa_tm1  # [T-1, N]
-          target_tm1 = target_tm1 * timestep.discount[:-1]  # [T-1, N]
-          ag_td_error = target_tm1 - qa_tm1  # [T-1, N]
         elif self.all_goals_td == "sarsa":
           # sarsa_lambda is a sequence fn ([T, A] q-values), vmap over N only
+          is_last = make_float(timestep.last())
           sarsa_fn = jax.vmap(
             losses.sarsa_lambda,
-            in_axes=(1, 1, 1, 1, 1, 1, None),
+            in_axes=(1, 1, 1, 1, 1, 1, None, 1),
             out_axes=1,
           )
 
@@ -794,6 +765,7 @@ class PreplayLossFn:
             target_preds_g.q_vals[1:],  # q_t:   [T-1, N, A]
             actions[1:],  # a_t:   [T-1, N]
             self.all_goals_lambda,
+            is_last[1:],  # is_last_t:  [T-1, N]
           )
           # Force targets to 0 at episode termination (Q(terminal, a) = 0).
           # Use original episode termination (timestep), not imaginary goal's (timestep_w_g).
@@ -875,9 +847,16 @@ class PreplayLossFn:
         target_state,  # [B, D]
         key_grad_,  # [B]
       )
-      # Take first goal: [B, N, ...] -> [B, ...]
+      # all_goals_log_info N dim follows all_tasks ordering:
+      # all_tasks = concat(train_objects, test_objects) = concat(groups[:,0], groups[:,1])
+      # Default 2 groups: idx 0=microwave, 1=fork, 2=stove, 3=knife
+      # Take goal index 2 (stove): [B, T, N, ...] -> [B, T, ...]
       all_log_info["all_goals"] = jax.tree_util.tree_map(
         lambda x: x[:, :, 2], all_goals_log_info
+      )
+      # Take goal index 0 (microwave): [B, T, N, ...] -> [B, T, ...]
+      all_log_info["all_goals_microwave"] = jax.tree_util.tree_map(
+        lambda x: x[:, :, 0], all_goals_log_info
       )
 
       batch_loss += self.all_goals_coeff * all_goals_batch_loss.mean(1)
@@ -2336,18 +2315,18 @@ def make_train_jaxmaze_multigoal(**kwargs):
     task_object = (task_objects * goal).sum(-1)  # scalar
     task_object = task_object.astype(jnp.int32)
     new_state = timestep.state.replace(
-      step_num=jnp.zeros_like(timestep.state.step_num),
+      #step_num=jnp.zeros_like(timestep.state.step_num),
       task_w=goal.astype(timestep.state.task_w.dtype),
       task_object=task_object,
     )
-    new_observation = env.make_observation(new_state, timestep.observation.prev_action)
+    new_observation = env.make_observation(new_state, timestep.observation.prev_action_raw)
 
     return timestep.replace(
       state=new_state,
       observation=new_observation,
-      reward=jnp.zeros_like(timestep.reward),
-      discount=jnp.ones_like(timestep.discount),
-      step_type=jnp.ones_like(timestep.step_type),
+      #reward=jnp.zeros_like(timestep.reward),
+      #discount=jnp.ones_like(timestep.discount),
+      #step_type=jnp.ones_like(timestep.step_type),
     )
 
   def make_log_extras(timestep, goal=None):
@@ -2412,6 +2391,11 @@ def jaxmaze_learner_log_extra(
   if "all_goals" in data:
     callback_data["all_goals"] = jax.tree_util.tree_map(
       lambda x: x[0], data["all_goals"]
+    )
+
+  if "all_goals_microwave" in data:
+    callback_data["all_goals_microwave"] = jax.tree_util.tree_map(
+      lambda x: x[0], data["all_goals_microwave"]
     )
 
   def task_object_to_name(task_object_id):
@@ -2629,7 +2613,24 @@ def jaxmaze_learner_log_extra(
           ax.set_visible(False)
 
       elif col_name == "all_goals":
-        ax.set_visible(False)
+        if "all_goals_microwave" in d:
+          cd2 = d["all_goals_microwave"]
+          actions2 = cd2["actions"]
+          q_values2 = cd2["q_values"]
+          q_target2 = cd2["q_target"]
+          nT2 = len(actions2)
+          q_values_taken2 = rlax.batched_index(q_values2, actions2)
+          goal_reward2 = cd2.get("goal_reward")
+          if goal_reward2 is not None:
+            ax.plot(goal_reward2, label="Goal Reward", color="tab:blue")
+          ax.plot(q_values_taken2, label="Q-Values", color="tab:orange")
+          ax.plot(q_values2.max(axis=-1), label="Q-Max", color="tab:green")
+          ax.plot(q_target2, label="Q-Targets", color="tab:red")
+          ax.set_title("all_goals (microwave) — Q-Values", fontsize=22)
+          ax.grid(True)
+          ax.set_xticks(range(nT2))
+        else:
+          ax.set_visible(False)
 
       elif col_name in ("preplay", "dyna"):
         # Simulation trajectory rendering

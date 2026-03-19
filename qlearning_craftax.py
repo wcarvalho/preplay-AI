@@ -22,7 +22,7 @@ import matplotlib
 from jaxneurorl.agents.basics import TimeStep
 from jaxneurorl.agents import value_based_basics as vbb
 from jaxneurorl.agents.qlearning import *
-from jaxneurorl import losses
+import losses
 from networks import CraftaxObsEncoder, CraftaxMultiGoalObsEncoder
 
 MAX_REWARD = 1.0

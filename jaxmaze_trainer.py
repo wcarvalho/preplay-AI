@@ -266,6 +266,9 @@ def run_single(config: dict, save_path: str = None):
   test_objects = env_params.reset_params.test_objects[0]
   train_tasks = jnp.array([env.task_runner.task_vector(o) for o in train_objects])
   test_tasks = jnp.array([env.task_runner.task_vector(o) for o in test_objects])
+  # all_tasks ordering: train_objects (groups[:,0]) then test_objects (groups[:,1])
+  # With default 2 groups: [microwave, fork, stove, knife]
+  # This differs from task_objects (groups.reshape(-1)) = [microwave, stove, fork, knife]
   all_tasks = jnp.concatenate((train_tasks, test_tasks), axis=0)
 
   if alg_name == "qlearning":
@@ -522,7 +525,7 @@ def sweep(search: str = ""):
         #"ALL_GOALS_TD": {"values": ['qlearning']},
         "env.exp": {"values": ["preplay_test_big"]},
         "TOTAL_TIMESTEPS": {"values": [4_000_000]},
-        #"PRIORITY_EXPONENT": {"values": [0.0, 0.6]},
+        # "PRIORITY_EXPONENT": {"values": [0.0, 0.6]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "preplay-search-12-distance",
@@ -537,10 +540,10 @@ def sweep(search: str = ""):
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [2]},
         "ALL_GOALS_RNN": {"values": [True, False]},
-        "TASK_DROPOUT_RATE": {"values": [.7]},
-        "ALL_GOALS_LAMBDA": {"values": [.6, .9]},
+        "TASK_DROPOUT_RATE": {"values": [0.7]},
+        "ALL_GOALS_LAMBDA": {"values": [0.6, 0.9]},
         "env.exp": {"values": ["preplay_test_big"]},
-        "ALL_GOALS_TD": {"values": ["tree", 'retrace']},
+        "ALL_GOALS_TD": {"values": ["tree", "retrace"]},
         "RETRACE_TEMPERATURE": {"values": [0.1]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
