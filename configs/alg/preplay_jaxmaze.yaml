@@ -68,7 +68,7 @@ DYNA_COEFF: 1.0  # simulation loss
 SIMULATION_LENGTH: 15
 SIM_EPSILON_SETTING: 1 # range of epsilons
 WINDOW_SIZE: 1.0
-STEP_COST: 0.0001
+STEP_COST: 0.001
 
 # Online epsilon settings
 FIXED_EPSILON: 1 # range of epsilons

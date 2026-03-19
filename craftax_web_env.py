@@ -702,6 +702,7 @@ class MultiGoalObservation(struct.PyTreeNode):
   player_position: chex.Array
   nearby_objects: chex.Array = None
   previous_action: int = None
+  object_positions: chex.Array = None  # [N_goals, 2] — (y, x), -1 if collected
 
 
 class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset):
@@ -754,10 +755,15 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
 
       return task_onehot(achievement) * complete
 
-    # N 1-hots
-    achievement_state_features = jax.vmap(achieved)(params.placed_achievements)
-    # place them all in same vector of length [N]
-    achievement_state_features = achievement_state_features.sum(axis=0)
+    # N 1-hots — [N_goals, N_types]
+    per_goal_achieved = jax.vmap(achieved)(params.placed_achievements)
+    # place them all in same vector of length [N_types]
+    achievement_state_features = per_goal_achieved.sum(axis=0)
+
+    # Per-goal collection mask for object_positions
+    collected = per_goal_achieved.any(axis=-1)  # [N_goals]
+    goal_locations = jnp.asarray(params.goal_locations)  # [N_goals, 2]
+    object_positions = jnp.where(collected[:, None], -1, goal_locations)  # [N_goals, 2]
 
     map_view = _get_map_view(state)
 
@@ -800,6 +806,7 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
       state_features=state_features,
       player_position=state.player_position,
       nearby_objects=nearby_objects,
+      object_positions=object_positions,
     )
 
 

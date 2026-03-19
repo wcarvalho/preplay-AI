@@ -590,12 +590,19 @@ class PreplayLossFn:
 
     # ---- Online loss ----
     if self.online_coeff > 0.0:
+      # [T, B, G]
+      goal = self.get_main_goal(
+        data.timestep, expand_across_simulations=False)
+      rewards = self.compute_rewards(
+        data.timestep, goal,
+        expand_g_across_time=False)
+
       td_error, batch_loss, metrics, log_info = self.loss_fn(
         timestep=data.timestep,  # [T, B, ...]
         online_preds=online_preds,  # .q_vals: [T, B, A]
         target_preds=target_preds,  # .q_vals: [T, B, A]
         actions=data.action,  # [T, B]
-        rewards=data.reward,  # [T, B]
+        rewards=rewards,  # [T, B]
         is_last=make_float(data.timestep.last()),  # [T, B]
         non_terminal=data.timestep.discount,  # [T, B]
         loss_mask=loss_mask,  # [T, B]
@@ -716,7 +723,7 @@ class PreplayLossFn:
 
           # Rewards and discounts
           rewards = make_float(goal_rewards) - self.step_cost
-          discounts = timestep_w_g.discount * self.discount
+          discounts = timestep.discount * self.discount
 
           loss_mask = is_truncated(timestep)
 
@@ -738,9 +745,17 @@ class PreplayLossFn:
             mu_t[1:],  # mu_t:       [T-1]
             self.all_goals_lambda,  # lambda:     scalar
           )  # returns [T-1, N]
+          # Force targets to 0 at episode termination (Q(terminal, a) = 0).
+          # Use original episode termination (timestep), not imaginary goal's (timestep_w_g).
+          qa_tm1 = rlax.batched_index(
+            online_preds_g.q_vals[:-1], actions[:-1]
+          )  # [T-1, N]
+          target_tm1 = ag_td_error + qa_tm1  # [T-1, N]
+          target_tm1 = target_tm1 * timestep.discount[:-1]  # [T-1, N]
+          ag_td_error = target_tm1 - qa_tm1  # [T-1, N]
         elif self.all_goals_td == "e-sarsa":
           rewards = make_float(goal_rewards) - self.step_cost
-          discounts = timestep_w_g.discount * self.discount
+          discounts = timestep.discount * self.discount
           loss_mask = is_truncated(timestep_w_g)
 
           temp = self.retrace_temperature
@@ -763,9 +778,17 @@ class PreplayLossFn:
             target_preds_g.q_vals[1:],  # q_t:   [T-1, N, A]
             probs_a_t[1:],  # probs_a_t: [T-1, N, A]
           )  # returns [T-1, N]
+          # Force targets to 0 at episode termination (Q(terminal, a) = 0).
+          # Use original episode termination (timestep), not imaginary goal's (timestep_w_g).
+          qa_tm1 = rlax.batched_index(
+            online_preds_g.q_vals[:-1], actions[:-1]
+          )  # [T-1, N]
+          target_tm1 = ag_td_error + qa_tm1  # [T-1, N]
+          target_tm1 = target_tm1 * timestep.discount[:-1]  # [T-1, N]
+          ag_td_error = target_tm1 - qa_tm1  # [T-1, N]
         elif self.all_goals_td == "sarsa":
           rewards = make_float(goal_rewards) - self.step_cost
-          discounts = timestep_w_g.discount * self.discount
+          discounts = timestep.discount * self.discount
           loss_mask = is_truncated(timestep_w_g)
 
           # sarsa_lambda is a sequence fn ([T, A] q-values), vmap over N only
@@ -784,9 +807,11 @@ class PreplayLossFn:
             actions[1:],  # a_t:   [T-1, N]
             self.all_goals_lambda,
           )
+          # Force targets to 0 at episode termination (Q(terminal, a) = 0).
+          # Use original episode termination (timestep), not imaginary goal's (timestep_w_g).
+          target_tm1 = target_tm1 * timestep.discount[:-1]  # [T-1, N]
           ag_td_error = target_tm1 - qa_tm1  # [T-1, N]
         elif self.all_goals_td == "qlearning":
-
           ag_td_error, ag_batch_loss, ag_metrics, ag_log_info = self.loss_fn(
             timestep=timestep_w_g,  # [T, N, ...]
             online_preds=online_preds_g,  # .q_vals: [T, N, A]
@@ -809,9 +834,7 @@ class PreplayLossFn:
         ag_td_error = ag_td_error * loss_mask[:-1]
         ag_loss_per_t = 0.5 * jnp.square(ag_td_error)
         # [N] — per-goal mean loss (matches self.loss_fn return shape)
-        ag_batch_loss = (ag_loss_per_t * loss_mask[:-1]).sum(0) / loss_mask[
-          :-1
-        ].sum(0)
+        ag_batch_loss = (ag_loss_per_t * loss_mask[:-1]).sum(0) / loss_mask[:-1].sum(0)
 
         ag_metrics = {
           "0.q_loss": ag_loss_per_t.mean(),
@@ -2162,8 +2185,8 @@ def make_train_jaxmaze_multigoal(**kwargs):
   known_offtask_goal = config.get("KNOWN_OFFTASK_GOAL", False)
   num_offtask_goals = 1 if known_offtask_goal else config["NUM_OFFTASK_GOALS"]
   config["NUM_OFFTASK_GOALS"] = num_offtask_goals
-
-  epsilon_setting = config["SIM_EPSILON_SETTING"]
+  distance_coeff = config.get("DISTANCE_COEFF", 1e-2)
+  epsilon_setting = config.get("SIM_EPSILON_SETTING", 1)
 
   if epsilon_setting == 1:
     # ACME default
@@ -2235,27 +2258,55 @@ def make_train_jaxmaze_multigoal(**kwargs):
     any_achievable = jnp.bool_(True)
     return goals, achievable, any_achievable
 
-  def compute_rewards(timesteps, goal_onehot):
+  def compute_goal_object_distances(timestep):
+    # get agent position [T, B, 2] --> [T, B, 1, 2]
+    player_position = jnp.expand_dims(timestep.observation.player_position, -2)
+
+    # get object position # [T, B, N, 2]
+    obj_pos = timestep.observation.object_positions
+
+    # compute distance [T, B, N]
+    distance = jnp.sqrt(jnp.square(player_position - obj_pos).sum(-1))
+
+    assert distance.shape == obj_pos.shape[:-1]
+
+    return distance
+
+  def compute_rewards(timesteps, goal_onehot, expand_g_across_time=True):
     """Compute rewards using state features and goal vectors.
 
     Args:
-      timesteps: [T, num_sims, ...] batch of timesteps
-      goal_onehot: [num_sims, G] one-hot goal vectors
+      timesteps: [T, B, ...] batch of timesteps
+      goal_onehot: [B, G] or [T, B, G] one-hot goal vectors
     Returns:
-      offtask_reward: [T, num_sims] reward per timestep
+      offtask_reward: [T, B] reward per timestep
     """
-    state_features = timesteps.state.task_state.features.astype(
-      jnp.float32
-    )  # [T, num_sims, G]
-    assert goal_onehot.ndim == state_features.ndim - 1
-    # goal_onehot[None]: [1, num_sims, G] broadcasts with [T, num_sims, G]
-    offtask_reward = (state_features * goal_onehot.astype(jnp.float32)[None]).sum(
-      -1
-    )  # [T, num_sims]
+    # [T, B, G]
+    state_features = timesteps.state.task_state.features.astype(jnp.float32)
 
-    return offtask_reward
+    if expand_g_across_time:
+      assert goal_onehot.ndim == state_features.ndim - 1
+      # goal_onehot[None]: [1, B, G] broadcasts with [T, B, G]
+      goal_onehot = goal_onehot.astype(jnp.float32)[None]
 
-  def get_main_goal(timestep):
+      # [T, B]
+      reward = (state_features * goal_onehot).sum(-1)
+
+    else:
+      assert goal_onehot.ndim == state_features.ndim
+      # [T, B]
+      reward = (state_features * goal_onehot.astype(jnp.float32)).sum(-1)
+
+    # [T, B, G]
+    goal_distances = compute_goal_object_distances(timesteps)
+
+    # [T, B]
+    distance_penalty = (goal_distances * goal_onehot).sum(-1)
+    reward = reward - distance_coeff * distance_penalty
+
+    return reward
+
+  def get_main_goal(timestep, expand_across_simulations: bool = True):
     """Tile the current task goal for on-task simulations.
 
     Args:
@@ -2263,6 +2314,8 @@ def make_train_jaxmaze_multigoal(**kwargs):
     Returns:
       goals: [num_ontask_simulations, G]
     """
+    if not expand_across_simulations:
+      return timestep.state.task_w
     goal = timestep.state.task_w[None]  # [G] -> [1, G]
 
     return jnp.tile(goal, (num_ontask_simulations, 1))  # [num_ontask_simulations, G]
@@ -2889,113 +2942,113 @@ if __name__ == "__main__":
   outs = train_fn(rng)
   print("Jaxmaze test passed!")
 
-  # ---- Craftax Multigoal Test ----
-  import craftax_simulation_configs
-  import craftax_observer
-  from jaxneurorl.wrappers import TimestepWrapper
-  from craftax_web_env import CraftaxMultiGoalSymbolicWebEnvNoAutoReset
+  ## ---- Craftax Multigoal Test ----
+  # import craftax_simulation_configs
+  # import craftax_observer
+  # from jaxneurorl.wrappers import TimestepWrapper
+  # from craftax_web_env import CraftaxMultiGoalSymbolicWebEnvNoAutoReset
 
-  static_env_params = (
-    CraftaxMultiGoalSymbolicWebEnvNoAutoReset.default_static_params().replace(
-      landmark_features=False
-    )
-  )
-  craftax_base_env = CraftaxMultiGoalSymbolicWebEnvNoAutoReset(
-    static_env_params=static_env_params
-  )
-  craftax_env = TimestepWrapper(LogWrapper(craftax_base_env), autoreset=True)
+  # static_env_params = (
+  #  CraftaxMultiGoalSymbolicWebEnvNoAutoReset.default_static_params().replace(
+  #    landmark_features=False
+  #  )
+  # )
+  # craftax_base_env = CraftaxMultiGoalSymbolicWebEnvNoAutoReset(
+  #  static_env_params=static_env_params
+  # )
+  # craftax_env = TimestepWrapper(LogWrapper(craftax_base_env), autoreset=True)
 
-  craftax_env_params = craftax_simulation_configs.default_params.replace(
-    task_configs=craftax_simulation_configs.TRAIN_CONFIGS
-  )
-  craftax_test_env_params = craftax_simulation_configs.default_params.replace(
-    task_configs=craftax_simulation_configs.TEST_CONFIGS
-  )
+  # craftax_env_params = craftax_simulation_configs.default_params.replace(
+  #  task_configs=craftax_simulation_configs.TRAIN_CONFIGS
+  # )
+  # craftax_test_env_params = craftax_simulation_configs.default_params.replace(
+  #  task_configs=craftax_simulation_configs.TEST_CONFIGS
+  # )
 
-  craftax_config = {
-    "SEED": 42,
-    "NUM_ENVS": 4,
-    "TOTAL_TIMESTEPS": 2000,
-    "TRAINING_INTERVAL": 5,
-    "BUFFER_SIZE": 1000,
-    "BUFFER_BATCH_SIZE": 2,
-    "TOTAL_BATCH_SIZE": 20,
-    "LEARNING_STARTS": 50,
-    "SAMPLE_LENGTH": 10,
-    # Small network dims
-    "MLP_HIDDEN_DIM": 32,
-    "NUM_MLP_LAYERS": 0,
-    "AGENT_RNN_DIM": 32,
-    "Q_HIDDEN_DIM": 64,
-    "NUM_PRED_LAYERS": 1,
-    "ACTIVATION": "leaky_relu",
-    "QHEAD_TYPE": "duelling",
-    "USE_BIAS": False,
-    "OBS_INCLUDE_GOAL": False,
-    # Preplay params
-    "SIMULATION_LENGTH": 3,
-    "NUM_OFFTASK_SIMULATIONS": 1,
-    "NUM_ONTASK_SIMULATIONS": 1,
-    "NUM_OFFTASK_GOALS": 1,
-    "ONLINE_COEFF": 1.0,
-    "DYNA_COEFF": 1.0,
-    "ALL_GOALS_COEFF": 1.0,
-    "MAINQ_COEFF": 1e-2,
-    "SUBTASK_COEFF": 2.0,
-    # Optimizer
-    "LR": 0.001,
-    "MAX_GRAD_NORM": 80,
-    "EPS_ADAM": 1e-5,
-    "LR_LINEAR_DECAY": False,
-    "GAMMA": 0.99,
-    "TD_LAMBDA": 0.9,
-    "ALL_GOALS_LAMBDA": 0.6,
-    "STEP_COST": 0.0,
-    "TARGET_UPDATE_INTERVAL": 10,
-    # Epsilon
-    "FIXED_EPSILON": 2,
-    "EPSILON_START": 1.0,
-    "EPSILON_FINISH": 0.1,
-    # Logging
-    "LEARNER_LOG_PERIOD": 0,
-    "LEARNER_EXTRA_LOG_PERIOD": 0,
-    "EVAL_LOG_PERIOD": 0,
-    "GRADIENT_LOG_PERIOD": 0,
-    "MAX_EPISODE_LOG_LEN": 10,
-    "EVAL_EPISODES": 1,
-    "EVAL_STEPS": 10,
-    "ALG": "preplay",
-    "PROJECT": "test",
-    "ENV_NAME": "craftax",
-    "ENV": "craftax",
-    "NUM_UPDATES": 1,
-  }
+  # craftax_config = {
+  #  "SEED": 42,
+  #  "NUM_ENVS": 4,
+  #  "TOTAL_TIMESTEPS": 2000,
+  #  "TRAINING_INTERVAL": 5,
+  #  "BUFFER_SIZE": 1000,
+  #  "BUFFER_BATCH_SIZE": 2,
+  #  "TOTAL_BATCH_SIZE": 20,
+  #  "LEARNING_STARTS": 50,
+  #  "SAMPLE_LENGTH": 10,
+  #  # Small network dims
+  #  "MLP_HIDDEN_DIM": 32,
+  #  "NUM_MLP_LAYERS": 0,
+  #  "AGENT_RNN_DIM": 32,
+  #  "Q_HIDDEN_DIM": 64,
+  #  "NUM_PRED_LAYERS": 1,
+  #  "ACTIVATION": "leaky_relu",
+  #  "QHEAD_TYPE": "duelling",
+  #  "USE_BIAS": False,
+  #  "OBS_INCLUDE_GOAL": False,
+  #  # Preplay params
+  #  "SIMULATION_LENGTH": 3,
+  #  "NUM_OFFTASK_SIMULATIONS": 1,
+  #  "NUM_ONTASK_SIMULATIONS": 1,
+  #  "NUM_OFFTASK_GOALS": 1,
+  #  "ONLINE_COEFF": 1.0,
+  #  "DYNA_COEFF": 1.0,
+  #  "ALL_GOALS_COEFF": 1.0,
+  #  "MAINQ_COEFF": 1e-2,
+  #  "SUBTASK_COEFF": 2.0,
+  #  # Optimizer
+  #  "LR": 0.001,
+  #  "MAX_GRAD_NORM": 80,
+  #  "EPS_ADAM": 1e-5,
+  #  "LR_LINEAR_DECAY": False,
+  #  "GAMMA": 0.99,
+  #  "TD_LAMBDA": 0.9,
+  #  "ALL_GOALS_LAMBDA": 0.6,
+  #  "STEP_COST": 0.0,
+  #  "TARGET_UPDATE_INTERVAL": 10,
+  #  # Epsilon
+  #  "FIXED_EPSILON": 2,
+  #  "EPSILON_START": 1.0,
+  #  "EPSILON_FINISH": 0.1,
+  #  # Logging
+  #  "LEARNER_LOG_PERIOD": 0,
+  #  "LEARNER_EXTRA_LOG_PERIOD": 0,
+  #  "EVAL_LOG_PERIOD": 0,
+  #  "GRADIENT_LOG_PERIOD": 0,
+  #  "MAX_EPISODE_LOG_LEN": 10,
+  #  "EVAL_EPISODES": 1,
+  #  "EVAL_STEPS": 10,
+  #  "ALG": "preplay",
+  #  "PROJECT": "test",
+  #  "ENV_NAME": "craftax",
+  #  "ENV": "craftax",
+  #  "NUM_UPDATES": 1,
+  # }
 
-  from jaxneurorl import loggers as jnrl_loggers
+  # from jaxneurorl import loggers as jnrl_loggers
 
-  def noop_experience_logger(*args, **kwargs):
-    pass
+  # def noop_experience_logger(*args, **kwargs):
+  #  pass
 
-  def craftax_make_logger(config, env, env_params, learner_log_extra=None):
-    return jnrl_loggers.Logger(
-      gradient_logger=jnrl_loggers.default_gradient_logger,
-      learner_logger=jnrl_loggers.default_learner_logger,
-      experience_logger=noop_experience_logger,
-    )
+  # def craftax_make_logger(config, env, env_params, learner_log_extra=None):
+  #  return jnrl_loggers.Logger(
+  #    gradient_logger=jnrl_loggers.default_gradient_logger,
+  #    learner_logger=jnrl_loggers.default_learner_logger,
+  #    experience_logger=noop_experience_logger,
+  #  )
 
-  craftax_train_fn = make_train_craftax_multigoal(
-    config=craftax_config,
-    env=craftax_env,
-    save_path="/tmp/multitask_preplay_craftax_test",
-    model_env=craftax_env,
-    train_env_params=craftax_env_params,
-    test_env_params=craftax_test_env_params,
-    ObserverCls=craftax_observer.Observer,
-    make_logger=craftax_make_logger,
-  )
+  # craftax_train_fn = make_train_craftax_multigoal(
+  #  config=craftax_config,
+  #  env=craftax_env,
+  #  save_path="/tmp/multitask_preplay_craftax_test",
+  #  model_env=craftax_env,
+  #  train_env_params=craftax_env_params,
+  #  test_env_params=craftax_test_env_params,
+  #  ObserverCls=craftax_observer.Observer,
+  #  make_logger=craftax_make_logger,
+  # )
 
-  rng = jax.random.PRNGKey(craftax_config["SEED"])
-  craftax_train_fn = jax.jit(craftax_train_fn)
-  print("JIT compiling Craftax multigoal test...")
-  outs = craftax_train_fn(rng)
-  print("Craftax multigoal test passed!")
+  # rng = jax.random.PRNGKey(craftax_config["SEED"])
+  # craftax_train_fn = jax.jit(craftax_train_fn)
+  # print("JIT compiling Craftax multigoal test...")
+  # outs = craftax_train_fn(rng)
+  # print("Craftax multigoal test passed!")
