@@ -2315,18 +2315,20 @@ def make_train_jaxmaze_multigoal(**kwargs):
     task_object = (task_objects * goal).sum(-1)  # scalar
     task_object = task_object.astype(jnp.int32)
     new_state = timestep.state.replace(
-      #step_num=jnp.zeros_like(timestep.state.step_num),
+      # step_num=jnp.zeros_like(timestep.state.step_num),
       task_w=goal.astype(timestep.state.task_w.dtype),
       task_object=task_object,
     )
-    new_observation = env.make_observation(new_state, timestep.observation.prev_action_raw)
+    new_observation = env.make_observation(
+      new_state, timestep.observation.prev_action_raw
+    )
 
     return timestep.replace(
       state=new_state,
       observation=new_observation,
-      #reward=jnp.zeros_like(timestep.reward),
-      #discount=jnp.ones_like(timestep.discount),
-      #step_type=jnp.ones_like(timestep.step_type),
+      # reward=jnp.zeros_like(timestep.reward),
+      # discount=jnp.ones_like(timestep.discount),
+      # step_type=jnp.ones_like(timestep.step_type),
     )
 
   def make_log_extras(timestep, goal=None):
@@ -2703,25 +2705,43 @@ def jaxmaze_learner_log_extra(
     for ci, col_name in enumerate(col_names):
       ax = axes[3, ci]
       cd = col_data[col_name]
-      target_q = cd.get("target_q_values")
-      if target_q is not None:
-        actions = cd["actions"]
-        nT = len(actions)
-        if col_name in ("online", "all_goals"):
-          nT = min(nT, 20)
+      # For all_goals column: show microwave regular Q-values instead of stove target Q
+      if col_name == "all_goals" and "all_goals_microwave" in d:
+        cd2 = d["all_goals_microwave"]
+        actions2 = cd2["actions"]
+        q_values2 = cd2["q_values"]
+        nT2 = min(len(actions2), 20)
         im_tq = plot_q_heatmap(
           ax,
-          target_q,
-          actions,
-          f"{col_name} — Target Q",
-          nT,
+          q_values2,
+          actions2,
+          "all_goals (microwave) — Q-values",
+          nT2,
           action_names=action_names,
-          show_numbers=col_name in ("preplay", "dyna"),
+          show_numbers=False,
           vmin=q_vmin,
           vmax=q_vmax,
         )
       else:
-        ax.set_visible(False)
+        target_q = cd.get("target_q_values")
+        if target_q is not None:
+          actions = cd["actions"]
+          nT = len(actions)
+          if col_name in ("online", "all_goals"):
+            nT = min(nT, 20)
+          im_tq = plot_q_heatmap(
+            ax,
+            target_q,
+            actions,
+            f"{col_name} — Target Q",
+            nT,
+            action_names=action_names,
+            show_numbers=col_name in ("preplay", "dyna"),
+            vmin=q_vmin,
+            vmax=q_vmax,
+          )
+        else:
+          ax.set_visible(False)
     if im_tq is not None:
       fig.colorbar(im_tq, ax=axes[3, :].tolist(), shrink=0.8, pad=0.02)
 
@@ -2791,6 +2811,7 @@ def jaxmaze_learner_log_extra(
 
     if wandb.run is not None:
       wandb.log({"learner_example/unified": wandb.Image(fig)})
+    fig.savefig("/tmp/unified_plot.png", dpi=100, bbox_inches="tight")  # DEBUG
     plt.close(fig)
 
   def callback(d):
