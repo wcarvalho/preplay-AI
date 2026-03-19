@@ -513,10 +513,10 @@ def sweep(search: str = ""):
         "SEED": {"values": [1]},
         #"ALL_GOALS_LAMBDA": {"values": [.3, .6, .7]},
         "GAMMA": {"values": [.99]},
-        "TARGET_UPDATE_INTERVAL": {"values": [1_000, 2_000]},
-        #"LR": {"values": [0.0003, 0.0001]},
-        "ALL_GOALS_COEFF": {"values": [1e-3, 1e-4]},
-        "ALL_GOALS_TD": {"values": ["sarsa", 'retrace']},
+        "TARGET_UPDATE_INTERVAL": {"values": [2_000]},
+        "DISTANCE_COEFF": {"values": [0, 1e-1, 1e-2, 1e-3]},
+        "ALL_GOALS_COEFF": {"values": [1e-3]},
+        "ALL_GOALS_TD": {"values": ["sarsa", 'qlearning']},
         #"SIM_EPSILON_SETTING": {"values": [1, 2]},
         #"STEP_COST": {"values": [0.0, .01, .001]},
         #"ALL_GOALS_TD": {"values": ['qlearning']},
@@ -525,7 +525,7 @@ def sweep(search: str = ""):
         #"PRIORITY_EXPONENT": {"values": [0.0, 0.6]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-search-11",
+      "group": "preplay-search-12-distance",
     }
   elif search == "preplay2":
     sweep_config = {
