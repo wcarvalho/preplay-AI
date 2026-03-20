@@ -163,7 +163,9 @@ def simulation_finished_mask(initial_mask, next_timesteps):
   is_last_t = make_float(next_timesteps.last()[1:])
   term_cumsum_t = jnp.cumsum(is_last_t, 0)
   loss_mask_t = make_float((term_cumsum_t + non_terminal) < 2)
-  return jnp.concatenate((initial_mask[None], loss_mask_t), axis=0)
+  full_mask = jnp.concatenate((initial_mask[None], loss_mask_t), axis=0)
+  # If initial state was masked (truncated/terminal), mask entire simulation
+  return full_mask * initial_mask[None]
 
 
 def make_optimizer(config: dict) -> optax.GradientTransformation:
@@ -880,6 +882,10 @@ class PreplayLossFn:
       h_tm1_target = concat_first_rest(target_state, remove_last(target_preds.state))
       x_t = data.timestep
 
+      # For preplay/dyna, also exclude terminal steps: simulating from a terminal
+      # state triggers auto-reset, producing a random episode with meaningless loss.
+      preplay_loss_mask = loss_mask * (1 - make_float(data.timestep.last()))
+
       dyna_loss_fn = functools.partial(
         self.preplay_loss_fn, params=params, target_params=target_params
       )
@@ -889,7 +895,7 @@ class PreplayLossFn:
         data.action,
         h_tm1_online,
         h_tm1_target,
-        loss_mask,
+        preplay_loss_mask,
         jax.random.split(key_grad, B),
       )
       batch_loss += self.dyna_coeff * dyna_batch_loss
@@ -942,20 +948,26 @@ class PreplayLossFn:
     goal_rewards = self.compute_rewards(timestep_w_g, new_goal)
 
     # Rewards and discounts
+    # NOTE: We use the original episode's discount (timestep.discount) for terminal
+    # handling, making on-task terminals absorbing states for off-task goals too.
+    # This is correct for JaxMaze where episodes end on ANY object pickup
+    # (terminate_with_any=True), so on-task terminal ≡ off-task terminal.
+    # Would need off-task-specific discounts if episodes could continue after on-task pickup.
     rewards = make_float(goal_rewards) - self.step_cost
     discounts = timestep.discount * self.discount
     loss_mask = is_truncated(timestep)
     is_last = make_float(timestep.last())
 
-    # Model-based 1-step target: r + γ max_a' Q(s', a', g)
+    # Model-based 1-step target: r + γ Q(s', argmax_a' Q_online(s', a'), g)
+    # Uses Double DQN: select action with online params, evaluate with target params.
     # All inputs are unbatched (scalar action, single timestep).
     def model_based_target_q(lstm_state, timestep_t, action, key_grad):
-      key_grad, rng_1, rng_2 = jax.random.split(key_grad, 3)
+      key_grad, rng_1, rng_2, rng_3 = jax.random.split(key_grad, 4)
       # Model forward (unsqueeze for apply_model's internal vmap, then squeeze)
       next_timestep = jax.tree_util.tree_map(
         lambda x: x[0],
         self.network.apply(
-          target_params,
+          params,
           jax.tree_util.tree_map(lambda x: x[None], timestep_t),
           action[None],
           rng_1,
@@ -965,22 +977,38 @@ class PreplayLossFn:
       # Reward: timestep_w_g was passed in, so next_timestep has goal context
       reward = self.compute_rewards(next_timestep, new_goal, expand_g_across_time=False)
       reward = reward - self.step_cost
-      # RNN forward
-      _, next_rnn_out = self.network.apply(
-        target_params,
+      # RNN forward (online for action selection, target for evaluation)
+      _, next_rnn_out_online = self.network.apply(
+        params,
         lstm_state,
         next_timestep,
         rng_2,
         task_dropout=False,
         method=self.network.apply_rnn,
       )
-      q_values = self.network.apply(
+      _, next_rnn_out_target = self.network.apply(
         target_params,
-        next_rnn_out,
+        lstm_state,
+        next_timestep,
+        rng_3,
+        task_dropout=False,
+        method=self.network.apply_rnn,
+      )
+      # Double DQN: select with online, evaluate with target
+      q_online = self.network.apply(
+        params,
+        next_rnn_out_online,
         new_goal,
         method=self.network.main_task_q_fn,
       )
-      max_q = jnp.max(q_values, -1)
+      selector_action = jnp.argmax(q_online, -1)
+      q_target = self.network.apply(
+        target_params,
+        next_rnn_out_target,
+        new_goal,
+        method=self.network.main_task_q_fn,
+      )
+      max_q = rlax.batched_index(q_target[None], selector_action[None])[0]
       return reward + next_timestep.discount * self.discount * max_q
 
     if self.all_goals_td in ("retrace", "tree"):
