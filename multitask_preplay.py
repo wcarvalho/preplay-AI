@@ -444,6 +444,7 @@ class PreplayLossFn:
   all_goals_rnn: bool = True
   all_goals_td: str = "retrace"
   retrace_temperature: float = 0.1
+  peng_trace_cutting: bool = True
 
   def __call__(
     self,
@@ -980,7 +981,7 @@ class PreplayLossFn:
         method=self.network.main_task_q_fn,
       )
       max_q = jnp.max(q_values, -1)
-      return reward + self.discount * max_q
+      return reward + next_timestep.discount * self.discount * max_q
 
     if self.all_goals_td in ("retrace", "tree"):
       # Retrace off-policy correction (Munos et al., 2016)
@@ -1146,7 +1147,10 @@ class PreplayLossFn:
       selector_a_is_online_a = selector_actions == actions
 
       # only continue backing up if greedy action is online action
-      lambda_ = selector_a_is_online_a * self.all_goals_lambda
+      if self.peng_trace_cutting:
+        lambda_ = selector_a_is_online_a * self.all_goals_lambda
+      else:
+        lambda_ = jnp.ones_like(actions) * self.all_goals_lambda
 
       # Peng's λ target using goal-conditioned Q-values
       target_q_t_online = losses.q_learning_lambda_target(
@@ -1642,6 +1646,7 @@ def make_loss_fn_class(config, **kwargs) -> PreplayLossFn:
     all_goals_rnn=config.get("ALL_GOALS_RNN", True),
     all_goals_td=config.get("ALL_GOALS_TD", "retrace"),
     retrace_temperature=config.get("RETRACE_TEMPERATURE", 0.1),
+    peng_trace_cutting=config.get("PENG_TRACE_CUTTING", True),
     **kwargs,
   )
 
@@ -2971,7 +2976,7 @@ def jaxmaze_learner_log_extra(
           ax.plot(loss_mask * 0.5, label="Loss Mask", linestyle="--", color="black")
 
       ax.set_title(f"{col_name} — Q-Values", fontsize=22)
-      if ci == 0:
+      if ci == 1:
         ax.legend(fontsize=18)
       ax.grid(True)
       ax.set_xticks(range(nT))
