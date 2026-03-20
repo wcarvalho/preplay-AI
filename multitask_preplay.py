@@ -2307,7 +2307,7 @@ def make_train_jaxmaze_multigoal(**kwargs):
   known_offtask_goal = config.get("KNOWN_OFFTASK_GOAL", False)
   num_offtask_goals = 1 if known_offtask_goal else config["NUM_OFFTASK_GOALS"]
   config["NUM_OFFTASK_GOALS"] = num_offtask_goals
-  distance_coeff = config.get("DISTANCE_COEFF", 1e-2)
+  distance_coeff = config.get("DISTANCE_COEFF", 0.0)
   epsilon_setting = config.get("SIM_EPSILON_SETTING", 1)
 
   if epsilon_setting == 1:
