@@ -39,6 +39,7 @@ dependencies = [
     "typing_extensions>=4.11.0",
     "ipdb",
     "ruff",
+    "imageio-ffmpeg>=0.6.0",
 ]
 
 [project.optional-dependencies]
