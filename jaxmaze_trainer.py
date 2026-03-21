@@ -515,14 +515,17 @@ def sweep(search: str = ""):
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [1]},
         "env.exp": {"values": ["preplay_test_big"]},
+        "TARGET_UPDATE_INTERVAL": {"values": [1_000]},
         "ALL_GOALS_COEFF": {"values": [1e-1, 1e-2, 1e-3]},
+        "ALL_GOALS_DYNA_COEFF": {"values": [1e-1, 1e-2, 1e-3]},
         "ALL_GOALS_LAMBDA": {"values": [.6, .9]},
-        "PENG_TRACE_CUTTING": {"values": [True, False]},
-        "ALL_GOALS_TD": {"values": ['mb_peng_lambda', 'mb_peng_lambda_all']},
-        "TOTAL_TIMESTEPS": {"values": [5_000_000]},
+        "DYNA_OTHER_ONLY": {"values": [True, False]},
+        "ALL_GOALS_TD": {
+          "values": ['mb_peng_lambda', 'mb_peng_lambda_all']},
+        "TOTAL_TIMESTEPS": {"values": [8_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-search-19-model-based-all-goals",
+      "group": "preplay-search-12-model-based-all-goals",
     }
   elif search == "preplay2":
     sweep_config = {

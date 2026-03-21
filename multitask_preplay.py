@@ -447,6 +447,8 @@ class PreplayLossFn:
   all_goals_td: str = "retrace"
   retrace_temperature: float = 0.1
   peng_trace_cutting: bool = True
+  dyna_other_only: bool = True  # True=replacement (current), False=additive
+  all_goals_dyna_coeff: float = None  # None → use all_goals_coeff
 
   def __call__(
     self,
@@ -623,216 +625,13 @@ class PreplayLossFn:
 
     # ---- All-goals loss (reusing RNN outputs) ----
     if self.all_goals_coeff > 0.0:
-      # def all_goals_loss(
-      #  new_goal,
-      #  timestep,
-      #  actions,
-      #  online_preds,
-      #  target_preds,
-      #  online_h,
-      #  target_h,
-      #  key_grad,
-      # ):
-      #  """Off-task Q-learning loss for a single goal.
-
-      #  Args:
-      #    new_goal: goal with scalar fields [N, G]
-      #    timestep: [T, ...] timestep sequence
-      #    actions: [T] actions
-      #    online_preds: Predictions with state [T, ...]
-      #    target_preds: Predictions with state [T, ...]
-      #  """
-
-      #  N = new_goal.shape[0]
-
-      #  def add_goal_dim(x, axis):
-      #    def add_goal_dim_(y):
-      #      return jnp.broadcast_to(
-      #        jnp.expand_dims(y, axis=axis), y.shape[:axis] + (N,) + y.shape[axis:]
-      #      )
-
-      #    return jax.tree_util.tree_map(add_goal_dim_, x)
-
-      #  actions = add_goal_dim(actions, 1)  # [T, A] --> [T, N, A]
-      #  if self.all_goals_rnn:
-      #    if self.place_goal_in_timestep:
-      #      place_goal_in_timestep = jax.vmap(self.place_goal_in_timestep, (None, 0), 0)
-      #      place_goal_in_timestep = jax.vmap(place_goal_in_timestep, (0, None), 0)
-      #      # [T, N, D] <- [T, D], [N, G]
-      #      timestep_w_g = place_goal_in_timestep(timestep, new_goal)
-      #      timestep = add_goal_dim(timestep, 1)
-      #    else:
-      #      # [T, N, D] <- [T, D]
-      #      timestep_w_g = add_goal_dim(timestep, 1)
-
-      #    online_h = add_goal_dim(online_h, 0)  # [D] --> [N, D]
-      #    target_h = add_goal_dim(target_h, 0)  # [D] --> [N, D]
-
-      #    unroll = functools.partial(self.network.apply, method=self.network.unroll)
-      #    key_grad, rng_1, rng_2 = jax.random.split(key_grad, 3)
-      #    online_preds_g, _ = unroll(
-      #      params, online_h, timestep_w_g, rng_1, task_dropout=False
-      #    )
-      #    target_preds_g, _ = unroll(
-      #      target_params, target_h, timestep_w_g, rng_2, task_dropout=False
-      #    )
-
-      #    goal_rewards = self.compute_rewards(timestep_w_g, new_goal)
-
-      #  else:
-      #    length = actions.shape[0]
-      #    expand = lambda x: jnp.tile(x[None], [length, 1, 1])
-      #    # [T, N, G]
-      #    expanded_goal = jax.tree_util.tree_map(expand, new_goal)
-
-      #    # [T, D]
-      #    rnn_out_online = rnn_output_from_state(online_preds.state)
-      #    rnn_out_target = rnn_output_from_state(target_preds.state)
-
-      #    apply_q = functools.partial(
-      #      self.network.apply, method=self.network.off_task_q_fn
-      #    )
-      #    apply_q = jax.vmap(apply_q, (None, None, 1), 1)
-      #    online_q = apply_q(params, rnn_out_online, expanded_goal)
-      #    target_q = apply_q(target_params, rnn_out_target, expanded_goal)
-
-      #    online_preds_g = Predictions(q_vals=online_q, state=None)
-      #    target_preds_g = Predictions(q_vals=target_q, state=None)
-
-      #    timestep_w_g = add_goal_dim(timestep_w_g, 1)  # [T, N, D] <- [T, D]
-      #    goal_rewards = self.compute_rewards(timestep_w_g, new_goal)
-
-      #  # Rewards and discounts
-      #  rewards = make_float(goal_rewards) - self.step_cost
-      #  discounts = timestep.discount * self.discount
-      #  loss_mask = is_truncated(timestep)
-
-      #  if self.all_goals_td in ("retrace", "tree"):
-      #    # Retrace off-policy correction (Munos et al., 2016)
-      #    # The trajectory was collected under the main-task policy (behavior),
-      #    # but we want to learn Q-values for the off-task goal (target).
-      #    # Retrace uses clipped IS ratios to safely correct for this mismatch.
-      #    temp = self.retrace_temperature
-
-      #    if self.all_goals_td == "tree":
-      #      mu_t = jnp.ones(goal_rewards.shape[0])
-      #    else:
-      #      # Behavior policy: Boltzmann over on-task Q-values [T, A]
-      #      mu_probs = jax.nn.softmax(online_preds.q_vals / temp, axis=-1)
-      #      # Prob of the taken action under behavior policy: [T]
-      #      original_actions = actions[:, 0]  # [T, N] -> [T] (identical across N)
-      #      mu_t = rlax.batched_index(mu_probs, original_actions)
-
-      #    # Target policy: Boltzmann over off-task Q-values [T, N, A]
-      #    pi_t = jax.nn.softmax(online_preds_g.q_vals / temp, axis=-1)
-
-      #    is_last = make_float(timestep.last())
-      #    # vmap retrace over N (goal dimension = axis 1)
-      #    retrace_fn = jax.vmap(
-      #      losses.retrace,
-      #      in_axes=(1, 1, 1, 1, 1, 1, 1, None, None, 1),
-      #      out_axes=1,
-      #    )
-
-      #    qa_tm1, target_tm1 = retrace_fn(
-      #      online_preds_g.q_vals[:-1],  # q_tm1:      [T-1, N, A]
-      #      target_preds_g.q_vals[1:],  # q_t:        [T-1, N, A]
-      #      actions[:-1],  # a_tm1:      [T-1, N]
-      #      actions[1:],  # a_t:        [T-1, N]
-      #      rewards[1:],  # r_t:        [T-1, N]
-      #      discounts[1:],  # discount_t: [T-1, N]
-      #      pi_t[1:],  # pi_t:       [T-1, N, A]
-      #      mu_t[1:],  # mu_t:       [T-1]
-      #      self.all_goals_lambda,  # lambda:     scalar
-      #      is_last[1:],  # is_last_t:  [T-1]
-      #    )  # returns [T-1, N], [T-1, N]
-      #    # Force targets to 0 at episode termination (Q(terminal, a) = 0).
-      #    # Use original episode termination (timestep), not imaginary goal's (timestep_w_g).
-      #    target_tm1 = target_tm1 * timestep.discount[:-1]  # [T-1, N]
-      #    ag_td_error = target_tm1 - qa_tm1  # [T-1, N]
-
-      #  elif self.all_goals_td == "sarsa":
-      #    # sarsa_lambda is a sequence fn ([T, A] q-values), vmap over N only
-      #    is_last = make_float(timestep.last())
-      #    sarsa_fn = jax.vmap(
-      #      losses.sarsa_lambda,
-      #      in_axes=(1, 1, 1, 1, 1, 1, None, 1),
-      #      out_axes=1,
-      #    )
-
-      #    qa_tm1, target_tm1 = sarsa_fn(
-      #      online_preds_g.q_vals[:-1],  # q_tm1: [T-1, N, A]
-      #      actions[:-1],  # a_tm1: [T-1, N]
-      #      rewards[1:],  # r_t:   [T-1, N]
-      #      discounts[1:],  # discount_t: [T-1, N]
-      #      target_preds_g.q_vals[1:],  # q_t:   [T-1, N, A]
-      #      actions[1:],  # a_t:   [T-1, N]
-      #      self.all_goals_lambda,
-      #      is_last[1:],  # is_last_t:  [T-1, N]
-      #    )
-      #    # Force targets to 0 at episode termination (Q(terminal, a) = 0).
-      #    # Use original episode termination (timestep), not imaginary goal's (timestep_w_g).
-      #    target_tm1 = target_tm1 * timestep.discount[:-1]  # [T-1, N]
-      #    ag_td_error = target_tm1 - qa_tm1  # [T-1, N]
-      #  elif self.all_goals_td == "qlearning":
-      #    ag_td_error, ag_batch_loss, ag_metrics, ag_log_info = self.loss_fn(
-      #      timestep=timestep_w_g,  # [T, N, ...]
-      #      online_preds=online_preds_g,  # .q_vals: [T, N, A]
-      #      target_preds=target_preds_g,  # .q_vals: [T, N, A]
-      #      actions=actions,  # [T, N]
-      #      rewards=goal_rewards,  # [T, N]
-      #      is_last=make_float(timestep.last()),  # [T, N]
-      #      non_terminal=timestep.discount,  # [T, N]
-      #      loss_mask=is_truncated(timestep),  # [T, N]
-      #    )  # returns [T-1, N], [N], dict, dict
-      #    if self.make_log_extras is not None:
-      #      extras = self.make_log_extras(timestep_w_g, goal=new_goal)
-      #      ag_log_info.update(extras)
-
-      #    return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
-      #  else:
-      #    raise ValueError(f"Unknown all_goals_td: {self.all_goals_td}")
-
-      #  # Apply loss mask and compute loss
-      #  ag_td_error = ag_td_error * loss_mask[:-1]
-      #  ag_loss_per_t = 0.5 * jnp.square(ag_td_error)
-      #  # [N] — per-goal mean loss (matches self.loss_fn return shape)
-      #  ag_batch_loss = (ag_loss_per_t * loss_mask[:-1]).sum(0) / loss_mask[:-1].sum(0)
-
-      #  ag_metrics = {
-      #    "0.q_loss": ag_loss_per_t.mean(),
-      #    "0.q_td": jnp.abs(ag_td_error).mean(),
-      #    "1.reward": rewards.mean(),
-      #  }
-      #  ag_log_info = {
-      #    "timesteps": timestep_w_g,
-      #    "actions": actions,
-      #    "td_errors": ag_td_error,
-      #    "non_terminal": timestep_w_g.discount,
-      #    "loss_mask": loss_mask,
-      #    "q_values": online_preds_g.q_vals,
-      #    "q_loss": ag_loss_per_t,
-      #    "q_target": target_tm1,
-      #    "target_q_values": target_preds_g.q_vals,  # [T, N, A]
-      #    "behavior_q_values": jnp.broadcast_to(
-      #      online_preds.q_vals[:, None, :],
-      #      online_preds_g.q_vals.shape,
-      #    ),  # [T, N, A] (on-task Q-values, broadcast over goals)
-      #  }
-      #  if self.make_log_extras is not None:
-      #    extras = self.make_log_extras(timestep_w_g, goal=new_goal)
-      #    ag_log_info.update(extras)
-
-      #  return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
-
-      key_grad, key_grad_ = jax.random.split(key_grad)
-
-      key_grad_ = jax.random.split(key_grad_, B + 1)
-
       # [B, N, G]
+      key_grad, key_grad_ = jax.random.split(key_grad)
+      key_grad_ = jax.random.split(key_grad_, B + 1)
       all_goals, _, _ = jax.vmap(self.sample_td_goals, (1, 0), 0)(
         data.timestep, key_grad_[1:]
       )
+
       N = all_goals.shape[1]
       key_grad, key_grad_ = jax.random.split(key_grad)
       key_grad_ = jax.random.split(key_grad_, B * N).reshape(B, N, 2)
@@ -872,7 +671,7 @@ class PreplayLossFn:
         lambda x: x[:, 0], all_goals_log_info
       )
 
-      batch_loss += self.all_goals_coeff * all_goals_batch_loss.mean(1)
+      batch_loss += all_goals_batch_loss.mean(1)  # coeff applied inside
       all_metrics.update({f"2.all_goals/{k}": v for k, v in all_goals_metrics.items()})
 
     # ---- Dyna/preplay loss ----
@@ -930,6 +729,12 @@ class PreplayLossFn:
       online_preds: Predictions with state [T, ...]
       target_preds: Predictions with state [T, ...]
     """
+    dyna_coeff = (
+      self.all_goals_dyna_coeff
+      if self.all_goals_dyna_coeff is not None
+      else self.all_goals_coeff
+    )
+
     unroll = functools.partial(self.network.apply, method=self.network.unroll)
 
     if self.place_goal_in_timestep:
@@ -1008,7 +813,7 @@ class PreplayLossFn:
         new_goal,
         method=self.network.main_task_q_fn,
       )
-      max_q = rlax.batched_index(q_target[None], selector_action[None])[0]
+      max_q = rlax.batched_index(q_target, selector_action)
       return reward + next_timestep.discount * self.discount * max_q
 
     if self.all_goals_td in ("retrace", "tree"):
@@ -1076,6 +881,7 @@ class PreplayLossFn:
         loss_mask=is_truncated(timestep),  # [T]
         lambda_override=self.all_goals_lambda,
       )  # returns [T-1], [N], dict, dict
+      ag_batch_loss = self.all_goals_coeff * ag_batch_loss
       if self.make_log_extras is not None:
         extras = self.make_log_extras(timestep_w_g, goal=new_goal)
         ag_log_info.update(extras)
@@ -1128,28 +934,41 @@ class PreplayLossFn:
       target_all_tm1 = target_all[:-1]  # [T-1, A]
       target_all_tm1 = target_all_tm1 * timestep.discount[:-1, None]  # [T-1, A]
 
-      # --- Combine: retrace for taken action, model-based for non-taken ---
-      # Replace taken action's model target with retrace target
+      # --- Separate losses: retrace (taken action) + model (all or non-taken) ---
       taken_onehot = jax.nn.one_hot(actions[:-1], num_actions)  # [T-1, A]
-      target_all_tm1 = (
-        target_all_tm1 * (1 - taken_onehot) + target_tm1_retrace[:, None] * taken_onehot
-      )
-
-      # Per-action TD errors [T-1, A]
       qa_tm1_all = online_preds_g.q_vals[:-1]  # [T-1, A]
-      ag_td_error_all = target_all_tm1 - qa_tm1_all  # [T-1, A]
 
-      # Loss: mean over actions
-      ag_td_error_all = ag_td_error_all * loss_mask[:-1, None]
-      ag_loss_per_t = 0.5 * jnp.square(ag_td_error_all).mean(axis=-1)  # [T-1]
-      ag_td_error = ag_td_error_all.mean(axis=-1)  # [T-1]
-      ag_batch_loss = (ag_loss_per_t * loss_mask[:-1]).sum(0) / loss_mask[:-1].sum(0)
+      # Retrace loss for taken action [T-1]
+      # Divide by num_actions so relative weighting matches original mean(axis=-1)
+      qa_tm1_taken = rlax.batched_index(qa_tm1_all, actions[:-1])  # [T-1]
+      retrace_td = target_tm1_retrace - qa_tm1_taken  # [T-1]
+      retrace_loss_per_t = (
+        0.5 * jnp.square(retrace_td) * loss_mask[:-1] / num_actions
+      )  # [T-1]
+
+      # Model loss for actions [T-1, A]
+      model_td_all = target_all_tm1 - qa_tm1_all  # [T-1, A]
+      if self.dyna_other_only:
+        model_mask = 1 - taken_onehot  # non-taken only [T-1, A]
+      else:
+        model_mask = jnp.ones_like(taken_onehot)  # ALL actions [T-1, A]
+      model_loss_per_action = 0.5 * jnp.square(model_td_all) * model_mask  # [T-1, A]
+      model_loss_per_t = model_loss_per_action.mean(axis=-1) * loss_mask[:-1]  # [T-1]
+
+      # Combined with separate coefficients
+      ag_loss_per_t = (
+        self.all_goals_coeff * retrace_loss_per_t + dyna_coeff * model_loss_per_t
+      )  # [T-1]
+      ag_td_error = retrace_td * loss_mask[:-1]  # [T-1] for logging
+      ag_batch_loss = ag_loss_per_t.sum(0) / loss_mask[:-1].sum(0)
 
       # For logging: use taken action's target (retrace)
       target_tm1 = target_tm1_retrace
 
       ag_metrics = {
         "0.q_loss": ag_loss_per_t.mean(),
+        "0.q_loss_online": retrace_loss_per_t.mean(),
+        "0.q_loss_model": model_loss_per_t.mean(),
         "0.q_td": jnp.abs(ag_td_error).mean(),
         "1.reward": rewards.mean(),
       }
@@ -1190,6 +1009,7 @@ class PreplayLossFn:
         a_t=selector_actions[1:],
         lambda_=lambda_[1:],  # NOTE: based on whether online action matches greedy
       )
+      target_q_t_online = target_q_t_online * timestep.discount[:-1]
       h_t_online = online_preds_g.state  # [T, ...]
       h_t_target = target_preds_g.state  # [T, ...]
 
@@ -1207,15 +1027,65 @@ class PreplayLossFn:
           selector_actions,
           jax.random.split(key_grad, T),
         )  # [T] — full targets (r + γ max Q)
+        target_q_t_model = (
+          target_q_t_model[:-1] * timestep.discount[:-1]
+        )  # [T-1] model-based
 
+        # Separate losses: lambda (online) + model
+        online_td = target_q_t_online - qa_tm1  # [T-1]
+        model_td = target_q_t_model - qa_tm1  # [T-1]
+
+        if self.dyna_other_only:
+          # Replacement: lambda for on-policy, model for off-policy
+          online_mask = selector_a_is_online_a[:-1].astype(jnp.float32)
+          model_mask = 1.0 - online_mask
+        else:
+          # Additive: both everywhere
+          online_mask = jnp.ones_like(loss_mask[:-1])
+          model_mask = jnp.ones_like(loss_mask[:-1])
+
+        online_loss = 0.5 * jnp.square(online_td) * online_mask * loss_mask[:-1]
+        model_loss = 0.5 * jnp.square(model_td) * model_mask * loss_mask[:-1]
+
+        ag_loss_per_t = (
+          self.all_goals_coeff * online_loss + dyna_coeff * model_loss
+        )  # [T-1]
+        ag_batch_loss = ag_loss_per_t.sum(0) / loss_mask[:-1].sum(0)
+        ag_td_error = (online_td * online_mask + model_td * model_mask) * loss_mask[
+          :-1
+        ]  # [T-1]
         target_tm1 = jnp.where(
           selector_a_is_online_a[:-1],
-          target_q_t_online,  # [T-1] Peng's λ return
-          target_q_t_model[:-1],  # [T-1] model-based
-        )
+          target_q_t_online,
+          target_q_t_model,
+        )  # for logging
 
-        target_tm1 = target_tm1 * timestep.discount[:-1]  # [T-1]
-        ag_td_error = target_tm1 - qa_tm1  # [T-1]
+        ag_metrics = {
+          "0.q_loss": ag_loss_per_t.mean(),
+          "0.q_loss_online": online_loss.mean(),
+          "0.q_loss_model": model_loss.mean(),
+          "0.q_td": jnp.abs(ag_td_error).mean(),
+          "1.reward": rewards.mean(),
+        }
+        ag_log_info = {
+          "timesteps": timestep_w_g,
+          "actions": actions,
+          "td_errors": ag_td_error,
+          "non_terminal": timestep_w_g.discount,
+          "loss_mask": loss_mask,
+          "q_values": online_preds_g.q_vals,
+          "q_loss": ag_loss_per_t,
+          "q_target": target_tm1,
+          "target_q_values": target_preds_g.q_vals,  # [T, A]
+          "behavior_q_values": online_preds.q_vals,
+          "loss_rewards": rewards,
+          "target_q_t_lambda": target_q_t_online,
+          "target_q_t_model": target_q_t_model,
+        }
+        if self.make_log_extras is not None:
+          extras = self.make_log_extras(timestep_w_g, goal=new_goal)
+          ag_log_info.update(extras)
+        return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
 
       elif self.all_goals_td == "mb_peng_lambda_all":
         num_actions = online_preds_g.q_vals.shape[-1]  # A
@@ -1234,33 +1104,49 @@ class PreplayLossFn:
         )(h_t_online, h_t_target, timestep_w_g, all_actions_tiled, keys_tiled)  # [T, A]
 
         target_all_tm1 = target_all[:-1]  # [T-1, A]
-        # Only overwrite the greedy slot with the lambda target when the
-        # replayed action already matches that greedy action.
-        selector_onehot = jax.nn.one_hot(selector_actions[:-1], num_actions)  # [T-1, A]
-        use_lambda = selector_a_is_online_a[:-1, None].astype(target_all_tm1.dtype)
-        target_all_tm1 = (
-          target_all_tm1 * (1 - use_lambda * selector_onehot)
-          + target_q_t_online[:, None] * (use_lambda * selector_onehot)
-        )
-
-        # Apply terminal discount
         target_all_tm1 = target_all_tm1 * timestep.discount[:-1, None]  # [T-1, A]
-
-        # Per-action TD errors
         qa_tm1_all = online_preds_g.q_vals[:-1]  # [T-1, A]
-        ag_td_error_all = target_all_tm1 - qa_tm1_all  # [T-1, A]
 
-        # Loss: mean over actions
-        ag_td_error_all = ag_td_error_all * loss_mask[:-1, None]
-        ag_loss_per_t = 0.5 * jnp.square(ag_td_error_all).mean(axis=-1)  # [T-1]
-        ag_td_error = ag_td_error_all.mean(axis=-1)  # [T-1] for downstream
-        ag_batch_loss = (ag_loss_per_t * loss_mask[:-1]).sum(0) / loss_mask[:-1].sum(0)
+        # --- Lambda loss for greedy action [T-1] ---
+        # Divide by num_actions so relative weighting matches original mean(axis=-1)
+        greedy_q = rlax.batched_index(qa_tm1_all, selector_actions[:-1])  # [T-1]
+        lambda_td = target_q_t_online - greedy_q  # [T-1]
+        if self.dyna_other_only:
+          # Lambda only when on-policy (current behavior)
+          lambda_mask = selector_a_is_online_a[:-1].astype(jnp.float32) * loss_mask[:-1]
+        else:
+          # Lambda for greedy action at all timesteps
+          lambda_mask = loss_mask[:-1]
+        lambda_loss = 0.5 * jnp.square(lambda_td) * lambda_mask / num_actions  # [T-1]
+
+        # --- Model loss for all actions [T-1, A] ---
+        selector_onehot = jax.nn.one_hot(selector_actions[:-1], num_actions)  # [T-1, A]
+        model_td_all = target_all_tm1 - qa_tm1_all  # [T-1, A]
+        if self.dyna_other_only:
+          # Exclude greedy action when on-policy (original replaced it with lambda)
+          use_lambda = selector_a_is_online_a[:-1, None].astype(jnp.float32)
+          model_mask = 1 - use_lambda * selector_onehot  # [T-1, A]
+        else:
+          model_mask = jnp.ones_like(selector_onehot)  # [T-1, A]
+        model_loss_per_action = (
+          0.5 * jnp.square(model_td_all) * model_mask * loss_mask[:-1, None]
+        )  # [T-1, A]
+        model_loss = model_loss_per_action.mean(axis=-1)  # [T-1]
+
+        # Combined with separate coefficients
+        ag_loss_per_t = (
+          self.all_goals_coeff * lambda_loss + dyna_coeff * model_loss
+        )  # [T-1]
+        ag_batch_loss = ag_loss_per_t.sum(0) / loss_mask[:-1].sum(0)
+        ag_td_error = (model_td_all * loss_mask[:-1, None]).mean(axis=-1)  # [T-1]
 
         # For logging: use greedy action's target [T-1]
         target_tm1 = rlax.batched_index(target_all_tm1, selector_actions[:-1])
 
         ag_metrics = {
           "0.q_loss": ag_loss_per_t.mean(),
+          "0.q_loss_online": lambda_loss.mean(),
+          "0.q_loss_model": model_loss.mean(),
           "0.q_td": jnp.abs(ag_td_error).mean(),
           "1.reward": rewards.mean(),
         }
@@ -1313,9 +1199,11 @@ class PreplayLossFn:
       qa_tm1_all = online_preds_g.q_vals[:-1]  # [T-1, A]
       ag_td_error_all = target_all_tm1 - qa_tm1_all  # [T-1, A]
 
-      # Loss: mean over actions
+      # Loss: mean over actions, weighted by dyna_coeff
       ag_td_error_all = ag_td_error_all * loss_mask[:-1, None]
-      ag_loss_per_t = 0.5 * jnp.square(ag_td_error_all).mean(axis=-1)  # [T-1]
+      ag_loss_per_t = (
+        dyna_coeff * 0.5 * jnp.square(ag_td_error_all).mean(axis=-1)
+      )  # [T-1]
       ag_td_error = ag_td_error_all.mean(axis=-1)  # [T-1]
       ag_batch_loss = (ag_loss_per_t * loss_mask[:-1]).sum(0) / loss_mask[:-1].sum(0)
 
@@ -1353,7 +1241,11 @@ class PreplayLossFn:
     ag_td_error = ag_td_error * loss_mask[:-1]
     ag_loss_per_t = 0.5 * jnp.square(ag_td_error)
     # [N] — per-goal mean loss (matches self.loss_fn return shape)
-    ag_batch_loss = (ag_loss_per_t * loss_mask[:-1]).sum(0) / loss_mask[:-1].sum(0)
+    ag_batch_loss = (
+      self.all_goals_coeff
+      * (ag_loss_per_t * loss_mask[:-1]).sum(0)
+      / loss_mask[:-1].sum(0)
+    )
 
     ag_metrics = {
       "0.q_loss": ag_loss_per_t.mean(),
@@ -1373,9 +1265,6 @@ class PreplayLossFn:
       "behavior_q_values": online_preds.q_vals,
       "loss_rewards": rewards,
     }
-    if self.all_goals_td == "mb_peng_lambda":
-      ag_log_info["target_q_t_lambda"] = target_q_t_online
-      ag_log_info["target_q_t_model"] = target_q_t_model
     if self.make_log_extras is not None:
       extras = self.make_log_extras(timestep_w_g, goal=new_goal)
       ag_log_info.update(extras)
@@ -1744,6 +1633,8 @@ def make_loss_fn_class(config, **kwargs) -> PreplayLossFn:
     all_goals_td=config.get("ALL_GOALS_TD", "retrace"),
     retrace_temperature=config.get("RETRACE_TEMPERATURE", 0.1),
     peng_trace_cutting=config.get("PENG_TRACE_CUTTING", True),
+    dyna_other_only=config.get("DYNA_OTHER_ONLY", True),
+    all_goals_dyna_coeff=config.get("ALL_GOALS_DYNA_COEFF", None),
     **kwargs,
   )
 
@@ -3052,15 +2943,29 @@ def jaxmaze_learner_log_extra(
         loss_rewards = cd.get("loss_rewards")
         if loss_rewards is not None:
           ax.plot(loss_rewards, label="Loss Reward", color="tab:cyan")
+        # Show microwave reward timesteps as dashed black vertical lines
+        if col_name == "all_goals" and "all_goals_microwave" in d:
+          mw_rewards = d["all_goals_microwave"].get("loss_rewards")
+          if mw_rewards is not None:
+            mw_ts = np.where(np.array(mw_rewards) > 0)[0]
+            if len(mw_ts) > 0:
+              ax.vlines(
+                mw_ts,
+                0,
+                np.array(mw_rewards)[mw_ts],
+                linestyles="--",
+                color="black",
+                label="Reward (microwave)",
+              )
         ax.plot(q_values_taken, label="Q-Values", color="tab:orange")
         ax.plot(q_values.max(axis=-1), label="Q-Max", color="tab:green")
         ax.plot(q_target, label="Q-Targets", color="tab:red")
         tql = cd.get("target_q_t_lambda")
         if tql is not None:
-          ax.plot(tql, label="Q-Target (λ)", color="tab:brown")
+          ax.plot(tql, label="Q-Target (λ)", color="blue")
         tqm = cd.get("target_q_t_model")
         if tqm is not None:
-          ax.plot(tqm, label="Q-Target (model)", color="tab:pink")
+          ax.plot(tqm, label="Q-Target (model)", color="grey")
       else:
         # preplay/dyna
         simulation_reward = cd.get("simulation_reward")
@@ -3073,8 +2978,6 @@ def jaxmaze_learner_log_extra(
           ax.plot(loss_mask * 0.5, label="Loss Mask", linestyle="--", color="black")
 
       ax.set_title(f"{col_name} — Q-Values", fontsize=22)
-      if ci == 1:
-        ax.legend(fontsize=18)
       ax.grid(True)
       ax.set_xticks(range(nT))
 
@@ -3119,17 +3022,26 @@ def jaxmaze_learner_log_extra(
           q_values_taken2 = rlax.batched_index(q_values2, actions2)
           loss_rewards2 = cd2.get("loss_rewards")
           if loss_rewards2 is not None:
-            ax.plot(loss_rewards2, label="Loss Reward", color="tab:cyan")
+            reward_ts = np.where(np.array(loss_rewards2) > 0)[0]
+            if len(reward_ts) > 0:
+              ax.vlines(
+                reward_ts,
+                0,
+                np.array(loss_rewards2)[reward_ts],
+                label="Loss Reward",
+                color="tab:cyan",
+              )
           ax.plot(q_values_taken2, label="Q-Values", color="tab:orange")
           ax.plot(q_values2.max(axis=-1), label="Q-Max", color="tab:green")
           ax.plot(q_target2, label="Q-Targets", color="tab:red")
           tql2 = cd2.get("target_q_t_lambda")
           if tql2 is not None:
-            ax.plot(tql2, label="Q-Target (λ)", color="tab:brown")
+            ax.plot(tql2, label="Q-Target (λ)", color="darkblue")
           tqm2 = cd2.get("target_q_t_model")
           if tqm2 is not None:
-            ax.plot(tqm2, label="Q-Target (model)", color="tab:pink")
-          ax.set_title("all_goals (microwave) — Q-Values", fontsize=22)
+            ax.plot(tqm2, label="Q-Target (model)", color="grey")
+          ax.set_title("all_goals(microwave) — Q-Values", fontsize=22)
+          ax.legend(fontsize=15)
           ax.grid(True)
           ax.set_xticks(range(nT2))
         else:
@@ -3381,7 +3293,7 @@ if __name__ == "__main__":
     "GAMMA": 0.99,
     "TD_LAMBDA": 0.9,
     "ALL_GOALS_LAMBDA": 0.6,
-    "ALL_GOALS_TD": "mb_peng_lambda",
+    "ALL_GOALS_TD": "mb_all",
     "STEP_COST": 0.0,
     "TARGET_UPDATE_INTERVAL": 10,
     # Epsilon
