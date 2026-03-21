@@ -522,7 +522,7 @@ def sweep(search: str = ""):
         "TOTAL_TIMESTEPS": {"values": [5_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-search-18-model-based-all-goals",
+      "group": "preplay-search-19-model-based-all-goals",
     }
   elif search == "preplay2":
     sweep_config = {
@@ -537,10 +537,10 @@ def sweep(search: str = ""):
         "ALL_GOALS_COEFF": {"values": [1e-1, 1e-2, 1e-3]},
         "ALL_GOALS_LAMBDA": {"values": [.6, .9]},
         "ALL_GOALS_TD": {"values": ['rmae']},
-        "TOTAL_TIMESTEPS": {"values": [4_000_000]},
+        "TOTAL_TIMESTEPS": {"values": [5_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-search-18-model-based-all-goals-retrace",
+      "group": "preplay-search-19-model-based-all-goals-retrace",
     }
 
   elif search == "her":

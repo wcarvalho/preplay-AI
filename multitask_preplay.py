@@ -1234,11 +1234,13 @@ class PreplayLossFn:
         )(h_t_online, h_t_target, timestep_w_g, all_actions_tiled, keys_tiled)  # [T, A]
 
         target_all_tm1 = target_all[:-1]  # [T-1, A]
-        # q-lambda for taken action (λ=0 at off-policy steps handles cutoff); model-based for rest
-        taken_onehot = jax.nn.one_hot(actions[:-1], num_actions)  # [T-1, A]
+        # Only overwrite the greedy slot with the lambda target when the
+        # replayed action already matches that greedy action.
+        selector_onehot = jax.nn.one_hot(selector_actions[:-1], num_actions)  # [T-1, A]
+        use_lambda = selector_a_is_online_a[:-1, None].astype(target_all_tm1.dtype)
         target_all_tm1 = (
-          target_all_tm1 * (1 - taken_onehot)
-          + target_q_t_online[:, None] * taken_onehot
+          target_all_tm1 * (1 - use_lambda * selector_onehot)
+          + target_q_t_online[:, None] * (use_lambda * selector_onehot)
         )
 
         # Apply terminal discount
