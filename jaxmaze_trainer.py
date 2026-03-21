@@ -515,14 +515,14 @@ def sweep(search: str = ""):
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [1]},
         "env.exp": {"values": ["preplay_test_big"]},
-        "ALL_GOALS_COEFF": {"values": [1e-1, 1e-2]},
+        "ALL_GOALS_COEFF": {"values": [1e-1, 1e-2, 1e-3]},
         "ALL_GOALS_LAMBDA": {"values": [.6, .9]},
         "PENG_TRACE_CUTTING": {"values": [True, False]},
         "ALL_GOALS_TD": {"values": ['mb_peng_lambda', 'mb_peng_lambda_all']},
         "TOTAL_TIMESTEPS": {"values": [4_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-search-17-model-based-all-goals",
+      "group": "preplay-search-18-model-based-all-goals",
     }
   elif search == "preplay2":
     sweep_config = {
@@ -533,11 +533,14 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [1]},
-        "env.exp": {"values": ["exp4"]},
-        "STEP_COST": {"values": [0.0, 1e-1, 1e-2, 1e-3]},
+        "env.exp": {"values": ["preplay_test_big"]},
+        "ALL_GOALS_COEFF": {"values": [1e-1, 1e-2, 1e-3]},
+        "ALL_GOALS_LAMBDA": {"values": [.6, .9]},
+        "ALL_GOALS_TD": {"values": ['rmae']},
+        "TOTAL_TIMESTEPS": {"values": [4_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-test-22-retrace-short",
+      "group": "preplay-search-18-model-based-all-goals-retrace",
     }
 
   elif search == "her":
