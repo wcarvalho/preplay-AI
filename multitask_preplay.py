@@ -961,7 +961,7 @@ class PreplayLossFn:
     # Model-based 1-step target: r + γ Q(s', argmax_a' Q_online(s', a'), g)
     # Uses Double DQN: select action with online params, evaluate with target params.
     # All inputs are unbatched (scalar action, single timestep).
-    def model_based_target_q(lstm_state, timestep_t, action, key_grad):
+    def model_based_target_q(online_h, target_h, timestep_t, action, key_grad):
       key_grad, rng_1, rng_2, rng_3 = jax.random.split(key_grad, 4)
       # Model forward (unsqueeze for apply_model's internal vmap, then squeeze)
       next_timestep = jax.tree_util.tree_map(
@@ -980,7 +980,7 @@ class PreplayLossFn:
       # RNN forward (online for action selection, target for evaluation)
       _, next_rnn_out_online = self.network.apply(
         params,
-        lstm_state,
+        online_h,
         next_timestep,
         rng_2,
         task_dropout=False,
@@ -988,7 +988,7 @@ class PreplayLossFn:
       )
       _, next_rnn_out_target = self.network.apply(
         target_params,
-        lstm_state,
+        target_h,
         next_timestep,
         rng_3,
         task_dropout=False,
@@ -1111,7 +1111,8 @@ class PreplayLossFn:
       target_tm1_retrace = target_tm1_retrace * timestep.discount[:-1]  # [T-1]
 
       # --- Part B: Model-based 1-step targets for non-taken actions [T, A] ---
-      h_t_target = target_preds_g.state  # [T, ...] — RNN state after timestep[t]
+      h_t_online = online_preds_g.state  # [T, ...] — online RNN state after timestep[t]
+      h_t_target = target_preds_g.state  # [T, ...] — target RNN state after timestep[t]
 
       all_actions_tiled = jnp.tile(jnp.arange(num_actions), (T, 1))  # [T, A]
       keys_tiled = jax.random.split(key_grad, T * num_actions).reshape(
@@ -1120,9 +1121,9 @@ class PreplayLossFn:
 
       # Model-based targets for all actions: [T, A]
       target_all = jax.vmap(
-        jax.vmap(model_based_target_q, in_axes=(None, None, 0, 0)),
-        in_axes=(0, 0, 0, 0),
-      )(h_t_target, timestep_w_g, all_actions_tiled, keys_tiled)  # [T, A]
+        jax.vmap(model_based_target_q, in_axes=(None, None, None, 0, 0)),
+        in_axes=(0, 0, 0, 0, 0),
+      )(h_t_online, h_t_target, timestep_w_g, all_actions_tiled, keys_tiled)  # [T, A]
 
       target_all_tm1 = target_all[:-1]  # [T-1, A]
       target_all_tm1 = target_all_tm1 * timestep.discount[:-1, None]  # [T-1, A]
@@ -1189,6 +1190,7 @@ class PreplayLossFn:
         a_t=selector_actions[1:],
         lambda_=lambda_[1:],  # NOTE: based on whether online action matches greedy
       )
+      h_t_online = online_preds_g.state  # [T, ...]
       h_t_target = target_preds_g.state  # [T, ...]
 
       T = actions.shape[0]
@@ -1199,6 +1201,7 @@ class PreplayLossFn:
 
         # Full model-based targets for greedy actions: [T]
         target_q_t_model = jax.vmap(model_based_target_q)(
+          h_t_online,
           h_t_target,
           timestep_w_g,
           selector_actions,
@@ -1226,9 +1229,9 @@ class PreplayLossFn:
         # vmap: outer over T, inner over A
         # lstm_state and timestep broadcast (None) over A
         target_all = jax.vmap(
-          jax.vmap(model_based_target_q, in_axes=(None, None, 0, 0)),
-          in_axes=(0, 0, 0, 0),
-        )(h_t_target, timestep_w_g, all_actions_tiled, keys_tiled)  # [T, A]
+          jax.vmap(model_based_target_q, in_axes=(None, None, None, 0, 0)),
+          in_axes=(0, 0, 0, 0, 0),
+        )(h_t_online, h_t_target, timestep_w_g, all_actions_tiled, keys_tiled)  # [T, A]
 
         target_all_tm1 = target_all[:-1]  # [T-1, A]
         # q-lambda for taken action (λ=0 at off-policy steps handles cutoff); model-based for rest
@@ -1276,6 +1279,70 @@ class PreplayLossFn:
           extras = self.make_log_extras(timestep_w_g, goal=new_goal)
           ag_log_info.update(extras)
         return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
+
+    elif self.all_goals_td == "mb_all":
+      # Pure 1-step model-based targets for ALL actions (1-step dyna for goal).
+      # Unlike mb_peng_lambda_all/rmae, the taken action also gets a model target,
+      # avoiding the conflict where retrace/λ-returns are depressed by on-task
+      # terminal boundaries while model targets are not.
+      h_t_online = online_preds_g.state  # [T, ...]
+      h_t_target = target_preds_g.state  # [T, ...]
+      T = actions.shape[0]
+      num_actions = online_preds_g.q_vals.shape[-1]  # A
+
+      # Model-based 1-step targets for ALL actions: [T, A]
+      all_actions_tiled = jnp.tile(jnp.arange(num_actions), (T, 1))  # [T, A]
+      keys_tiled = jax.random.split(key_grad, T * num_actions).reshape(
+        T, num_actions, 2
+      )  # [T, A, 2]
+
+      # vmap: outer over T, inner over A
+      target_all = jax.vmap(
+        jax.vmap(model_based_target_q, in_axes=(None, None, None, 0, 0)),
+        in_axes=(0, 0, 0, 0, 0),
+      )(h_t_online, h_t_target, timestep_w_g, all_actions_tiled, keys_tiled)  # [T, A]
+
+      target_all_tm1 = target_all[:-1]  # [T-1, A]
+
+      # Apply terminal discount
+      target_all_tm1 = target_all_tm1 * timestep.discount[:-1, None]  # [T-1, A]
+
+      # Per-action TD errors
+      qa_tm1_all = online_preds_g.q_vals[:-1]  # [T-1, A]
+      ag_td_error_all = target_all_tm1 - qa_tm1_all  # [T-1, A]
+
+      # Loss: mean over actions
+      ag_td_error_all = ag_td_error_all * loss_mask[:-1, None]
+      ag_loss_per_t = 0.5 * jnp.square(ag_td_error_all).mean(axis=-1)  # [T-1]
+      ag_td_error = ag_td_error_all.mean(axis=-1)  # [T-1]
+      ag_batch_loss = (ag_loss_per_t * loss_mask[:-1]).sum(0) / loss_mask[:-1].sum(0)
+
+      # For logging: use greedy action's target [T-1]
+      selector_actions = jnp.argmax(online_preds_g.q_vals, axis=-1)
+      target_tm1 = rlax.batched_index(target_all_tm1, selector_actions[:-1])
+
+      ag_metrics = {
+        "0.q_loss": ag_loss_per_t.mean(),
+        "0.q_td": jnp.abs(ag_td_error).mean(),
+        "1.reward": rewards.mean(),
+      }
+      ag_log_info = {
+        "timesteps": timestep_w_g,
+        "actions": actions,
+        "td_errors": ag_td_error,
+        "non_terminal": timestep_w_g.discount,
+        "loss_mask": loss_mask,
+        "q_values": online_preds_g.q_vals,
+        "q_loss": ag_loss_per_t,
+        "q_target": target_tm1,
+        "target_q_values": target_preds_g.q_vals,
+        "behavior_q_values": online_preds.q_vals,
+        "loss_rewards": rewards,
+      }
+      if self.make_log_extras is not None:
+        extras = self.make_log_extras(timestep_w_g, goal=new_goal)
+        ag_log_info.update(extras)
+      return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
 
     else:
       raise ValueError(f"Unknown all_goals_td: {self.all_goals_td}")

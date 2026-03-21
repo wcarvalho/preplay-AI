@@ -519,7 +519,7 @@ def sweep(search: str = ""):
         "ALL_GOALS_LAMBDA": {"values": [.6, .9]},
         "PENG_TRACE_CUTTING": {"values": [True, False]},
         "ALL_GOALS_TD": {"values": ['mb_peng_lambda', 'mb_peng_lambda_all']},
-        "TOTAL_TIMESTEPS": {"values": [4_000_000]},
+        "TOTAL_TIMESTEPS": {"values": [5_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "preplay-search-17-model-based-all-goals",
