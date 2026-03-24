@@ -514,14 +514,12 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [1]},
-        "env.exp": {"values": ["preplay_test_big"]},
-        "ALL_GOALS_COEFF": {"values": [1, 1e-1, 1e-2, 1e-3]},
-        "ALL_GOALS_LAMBDA": {"values": [.6, .9]},
-        "ALL_GOALS_TD": {"values": ['mb_peng_lambda', 'mb_peng_lambda_all', 'mb_all']},
-        "TOTAL_TIMESTEPS": {"values": [10_000_000]},
+        "env.exp": {"values": ["two_paths", "shortcut"]},
+        "TOTAL_BATCH_SIZE": {"values": [1280*2]},
+        "TOTAL_TIMESTEPS": {"values": [50_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-search-19-model-based-all-goals",
+      "group": "preplay-search-23-dyna-all-goals",
     }
   elif search == "preplay2":
     sweep_config = {
