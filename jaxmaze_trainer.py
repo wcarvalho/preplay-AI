@@ -264,6 +264,7 @@ def run_single(config: dict, save_path: str = None):
 
   train_objects = env_params.reset_params.train_objects[0]
   test_objects = env_params.reset_params.test_objects[0]
+  import ipdb; ipdb.set_trace()
   train_tasks = jnp.array([env.task_runner.task_vector(o) for o in train_objects])
   test_tasks = jnp.array([env.task_runner.task_vector(o) for o in test_objects])
   # all_tasks ordering: train_objects (groups[:,0]) then test_objects (groups[:,1])
