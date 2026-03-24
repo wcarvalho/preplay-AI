@@ -264,7 +264,6 @@ def run_single(config: dict, save_path: str = None):
 
   train_objects = env_params.reset_params.train_objects[0]
   test_objects = env_params.reset_params.test_objects[0]
-  import ipdb; ipdb.set_trace()
   train_tasks = jnp.array([env.task_runner.task_vector(o) for o in train_objects])
   test_tasks = jnp.array([env.task_runner.task_vector(o) for o in test_objects])
   # all_tasks ordering: train_objects (groups[:,0]) then test_objects (groups[:,1])
@@ -515,18 +514,14 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [1]},
+        #"env.exp": {"values": ["two_paths", "shortcut"]},
         "env.exp": {"values": ["preplay_test_big"]},
-        "TARGET_UPDATE_INTERVAL": {"values": [1_000]},
-        "ALL_GOALS_COEFF": {"values": [1e-1, 1e-2, 1e-3]},
-        "ALL_GOALS_DYNA_COEFF": {"values": [1e-1, 1e-2, 1e-3]},
-        "ALL_GOALS_LAMBDA": {"values": [.6, .9]},
-        "DYNA_OTHER_ONLY": {"values": [True, False]},
-        "ALL_GOALS_TD": {
-          "values": ['mb_peng_lambda', 'mb_peng_lambda_all']},
-        "TOTAL_TIMESTEPS": {"values": [8_000_000]},
+        "TOTAL_BATCH_SIZE": {"values": [1280*2, 1280]},
+        "MASK_DECLINING_MODEL": {"values": [True]},
+        "TOTAL_TIMESTEPS": {"values": [10_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-search-12-model-based-all-goals",
+      "group": "preplay-search-24-mask-declining",
     }
   elif search == "preplay2":
     sweep_config = {

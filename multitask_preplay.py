@@ -448,6 +448,7 @@ class PreplayLossFn:
   retrace_temperature: float = 0.1
   peng_trace_cutting: bool = True
   dyna_other_only: bool = True  # True=replacement (current), False=additive
+  mask_declining_model: bool = False  # mask all TD updates where off-task Q declining
   all_goals_dyna_coeff: float = None  # None → use all_goals_coeff
 
   def __call__(
@@ -994,6 +995,14 @@ class PreplayLossFn:
       selector_actions = jnp.argmax(online_preds_g.q_vals, axis=-1)
       selector_a_is_online_a = selector_actions == actions
 
+      # Mask out timesteps where off-task Q is declining (trajectory moving away from goal)
+      if self.mask_declining_model:
+        greedy_q = rlax.batched_index(online_preds_g.q_vals, selector_actions)  # [T]
+        q_not_declining = (greedy_q[1:] >= greedy_q[:-1]).astype(jnp.float32)  # [T-1]
+        q_not_declining = jax.lax.stop_gradient(q_not_declining)
+      else:
+        q_not_declining = jnp.ones_like(loss_mask[:-1])
+
       # only continue backing up if greedy action is online action
       if self.peng_trace_cutting:
         lambda_ = selector_a_is_online_a * self.all_goals_lambda
@@ -1044,16 +1053,17 @@ class PreplayLossFn:
           online_mask = jnp.ones_like(loss_mask[:-1])
           model_mask = jnp.ones_like(loss_mask[:-1])
 
-        online_loss = 0.5 * jnp.square(online_td) * online_mask * loss_mask[:-1]
-        model_loss = 0.5 * jnp.square(model_td) * model_mask * loss_mask[:-1]
+        effective_mask = loss_mask[:-1] * q_not_declining  # [T-1]
+        online_loss = 0.5 * jnp.square(online_td) * online_mask * effective_mask
+        model_loss = 0.5 * jnp.square(model_td) * model_mask * effective_mask
 
         ag_loss_per_t = (
           self.all_goals_coeff * online_loss + dyna_coeff * model_loss
         )  # [T-1]
-        ag_batch_loss = ag_loss_per_t.sum(0) / loss_mask[:-1].sum(0)
-        ag_td_error = (online_td * online_mask + model_td * model_mask) * loss_mask[
-          :-1
-        ]  # [T-1]
+        ag_batch_loss = ag_loss_per_t.sum(0) / effective_mask.sum(0).clip(min=1)
+        ag_td_error = (
+          online_td * online_mask + model_td * model_mask
+        ) * effective_mask  # [T-1]
         target_tm1 = jnp.where(
           selector_a_is_online_a[:-1],
           target_q_t_online,
@@ -1065,6 +1075,7 @@ class PreplayLossFn:
           "0.q_loss_online": online_loss.mean(),
           "0.q_loss_model": model_loss.mean(),
           "0.q_td": jnp.abs(ag_td_error).mean(),
+          "0.declining_mask_frac": (1.0 - q_not_declining).mean(),
           "1.reward": rewards.mean(),
         }
         ag_log_info = {
@@ -1081,6 +1092,7 @@ class PreplayLossFn:
           "loss_rewards": rewards,
           "target_q_t_lambda": target_q_t_online,
           "target_q_t_model": target_q_t_model,
+          "q_not_declining": q_not_declining,
         }
         if self.make_log_extras is not None:
           extras = self.make_log_extras(timestep_w_g, goal=new_goal)
@@ -1117,7 +1129,10 @@ class PreplayLossFn:
         else:
           # Lambda for greedy action at all timesteps
           lambda_mask = loss_mask[:-1]
-        lambda_loss = 0.5 * jnp.square(lambda_td) * lambda_mask / num_actions  # [T-1]
+        effective_mask = loss_mask[:-1] * q_not_declining  # [T-1]
+        lambda_loss = (
+          0.5 * jnp.square(lambda_td) * lambda_mask * q_not_declining / num_actions
+        )  # [T-1]
 
         # --- Model loss for all actions [T-1, A] ---
         selector_onehot = jax.nn.one_hot(selector_actions[:-1], num_actions)  # [T-1, A]
@@ -1129,7 +1144,7 @@ class PreplayLossFn:
         else:
           model_mask = jnp.ones_like(selector_onehot)  # [T-1, A]
         model_loss_per_action = (
-          0.5 * jnp.square(model_td_all) * model_mask * loss_mask[:-1, None]
+          0.5 * jnp.square(model_td_all) * model_mask * effective_mask[:, None]
         )  # [T-1, A]
         model_loss = model_loss_per_action.mean(axis=-1)  # [T-1]
 
@@ -1137,8 +1152,8 @@ class PreplayLossFn:
         ag_loss_per_t = (
           self.all_goals_coeff * lambda_loss + dyna_coeff * model_loss
         )  # [T-1]
-        ag_batch_loss = ag_loss_per_t.sum(0) / loss_mask[:-1].sum(0)
-        ag_td_error = (model_td_all * loss_mask[:-1, None]).mean(axis=-1)  # [T-1]
+        ag_batch_loss = ag_loss_per_t.sum(0) / effective_mask.sum(0).clip(min=1)
+        ag_td_error = (model_td_all * effective_mask[:, None]).mean(axis=-1)  # [T-1]
 
         # For logging: use greedy action's target [T-1]
         target_tm1 = rlax.batched_index(target_all_tm1, selector_actions[:-1])
@@ -1148,6 +1163,7 @@ class PreplayLossFn:
           "0.q_loss_online": lambda_loss.mean(),
           "0.q_loss_model": model_loss.mean(),
           "0.q_td": jnp.abs(ag_td_error).mean(),
+          "0.declining_mask_frac": (1.0 - q_not_declining).mean(),
           "1.reward": rewards.mean(),
         }
         ag_log_info = {
@@ -1162,6 +1178,7 @@ class PreplayLossFn:
           "target_q_values": target_preds_g.q_vals,  # [T, A]
           "behavior_q_values": online_preds.q_vals,
           "loss_rewards": rewards,
+          "q_not_declining": q_not_declining,
         }
         if self.make_log_extras is not None:
           extras = self.make_log_extras(timestep_w_g, goal=new_goal)
@@ -1634,6 +1651,7 @@ def make_loss_fn_class(config, **kwargs) -> PreplayLossFn:
     retrace_temperature=config.get("RETRACE_TEMPERATURE", 0.1),
     peng_trace_cutting=config.get("PENG_TRACE_CUTTING", True),
     dyna_other_only=config.get("DYNA_OTHER_ONLY", True),
+    mask_declining_model=config.get("MASK_DECLINING_MODEL", False),
     all_goals_dyna_coeff=config.get("ALL_GOALS_DYNA_COEFF", None),
     **kwargs,
   )
@@ -2966,6 +2984,9 @@ def jaxmaze_learner_log_extra(
         tqm = cd.get("target_q_t_model")
         if tqm is not None:
           ax.plot(tqm, label="Q-Target (model)", color="grey")
+        qnd = cd.get("q_not_declining")
+        if qnd is not None:
+          ax.plot(qnd * 0.1, label="Not Declining", linestyle="--", color="purple")
       else:
         # preplay/dyna
         simulation_reward = cd.get("simulation_reward")
@@ -3040,6 +3061,9 @@ def jaxmaze_learner_log_extra(
           tqm2 = cd2.get("target_q_t_model")
           if tqm2 is not None:
             ax.plot(tqm2, label="Q-Target (model)", color="grey")
+          qnd2 = cd2.get("q_not_declining")
+          if qnd2 is not None:
+            ax.plot(qnd2 * 0.1, label="Not Declining", linestyle="--", color="purple")
           ax.set_title("all_goals(microwave) — Q-Values", fontsize=22)
           ax.legend(fontsize=15)
           ax.grid(True)
