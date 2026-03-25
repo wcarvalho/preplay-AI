@@ -513,15 +513,17 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["preplay"]},
-        "SEED": {"values": [3]},
+        "SEED": {"values": [1]},
         #"env.exp": {"values": ["two_paths", "shortcut"]},
-        "env.exp": {"values": ["two_paths", 'exp4', "preplay_test_big"]},
+        "env.exp": {"values": ["preplay_test_big"]},
         #"TOTAL_BATCH_SIZE": {"values": [1280*2, 1280]},
         "MASK_DECLINING_MODEL": {"values": [True]},
-        "TOTAL_TIMESTEPS": {"values": [50_000_000]},
+        "PENG_TRACE_CUTTING": {"values": [False]},
+        #"TOTAL_TIMESTEPS": {"values": [50_000_000]},
+        "TOTAL_TIMESTEPS": {"values": [10_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-search-24-mask-declining",
+      "group": "preplay-search-25-mask-declining",
     }
   elif search == "preplay2":
     sweep_config = {
