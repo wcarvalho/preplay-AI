@@ -191,7 +191,7 @@ def run_single(config: dict, save_path: str = None):
   ###################
   # load data
   ###################
-  exp = config["rlenv"]["ENV_KWARGS"].pop("exp")
+  exp = config["rlenv"]["ENV_KWARGS"].get("exp")
   try:
     exp_fn = getattr(jaxmaze_experiments, exp, None)
   except Exception as e:
