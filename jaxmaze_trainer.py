@@ -516,12 +516,14 @@ def sweep(search: str = ""):
         "SEED": {"values": [1]},
         #"env.exp": {"values": ["two_paths", "shortcut"]},
         "env.exp": {"values": ["preplay_test_big"]},
-        "TOTAL_BATCH_SIZE": {"values": [1280*2, 1280]},
-        "MASK_DECLINING_MODEL": {"values": [True]},
-        "TOTAL_TIMESTEPS": {"values": [10_000_000]},
+        #"TOTAL_BATCH_SIZE": {"values": [1280*2, 1280]},
+        "TARGET_UPDATE_INTERVAL": {"values": [200, 1_000]},
+        "KEEP_GREEDY_ALIGNED": {"values": [True, False]},
+        "MASK_DECLINING_MODEL": {"values": ['greedy_online', 'greedy_target', 'target_trend']},
+        "TOTAL_TIMESTEPS": {"values": [5_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-search-24-mask-declining",
+      "group": "preplay-search-25-mask-declining",
     }
   elif search == "preplay2":
     sweep_config = {
