@@ -517,13 +517,14 @@ def sweep(search: str = ""):
         #"env.exp": {"values": ["two_paths", "shortcut"]},
         "env.exp": {"values": ["preplay_test_big"]},
         #"TOTAL_BATCH_SIZE": {"values": [1280*2, 1280]},
-        "MASK_DECLINING_MODEL": {"values": [True]},
-        "PENG_TRACE_CUTTING": {"values": [False]},
-        #"TOTAL_TIMESTEPS": {"values": [50_000_000]},
-        "TOTAL_TIMESTEPS": {"values": [10_000_000]},
+        "TARGET_UPDATE_INTERVAL": {"values": [1_000]},
+        "MASK_DECLINING_THRESHOLD": {"values": [.5, .7, .9]},
+        "MASK_DECLINING_MODEL": {
+          "values": ['greedy_online_episode', 'target_online_episode']},
+        "TOTAL_TIMESTEPS": {"values": [5_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-search-25-mask-declining",
+      "group": "preplay-search-26-mask-declining",
     }
   elif search == "preplay2":
     sweep_config = {
@@ -533,15 +534,13 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["preplay"]},
-        "SEED": {"values": [1]},
-        "env.exp": {"values": ["preplay_test_big"]},
-        "ALL_GOALS_COEFF": {"values": [1e-1, 1e-2, 1e-3]},
-        "ALL_GOALS_LAMBDA": {"values": [.6, .9]},
-        "ALL_GOALS_TD": {"values": ['rmae']},
-        "TOTAL_TIMESTEPS": {"values": [5_000_000]},
+        "SEED": {"values": [2,3]},
+        "env.exp": {"values": ["exp4", "two_paths"]},
+        "MASK_DECLINING_MODEL": {"values": ['']},
+        "TOTAL_TIMESTEPS": {"values": [50_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-search-19-model-based-all-goals-retrace",
+      "group": "preplay-search-27-mask-declining",
     }
 
   elif search == "her":

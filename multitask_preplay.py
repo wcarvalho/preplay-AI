@@ -448,7 +448,10 @@ class PreplayLossFn:
   retrace_temperature: float = 0.1
   peng_trace_cutting: bool = True
   dyna_other_only: bool = True  # True=replacement (current), False=additive
-  mask_declining_model: bool = False  # mask all TD updates where off-task Q declining
+  mask_declining_model: str = (
+    ""  # "greedy_online", "greedy_target", "target_trend", or "" (off)
+  )
+  keep_greedy_aligned: bool = False  # OR with greedy(on)==greedy(off)
   all_goals_dyna_coeff: float = None  # None → use all_goals_coeff
 
   def __call__(
@@ -995,18 +998,6 @@ class PreplayLossFn:
       selector_actions = jnp.argmax(online_preds_g.q_vals, axis=-1)
       selector_a_is_online_a = selector_actions == actions
 
-      # Mask out timesteps where off-task Q is declining (trajectory moving away from goal)
-      # But keep terminal transitions: discount=0 means no bootstrap, so target is clean
-      if self.mask_declining_model:
-        greedy_q = rlax.batched_index(online_preds_g.q_vals, selector_actions)  # [T]
-        q_not_declining = (greedy_q[1:] >= greedy_q[:-1]).astype(jnp.float32)  # [T-1]
-        td_loss_mask = ((q_not_declining + is_last[1:]) > 0).astype(
-          jnp.float32
-        )  # [T-1]
-        td_loss_mask = jax.lax.stop_gradient(td_loss_mask)
-      else:
-        td_loss_mask = jnp.ones_like(loss_mask[:-1])
-
       # only continue backing up if greedy action is online action
       if self.peng_trace_cutting:
         lambda_ = selector_a_is_online_a * self.all_goals_lambda
@@ -1057,6 +1048,36 @@ class PreplayLossFn:
           online_mask = jnp.ones_like(loss_mask[:-1])
           model_mask = jnp.ones_like(loss_mask[:-1])
 
+        # Mask out timesteps where off-task Q is declining (trajectory moving away from goal)
+        # But keep terminal transitions: discount=0 means no bootstrap, so target is clean
+        if self.mask_declining_model == "greedy_online":
+          greedy_q = jnp.max(online_preds_g.q_vals, axis=-1)  # [T]
+          q_not_declining = (greedy_q[1:] >= greedy_q[:-1]).astype(jnp.float32)
+        elif self.mask_declining_model == "greedy_target":
+          greedy_q = jnp.max(target_preds_g.q_vals, axis=-1)  # [T]
+          q_not_declining = (greedy_q[1:] >= greedy_q[:-1]).astype(jnp.float32)
+        elif self.mask_declining_model == "target_trend":
+          best_target = jnp.maximum(target_q_t_online, target_q_t_model)  # [T-1]
+          q_not_declining = (best_target[1:] >= best_target[:-1]).astype(
+            jnp.float32
+          )  # [T-2]
+          q_not_declining = jnp.concatenate(
+            [jnp.zeros(1), q_not_declining]
+          )  # [T-1], no trend info at first timestep → suppress
+        else:
+          q_not_declining = None
+
+        if q_not_declining is not None:
+          td_loss_mask = q_not_declining + is_last[1:]  # [T-1]
+          if self.keep_greedy_aligned:
+            greedy_ontask = jnp.argmax(online_preds.q_vals, axis=-1)  # [T]
+            greedy_aligned = (greedy_ontask == selector_actions)[:-1]  # [T-1]
+            td_loss_mask = td_loss_mask + greedy_aligned
+          td_loss_mask = (td_loss_mask > 0).astype(jnp.float32)
+          td_loss_mask = jax.lax.stop_gradient(td_loss_mask)
+        else:
+          td_loss_mask = jnp.ones_like(loss_mask[:-1])
+
         effective_mask = loss_mask[:-1] * td_loss_mask  # [T-1]
         online_loss = 0.5 * jnp.square(online_td) * online_mask * effective_mask
         model_loss = 0.5 * jnp.square(model_td) * model_mask * effective_mask
@@ -1103,91 +1124,8 @@ class PreplayLossFn:
           ag_log_info.update(extras)
         return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
 
-      elif self.all_goals_td == "mb_peng_lambda_all":
-        num_actions = online_preds_g.q_vals.shape[-1]  # A
-
-        # Model-based 1-step targets for ALL actions: [T, A]
-        all_actions_tiled = jnp.tile(jnp.arange(num_actions), (T, 1))  # [T, A]
-        keys_tiled = jax.random.split(key_grad, T * num_actions).reshape(
-          T, num_actions, 2
-        )  # [T, A, 2]
-
-        # vmap: outer over T, inner over A
-        # lstm_state and timestep broadcast (None) over A
-        target_all = jax.vmap(
-          jax.vmap(model_based_target_q, in_axes=(None, None, None, 0, 0)),
-          in_axes=(0, 0, 0, 0, 0),
-        )(h_t_online, h_t_target, timestep_w_g, all_actions_tiled, keys_tiled)  # [T, A]
-
-        target_all_tm1 = target_all[:-1]  # [T-1, A]
-        target_all_tm1 = target_all_tm1 * timestep.discount[:-1, None]  # [T-1, A]
-        qa_tm1_all = online_preds_g.q_vals[:-1]  # [T-1, A]
-
-        # --- Lambda loss for greedy action [T-1] ---
-        # Divide by num_actions so relative weighting matches original mean(axis=-1)
-        greedy_q = rlax.batched_index(qa_tm1_all, selector_actions[:-1])  # [T-1]
-        lambda_td = target_q_t_online - greedy_q  # [T-1]
-        if self.dyna_other_only:
-          # Lambda only when on-policy (current behavior)
-          lambda_mask = selector_a_is_online_a[:-1].astype(jnp.float32) * loss_mask[:-1]
-        else:
-          # Lambda for greedy action at all timesteps
-          lambda_mask = loss_mask[:-1]
-        effective_mask = loss_mask[:-1] * td_loss_mask  # [T-1]
-        lambda_loss = (
-          0.5 * jnp.square(lambda_td) * lambda_mask * td_loss_mask / num_actions
-        )  # [T-1]
-
-        # --- Model loss for all actions [T-1, A] ---
-        selector_onehot = jax.nn.one_hot(selector_actions[:-1], num_actions)  # [T-1, A]
-        model_td_all = target_all_tm1 - qa_tm1_all  # [T-1, A]
-        if self.dyna_other_only:
-          # Exclude greedy action when on-policy (original replaced it with lambda)
-          use_lambda = selector_a_is_online_a[:-1, None].astype(jnp.float32)
-          model_mask = 1 - use_lambda * selector_onehot  # [T-1, A]
-        else:
-          model_mask = jnp.ones_like(selector_onehot)  # [T-1, A]
-        model_loss_per_action = (
-          0.5 * jnp.square(model_td_all) * model_mask * effective_mask[:, None]
-        )  # [T-1, A]
-        model_loss = model_loss_per_action.mean(axis=-1)  # [T-1]
-
-        # Combined with separate coefficients
-        ag_loss_per_t = (
-          self.all_goals_coeff * lambda_loss + dyna_coeff * model_loss
-        )  # [T-1]
-        ag_batch_loss = ag_loss_per_t.sum(0) / effective_mask.sum(0).clip(min=1)
-        ag_td_error = (model_td_all * effective_mask[:, None]).mean(axis=-1)  # [T-1]
-
-        # For logging: use greedy action's target [T-1]
-        target_tm1 = rlax.batched_index(target_all_tm1, selector_actions[:-1])
-
-        ag_metrics = {
-          "0.q_loss": ag_loss_per_t.mean(),
-          "0.q_loss_online": lambda_loss.mean(),
-          "0.q_loss_model": model_loss.mean(),
-          "0.q_td": jnp.abs(ag_td_error).mean(),
-          "0.declining_mask_frac": (1.0 - td_loss_mask).mean(),
-          "1.reward": rewards.mean(),
-        }
-        ag_log_info = {
-          "timesteps": timestep_w_g,
-          "actions": actions,
-          "td_errors": ag_td_error,
-          "non_terminal": timestep_w_g.discount,
-          "loss_mask": loss_mask,
-          "q_values": online_preds_g.q_vals,
-          "q_loss": ag_loss_per_t,
-          "q_target": target_tm1,
-          "target_q_values": target_preds_g.q_vals,  # [T, A]
-          "behavior_q_values": online_preds.q_vals,
-          "loss_rewards": rewards,
-          "q_not_declining": td_loss_mask,
-        }
-        if self.make_log_extras is not None:
-          extras = self.make_log_extras(timestep_w_g, goal=new_goal)
-          ag_log_info.update(extras)
-        return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
+      else:
+        raise NotImplementedError
 
     elif self.all_goals_td == "mb_all":
       # Pure 1-step model-based targets for ALL actions (1-step dyna for goal).
@@ -1655,7 +1593,8 @@ def make_loss_fn_class(config, **kwargs) -> PreplayLossFn:
     retrace_temperature=config.get("RETRACE_TEMPERATURE", 0.1),
     peng_trace_cutting=config.get("PENG_TRACE_CUTTING", True),
     dyna_other_only=config.get("DYNA_OTHER_ONLY", True),
-    mask_declining_model=config.get("MASK_DECLINING_MODEL", False),
+    mask_declining_model=config.get("MASK_DECLINING_MODEL", ""),
+    keep_greedy_aligned=config.get("KEEP_GREEDY_ALIGNED", False),
     all_goals_dyna_coeff=config.get("ALL_GOALS_DYNA_COEFF", None),
     **kwargs,
   )
