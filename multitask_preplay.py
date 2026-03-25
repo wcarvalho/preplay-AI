@@ -43,6 +43,47 @@ def info(x):
   return jax.tree_util.tree_map(lambda y: (y.shape, y.dtype), x)
 
 
+def symlog(x):
+  """Symmetric log transform from DreamerV3 (Hafner et al., 2023)."""
+  return jnp.sign(x) * jnp.log1p(jnp.abs(x))
+
+
+def normalize_td_error(td_error, mask, style, scale_from=None):
+  """Normalize TD-errors before squaring.
+
+  Args:
+    td_error: raw TD-errors [T-1] or [T-1, A]
+    mask: loss mask [T-1] (broadcastable to td_error)
+    style: "none", "symlog", "per_goal", or "symlog+per_goal"
+    scale_from: optional tensor to compute the per_goal normalization scale
+      from (instead of td_error itself). Use this when normalizing multiple
+      TD-error streams (e.g. online + model) by a shared scale so you
+      equalize across goals without distorting the ratio between streams.
+  Returns:
+    normalized TD-errors, same shape as td_error
+  """
+  if style == "none" or style == "":
+    return td_error
+
+  parts = style.split("+")
+  out = td_error
+  for part in parts:
+    if part == "symlog":
+      out = symlog(out)
+    elif part == "per_goal":
+      eps = 1e-6
+      # normalize by mean absolute TD-error across time
+      ref = out if scale_from is None else scale_from
+      # apply symlog to ref too if it was already applied to out
+      if "symlog" in parts and scale_from is not None:
+        ref = symlog(ref)
+      abs_mean = (jnp.abs(ref) * mask).sum(0) / mask.sum(0).clip(min=1)
+      out = out / jnp.maximum(abs_mean, eps)
+    else:
+      raise ValueError(f"Unknown td_norm_style component: {part}")
+  return out
+
+
 Agent = nn.Module
 Params = flax.core.FrozenDict
 Qvalues = jax.Array
@@ -480,6 +521,7 @@ class PreplayLossFn:
   mask_declining_keep_last: bool = False  # OR-gate td_loss_mask with is_last
   keep_greedy_aligned: bool = False  # OR with greedy(on)==greedy(off)
   all_goals_dyna_coeff: float = None  # None → use all_goals_coeff
+  td_norm_style: str = "none"  # "none", "symlog", "per_goal", "symlog+per_goal"
 
   def __call__(
     self,
@@ -973,17 +1015,26 @@ class PreplayLossFn:
       # Divide by num_actions so relative weighting matches original mean(axis=-1)
       qa_tm1_taken = rlax.batched_index(qa_tm1_all, actions[:-1])  # [T-1]
       retrace_td = target_tm1_retrace - qa_tm1_taken  # [T-1]
+      # Normalize retrace and model TD-errors by a shared scale
+      retrace_td_normed = normalize_td_error(
+        retrace_td, loss_mask[:-1], self.td_norm_style, scale_from=retrace_td
+      )
       retrace_loss_per_t = (
-        0.5 * jnp.square(retrace_td) * loss_mask[:-1] / num_actions
+        0.5 * jnp.square(retrace_td_normed) * loss_mask[:-1] / num_actions
       )  # [T-1]
 
       # Model loss for actions [T-1, A]
       model_td_all = target_all_tm1 - qa_tm1_all  # [T-1, A]
+      model_td_all_normed = normalize_td_error(
+        model_td_all, loss_mask[:-1, None], self.td_norm_style, scale_from=retrace_td
+      )
       if self.dyna_other_only:
         model_mask = 1 - taken_onehot  # non-taken only [T-1, A]
       else:
         model_mask = jnp.ones_like(taken_onehot)  # ALL actions [T-1, A]
-      model_loss_per_action = 0.5 * jnp.square(model_td_all) * model_mask  # [T-1, A]
+      model_loss_per_action = (
+        0.5 * jnp.square(model_td_all_normed) * model_mask
+      )  # [T-1, A]
       model_loss_per_t = model_loss_per_action.mean(axis=-1) * loss_mask[:-1]  # [T-1]
 
       # Combined with separate coefficients
@@ -1120,8 +1171,17 @@ class PreplayLossFn:
           td_loss_mask = jnp.ones_like(loss_mask[:-1])
 
         effective_mask = loss_mask[:-1] * td_loss_mask  # [T-1]
-        online_loss = 0.5 * jnp.square(online_td) * online_mask * effective_mask
-        model_loss = 0.5 * jnp.square(model_td) * model_mask * effective_mask
+        # Normalize online and model TD-errors by a shared scale so we
+        # equalize across goals without distorting the online/model ratio.
+        combined_td = online_td * online_mask + model_td * model_mask  # [T-1]
+        online_td_normed = normalize_td_error(
+          online_td, effective_mask, self.td_norm_style, scale_from=combined_td
+        )
+        model_td_normed = normalize_td_error(
+          model_td, effective_mask, self.td_norm_style, scale_from=combined_td
+        )
+        online_loss = 0.5 * jnp.square(online_td_normed) * online_mask * effective_mask
+        model_loss = 0.5 * jnp.square(model_td_normed) * model_mask * effective_mask
 
         ag_loss_per_t = (
           self.all_goals_coeff * online_loss + dyna_coeff * model_loss
@@ -1201,8 +1261,11 @@ class PreplayLossFn:
 
       # Loss: mean over actions, weighted by dyna_coeff
       ag_td_error_all = ag_td_error_all * loss_mask[:-1, None]
+      ag_td_error_all_normed = normalize_td_error(
+        ag_td_error_all, loss_mask[:-1, None], self.td_norm_style
+      )
       ag_loss_per_t = (
-        dyna_coeff * 0.5 * jnp.square(ag_td_error_all).mean(axis=-1)
+        dyna_coeff * 0.5 * jnp.square(ag_td_error_all_normed).mean(axis=-1)
       )  # [T-1]
       ag_td_error = ag_td_error_all.mean(axis=-1)  # [T-1]
       ag_batch_loss = (ag_loss_per_t * loss_mask[:-1]).sum(0) / loss_mask[:-1].sum(0)
@@ -1239,7 +1302,8 @@ class PreplayLossFn:
 
     # Apply loss mask and compute loss
     ag_td_error = ag_td_error * loss_mask[:-1]
-    ag_loss_per_t = 0.5 * jnp.square(ag_td_error)
+    ag_td_normed = normalize_td_error(ag_td_error, loss_mask[:-1], self.td_norm_style)
+    ag_loss_per_t = 0.5 * jnp.square(ag_td_normed)
     # [N] — per-goal mean loss (matches self.loss_fn return shape)
     ag_batch_loss = (
       self.all_goals_coeff
@@ -1639,6 +1703,7 @@ def make_loss_fn_class(config, **kwargs) -> PreplayLossFn:
     mask_declining_keep_last=config.get("MASK_DECLINING_KEEP_LAST", False),
     keep_greedy_aligned=config.get("KEEP_GREEDY_ALIGNED", False),
     all_goals_dyna_coeff=config.get("ALL_GOALS_DYNA_COEFF", None),
+    td_norm_style=config.get("TD_NORM_STYLE", "none"),
     **kwargs,
   )
 
