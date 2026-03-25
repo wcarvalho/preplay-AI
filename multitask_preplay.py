@@ -195,6 +195,33 @@ def get_in_episode(timestep):
   return in_episode
 
 
+def _episode_level_mask(q_not_declining, is_first, threshold):
+  """Convert per-timestep non-declining mask to episode-level mask.
+
+  For each episode, computes proportion of intra-episode transitions
+  where Q is non-declining. If proportion >= threshold, mask=1 for the
+  entire episode; otherwise mask=0.
+  """
+  T = is_first.shape[0]
+  # Episode IDs via cumsum of is_first (marks start of each episode)
+  episode_ids = (jnp.cumsum(is_first) - 1).astype(jnp.int32)  # [T], 0-indexed
+  ep_ids_trans = episode_ids[:-1]  # [T-1]
+
+  # Exclude cross-episode transitions: transition t->t+1 is cross-episode
+  # if t+1 is the first timestep of a new episode
+  not_cross = (1.0 - is_first[1:]).astype(jnp.float32)  # [T-1]
+  valid_nondecl = q_not_declining * not_cross  # [T-1]
+
+  # Per-episode aggregation
+  nondecl_sum = jax.ops.segment_sum(valid_nondecl, ep_ids_trans, num_segments=T)
+  valid_sum = jax.ops.segment_sum(not_cross, ep_ids_trans, num_segments=T)
+  proportion = nondecl_sum / jnp.maximum(valid_sum, 1.0)  # [T]
+
+  # Threshold → episode mask → broadcast back to transitions
+  ep_mask = (proportion >= threshold).astype(jnp.float32)  # [T]
+  return ep_mask[ep_ids_trans]  # [T-1]
+
+
 def rnn_output_from_state(state):
   """Extract RNN output from LSTM state. state=(carry, hidden) -> hidden."""
   return state[1]
@@ -448,9 +475,9 @@ class PreplayLossFn:
   retrace_temperature: float = 0.1
   peng_trace_cutting: bool = True
   dyna_other_only: bool = True  # True=replacement (current), False=additive
-  mask_declining_model: str = (
-    ""  # "greedy_online", "greedy_target", "target_trend", or "" (off)
-  )
+  mask_declining_model: str = ""  # "greedy_online", "greedy_target", "target_trend", + "_episode" variants, or "" (off)
+  mask_declining_threshold: float = 0.5  # proportion threshold for _episode modes
+  mask_declining_keep_last: bool = False  # OR-gate td_loss_mask with is_last
   keep_greedy_aligned: bool = False  # OR with greedy(on)==greedy(off)
   all_goals_dyna_coeff: float = None  # None → use all_goals_coeff
 
@@ -1049,13 +1076,15 @@ class PreplayLossFn:
           model_mask = jnp.ones_like(loss_mask[:-1])
 
         # Mask out timesteps where off-task Q is declining (trajectory moving away from goal)
-        # But keep terminal transitions: discount=0 means no bootstrap, so target is clean
-        if self.mask_declining_model == "greedy_online":
+        if self.mask_declining_model in ("greedy_online", "greedy_online_episode"):
           greedy_q = jnp.max(online_preds_g.q_vals, axis=-1)  # [T]
-          q_not_declining = (greedy_q[1:] >= greedy_q[:-1]).astype(jnp.float32)
-        elif self.mask_declining_model == "greedy_target":
+          q_not_declining = (greedy_q[1:] >= greedy_q[:-1]).astype(jnp.float32)  # [T-1]
+        elif self.mask_declining_model in (
+          "greedy_target",
+          "greedy_target_episode",
+        ):
           greedy_q = jnp.max(target_preds_g.q_vals, axis=-1)  # [T]
-          q_not_declining = (greedy_q[1:] >= greedy_q[:-1]).astype(jnp.float32)
+          q_not_declining = (greedy_q[1:] >= greedy_q[:-1]).astype(jnp.float32)  # [T-1]
         elif self.mask_declining_model == "target_trend":
           best_target = jnp.maximum(target_q_t_online, target_q_t_model)  # [T-1]
           q_not_declining = (best_target[1:] >= best_target[:-1]).astype(
@@ -1067,8 +1096,20 @@ class PreplayLossFn:
         else:
           q_not_declining = None
 
+        # Episode-level aggregation: keep/drop entire episodes based on
+        # proportion of non-declining Q transitions within each episode
+        if q_not_declining is not None and self.mask_declining_model.endswith(
+          "_episode"
+        ):
+          is_first = make_float(timestep.first())  # [T]
+          q_not_declining = _episode_level_mask(
+            q_not_declining, is_first, self.mask_declining_threshold
+          )
+
         if q_not_declining is not None:
-          td_loss_mask = q_not_declining + is_last[1:]  # [T-1]
+          td_loss_mask = q_not_declining
+          if self.mask_declining_keep_last:
+            td_loss_mask = td_loss_mask + is_last[1:]  # [T-1]
           if self.keep_greedy_aligned:
             greedy_ontask = jnp.argmax(online_preds.q_vals, axis=-1)  # [T]
             greedy_aligned = (greedy_ontask == selector_actions)[:-1]  # [T-1]
@@ -1117,7 +1158,7 @@ class PreplayLossFn:
           "loss_rewards": rewards,
           "target_q_t_lambda": target_q_t_online,
           "target_q_t_model": target_q_t_model,
-          "q_not_declining": td_loss_mask,
+          "td_mask": td_loss_mask,
         }
         if self.make_log_extras is not None:
           extras = self.make_log_extras(timestep_w_g, goal=new_goal)
@@ -1594,6 +1635,8 @@ def make_loss_fn_class(config, **kwargs) -> PreplayLossFn:
     peng_trace_cutting=config.get("PENG_TRACE_CUTTING", True),
     dyna_other_only=config.get("DYNA_OTHER_ONLY", True),
     mask_declining_model=config.get("MASK_DECLINING_MODEL", ""),
+    mask_declining_threshold=config.get("MASK_DECLINING_THRESHOLD", 0.5),
+    mask_declining_keep_last=config.get("MASK_DECLINING_KEEP_LAST", False),
     keep_greedy_aligned=config.get("KEEP_GREEDY_ALIGNED", False),
     all_goals_dyna_coeff=config.get("ALL_GOALS_DYNA_COEFF", None),
     **kwargs,
@@ -2927,9 +2970,9 @@ def jaxmaze_learner_log_extra(
         tqm = cd.get("target_q_t_model")
         if tqm is not None:
           ax.plot(tqm, label="Q-Target (model)", color="grey")
-        qnd = cd.get("q_not_declining")
+        qnd = cd.get("td_mask")
         if qnd is not None:
-          ax.plot(qnd * 0.1, label="Not Declining", linestyle="--", color="purple")
+          ax.plot(qnd * 0.1, label="TD Mask", linestyle="--", color="purple")
       else:
         # preplay/dyna
         simulation_reward = cd.get("simulation_reward")
@@ -3004,9 +3047,9 @@ def jaxmaze_learner_log_extra(
           tqm2 = cd2.get("target_q_t_model")
           if tqm2 is not None:
             ax.plot(tqm2, label="Q-Target (model)", color="grey")
-          qnd2 = cd2.get("q_not_declining")
+          qnd2 = cd2.get("td_mask")
           if qnd2 is not None:
-            ax.plot(qnd2 * 0.1, label="Not Declining", linestyle="--", color="purple")
+            ax.plot(qnd2 * 0.1, label="TD Mask", linestyle="--", color="purple")
           ax.set_title("all_goals(microwave) — Q-Values", fontsize=22)
           ax.legend(fontsize=15)
           ax.grid(True)
