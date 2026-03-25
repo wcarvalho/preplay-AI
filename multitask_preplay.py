@@ -996,12 +996,16 @@ class PreplayLossFn:
       selector_a_is_online_a = selector_actions == actions
 
       # Mask out timesteps where off-task Q is declining (trajectory moving away from goal)
+      # But keep terminal transitions: discount=0 means no bootstrap, so target is clean
       if self.mask_declining_model:
         greedy_q = rlax.batched_index(online_preds_g.q_vals, selector_actions)  # [T]
         q_not_declining = (greedy_q[1:] >= greedy_q[:-1]).astype(jnp.float32)  # [T-1]
-        q_not_declining = jax.lax.stop_gradient(q_not_declining)
+        td_loss_mask = ((q_not_declining + is_last[1:]) > 0).astype(
+          jnp.float32
+        )  # [T-1]
+        td_loss_mask = jax.lax.stop_gradient(td_loss_mask)
       else:
-        q_not_declining = jnp.ones_like(loss_mask[:-1])
+        td_loss_mask = jnp.ones_like(loss_mask[:-1])
 
       # only continue backing up if greedy action is online action
       if self.peng_trace_cutting:
@@ -1053,7 +1057,7 @@ class PreplayLossFn:
           online_mask = jnp.ones_like(loss_mask[:-1])
           model_mask = jnp.ones_like(loss_mask[:-1])
 
-        effective_mask = loss_mask[:-1] * q_not_declining  # [T-1]
+        effective_mask = loss_mask[:-1] * td_loss_mask  # [T-1]
         online_loss = 0.5 * jnp.square(online_td) * online_mask * effective_mask
         model_loss = 0.5 * jnp.square(model_td) * model_mask * effective_mask
 
@@ -1075,7 +1079,7 @@ class PreplayLossFn:
           "0.q_loss_online": online_loss.mean(),
           "0.q_loss_model": model_loss.mean(),
           "0.q_td": jnp.abs(ag_td_error).mean(),
-          "0.declining_mask_frac": (1.0 - q_not_declining).mean(),
+          "0.declining_mask_frac": (1.0 - td_loss_mask).mean(),
           "1.reward": rewards.mean(),
         }
         ag_log_info = {
@@ -1092,7 +1096,7 @@ class PreplayLossFn:
           "loss_rewards": rewards,
           "target_q_t_lambda": target_q_t_online,
           "target_q_t_model": target_q_t_model,
-          "q_not_declining": q_not_declining,
+          "q_not_declining": td_loss_mask,
         }
         if self.make_log_extras is not None:
           extras = self.make_log_extras(timestep_w_g, goal=new_goal)
@@ -1129,9 +1133,9 @@ class PreplayLossFn:
         else:
           # Lambda for greedy action at all timesteps
           lambda_mask = loss_mask[:-1]
-        effective_mask = loss_mask[:-1] * q_not_declining  # [T-1]
+        effective_mask = loss_mask[:-1] * td_loss_mask  # [T-1]
         lambda_loss = (
-          0.5 * jnp.square(lambda_td) * lambda_mask * q_not_declining / num_actions
+          0.5 * jnp.square(lambda_td) * lambda_mask * td_loss_mask / num_actions
         )  # [T-1]
 
         # --- Model loss for all actions [T-1, A] ---
@@ -1163,7 +1167,7 @@ class PreplayLossFn:
           "0.q_loss_online": lambda_loss.mean(),
           "0.q_loss_model": model_loss.mean(),
           "0.q_td": jnp.abs(ag_td_error).mean(),
-          "0.declining_mask_frac": (1.0 - q_not_declining).mean(),
+          "0.declining_mask_frac": (1.0 - td_loss_mask).mean(),
           "1.reward": rewards.mean(),
         }
         ag_log_info = {
@@ -1178,7 +1182,7 @@ class PreplayLossFn:
           "target_q_values": target_preds_g.q_vals,  # [T, A]
           "behavior_q_values": online_preds.q_vals,
           "loss_rewards": rewards,
-          "q_not_declining": q_not_declining,
+          "q_not_declining": td_loss_mask,
         }
         if self.make_log_extras is not None:
           extras = self.make_log_extras(timestep_w_g, goal=new_goal)
