@@ -518,6 +518,7 @@ class PreplayLossFn:
   all_goals_td: str = "retrace"
   retrace_temperature: float = 0.1
   peng_trace_cutting: bool = True
+  sim_peng_trace_cutting: bool = False
   dyna_other_only: bool = True  # True=replacement (current), False=additive
   mask_declining_model: str = ""  # "greedy_online", "greedy_target", "target_trend", + "_episode" variants, or "" (off)
   mask_declining_threshold: float = 0.5  # proportion threshold for _episode modes
@@ -648,6 +649,7 @@ class PreplayLossFn:
       "q_target": target_q_t,
       "target_q_values": target_preds.q_vals,
       "loss_rewards": rewards,
+      "lambda_": lambda_.mean()
     }
     return batch_td_error, batch_loss_mean, metrics, log_info
 
@@ -1602,6 +1604,23 @@ class PreplayLossFn:
 
       all_t_is_last = make_float(all_t.last())
       ontask_reward = self.compute_rewards(all_t, ontask_goals_tiled)
+
+      # Peng's trace cutting for sim losses:
+      # on-policy sims get full λ, off-policy sims cut when greedy ≠ taken
+      if self.sim_peng_trace_cutting:
+        # main-task: on-task sims on-policy, off-task sims off-policy
+        ontask_on_policy = jnp.concatenate(
+          [jnp.ones(N_on), jnp.zeros(G_off * N_off)]
+        )  # [total_sims]
+        ontask_selector = jnp.argmax(ontask_q_on, axis=-1)  # [S+1, total_sims]
+        ontask_lambda = jnp.where(
+          ontask_on_policy[None],  # [1, total_sims]
+          self.lambda_,
+          (ontask_selector == all_t_a) * self.lambda_,
+        )  # [S+1, total_sims]
+      else:
+        ontask_lambda = None
+
       ontask_td, ontask_loss, ontask_metrics, _ = self.loss_fn(
         timestep=all_t,  # [S+1, total_sims, ...]
         online_preds=Predictions(ontask_q_on, None),  # .q_vals: [S+1, total_sims, A]
@@ -1611,6 +1630,7 @@ class PreplayLossFn:
         is_last=all_t_is_last,  # [S+1, total_sims]
         non_terminal=all_t.discount,  # [S+1, total_sims]
         loss_mask=all_t_loss_mask,  # [S+1, total_sims]
+        lambda_override=ontask_lambda,  # [S+1, total_sims] or None
       )  # returns [S, total_sims], [total_sims], dict, dict
 
       # === OFF-TASK GOAL LOSS (split: different goals + different rewards) ===
@@ -1625,6 +1645,20 @@ class PreplayLossFn:
 
       offtask_reward = self.compute_rewards(all_t, all_sim_goals)
 
+      if self.sim_peng_trace_cutting:
+        # off-task: off-task sims on-policy (for own goal), on-task sims off-policy
+        offtask_on_policy = jnp.concatenate(
+          [jnp.zeros(N_on), jnp.ones(G_off * N_off)]
+        )  # [total_sims]
+        offtask_selector = jnp.argmax(offtask_q_on, axis=-1)  # [S+1, total_sims]
+        offtask_lambda = jnp.where(
+          offtask_on_policy[None],  # [1, total_sims]
+          self.lambda_,
+          (offtask_selector == all_t_a) * self.lambda_,
+        )  # [S+1, total_sims]
+      else:
+        offtask_lambda = None
+
       off_td, off_loss, offtask_metrics, off_log = self.loss_fn(
         timestep=all_t,  # [S+1, total_sims, ...]
         online_preds=Predictions(offtask_q_on, None),  # .q_vals: [S+1, total_sims, A]
@@ -1634,6 +1668,7 @@ class PreplayLossFn:
         is_last=all_t_is_last,  # [S+1, total_sims]
         non_terminal=all_t.discount,  # [S+1, total_sims]
         loss_mask=all_t_loss_mask,  # [S+1, total_sims]
+        lambda_override=offtask_lambda,  # [S+1, total_sims] or None
       )  # returns [S, total_sims], [total_sims], dict, dict
 
       # --------------------
@@ -1788,6 +1823,7 @@ def make_loss_fn_class(config, **kwargs) -> PreplayLossFn:
     all_goals_td=config.get("ALL_GOALS_TD", "retrace"),
     retrace_temperature=config.get("RETRACE_TEMPERATURE", 0.1),
     peng_trace_cutting=config.get("PENG_TRACE_CUTTING", True),
+    sim_peng_trace_cutting=config.get("SIM_PENG_TRACE_CUTTING", False),
     dyna_other_only=config.get("DYNA_OTHER_ONLY", True),
     mask_declining_model=config.get("MASK_DECLINING_MODEL", ""),
     mask_declining_threshold=config.get("MASK_DECLINING_THRESHOLD", 0.5),
