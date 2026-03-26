@@ -1080,16 +1080,24 @@ class PreplayLossFn:
       selector_actions = jnp.argmax(online_preds_g.q_vals, axis=-1)  # [T]
       selector_a_is_online_a = selector_actions == actions  # [T]
 
-      # Lambda target with trace cutting: lambda=0 where off-policy
-      lambda_ = selector_a_is_online_a * self.all_goals_lambda  # [T]
-      target_q_t_online = losses.q_learning_lambda_target(
-        q_t=target_preds_g.q_vals[1:],  # [T-1, A]
-        r_t=rewards[1:],  # [T-1]
-        discount_t=discounts[1:],  # [T-1]
-        is_last_t=is_last[1:],  # [T-1]
-        a_t=selector_actions[1:],  # [T-1]
-        lambda_=lambda_[1:],  # [T-1]
-      )  # [T-1]
+      # Retrace targets with IS correction
+      temp = self.retrace_temperature
+      mu_probs = jax.nn.softmax(online_preds.q_vals / temp, axis=-1)  # [T, A]
+      mu_t = rlax.batched_index(mu_probs, actions)  # [T]
+      pi_t = jax.nn.softmax(online_preds_g.q_vals / temp, axis=-1)  # [T, A]
+
+      qa_tm1_retrace, target_q_t_online = losses.retrace(
+        online_preds_g.q_vals[:-1],  # q_tm1:      [T-1, A]
+        target_preds_g.q_vals[1:],  # q_t:        [T-1, A]
+        actions[:-1],  # a_tm1:      [T-1]
+        actions[1:],  # a_t:        [T-1]
+        rewards[1:],  # r_t:        [T-1]
+        discounts[1:],  # discount_t: [T-1]
+        pi_t[1:],  # pi_t:       [T-1, A]
+        mu_t[1:],  # mu_t:       [T-1]
+        self.all_goals_lambda,  # lambda:     scalar
+        is_last[1:],  # is_last_t:  [T-1]
+      )
       target_q_t_online = target_q_t_online * timestep.discount[:-1]  # [T-1]
 
       # 1-step model-based targets
@@ -1109,7 +1117,7 @@ class PreplayLossFn:
       qa_tm1 = rlax.batched_index(
         online_preds_g.q_vals[:-1], selector_actions[:-1]
       )  # [T-1]
-      online_td = target_q_t_online - qa_tm1  # [T-1]
+      online_td = target_q_t_online - qa_tm1_retrace  # [T-1]
       model_td = target_q_t_model - qa_tm1  # [T-1]
 
       online_mask = selector_a_is_online_a[:-1].astype(jnp.float32)  # [T-1]
