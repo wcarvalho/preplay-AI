@@ -536,14 +536,12 @@ def sweep(search: str = ""):
         "SEED": {"values": [2]},
         #"env.exp": {"values": ["two_paths", "shortcut"]},
         "env.exp": {"values": ["preplay_test_big"]},
-        #"TOTAL_BATCH_SIZE": {"values": [1280*2, 1280]},
+        "ALL_GOALS_TD": {"values": ["mb_retrace"]},
         "TARGET_UPDATE_INTERVAL": {"values": [1_000]},
-        #"MASK_DECLINING_THRESHOLD": {"values": [.25, .5, .75]},
-        "TD_NORM_STYLE": {"values": ['symlog', 'per_goal']},
         "TOTAL_TIMESTEPS": {"values": [5_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-search-1-td-normalization",
+      "group": "preplay-search-1-mb-retrace",
     }
 
   elif search == "her":
