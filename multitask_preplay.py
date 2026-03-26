@@ -244,6 +244,9 @@ def _episode_level_mask(q_not_declining, is_first, threshold):
   entire episode; otherwise mask=0.
   """
   T = is_first.shape[0]
+  # Ensure the first timestep is treated as an episode start so it gets
+  # a valid (non-negative) segment ID in the cumsum below.
+  is_first = is_first.at[0].set(1.0)
   # Episode IDs via cumsum of is_first (marks start of each episode)
   episode_ids = (jnp.cumsum(is_first) - 1).astype(jnp.int32)  # [T], 0-indexed
   ep_ids_trans = episode_ids[:-1]  # [T-1]
