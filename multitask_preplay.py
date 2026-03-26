@@ -1113,26 +1113,24 @@ class PreplayLossFn:
       )  # [T]
       target_q_t_model = target_q_t_model[:-1] * timestep.discount[:-1]  # [T-1]
 
-      # Replacement: retrace where on-policy, model where off-policy
+      # Retrace everywhere for Q(s, a_taken);
+      # model for Q(s, a*) only where a* != a_taken
       qa_tm1 = rlax.batched_index(
         online_preds_g.q_vals[:-1], selector_actions[:-1]
       )  # [T-1]
       online_td = target_q_t_online - qa_tm1_retrace  # [T-1]
       model_td = target_q_t_model - qa_tm1  # [T-1]
 
-      online_mask = selector_a_is_online_a[:-1].astype(jnp.float32)  # [T-1]
-      model_mask = 1.0 - online_mask  # [T-1]
+      model_mask = (1.0 - selector_a_is_online_a[:-1].astype(jnp.float32))  # [T-1]
 
-      online_loss = 0.5 * jnp.square(online_td) * online_mask * loss_mask[:-1]
+      online_loss = 0.5 * jnp.square(online_td) * loss_mask[:-1]
       model_loss = 0.5 * jnp.square(model_td) * model_mask * loss_mask[:-1]
 
       ag_loss_per_t = (
         self.all_goals_coeff * online_loss + dyna_coeff * model_loss
       )  # [T-1]
       ag_batch_loss = ag_loss_per_t.sum(0) / loss_mask[:-1].sum(0).clip(min=1)
-      ag_td_error = (online_td * online_mask + model_td * model_mask) * loss_mask[
-        :-1
-      ]  # [T-1]
+      ag_td_error = online_td * loss_mask[:-1]  # [T-1]
 
       target_tm1 = jnp.where(
         selector_a_is_online_a[:-1], target_q_t_online, target_q_t_model
