@@ -1121,7 +1121,7 @@ class PreplayLossFn:
       online_td = target_q_t_online - qa_tm1_retrace  # [T-1]
       model_td = target_q_t_model - qa_tm1  # [T-1]
 
-      model_mask = (1.0 - selector_a_is_online_a[:-1].astype(jnp.float32))  # [T-1]
+      model_mask = 1.0 - selector_a_is_online_a[:-1].astype(jnp.float32)  # [T-1]
 
       online_loss = 0.5 * jnp.square(online_td) * loss_mask[:-1]
       model_loss = 0.5 * jnp.square(model_td) * model_mask * loss_mask[:-1]
@@ -2932,6 +2932,11 @@ def jaxmaze_learner_log_extra(
   # Online: [B, T, ...] -> first batch -> [T, ...]
   if "online" in data:
     callback_data["online"] = jax.tree_util.tree_map(lambda x: x[0], data["online"])
+    # Keep full batch for episode grid plot
+    callback_data["online_all_batches"] = {
+      "timesteps": data["online"]["timesteps"],
+      "actions": data["online"]["actions"],
+    }
 
   # All goals: [B, T, ...] -> first batch -> [T, ...]
   if "all_goals" in data:
@@ -3047,7 +3052,7 @@ def jaxmaze_learner_log_extra(
     column_order = ["online", "all_goals", "preplay", "dyna"]
     col_names = [c for c in column_order if c in d]
     if not col_names:
-      return
+      return None
 
     col_data = {c: d[c] for c in col_names}
     n_cols = len(col_names)
@@ -3388,12 +3393,78 @@ def jaxmaze_learner_log_extra(
 
     fig.tight_layout()
 
-    if wandb.run is not None:
-      wandb.log({"learner_example/unified": wandb.Image(fig)})
-    plt.close(fig)
+    return fig
+
+  def plot_episode_grid(d):
+    """Grid of all batch episodes showing maze + trajectory arrows."""
+    if "online_all_batches" not in d:
+      return None
+    all_timesteps = d["online_all_batches"]["timesteps"]
+    all_actions = d["online_all_batches"]["actions"]
+    B = len(all_timesteps.reward)
+
+    n_cols = ceil(B**0.5)
+    n_rows = ceil(B / n_cols)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows))
+    if n_rows == 1 and n_cols == 1:
+      axes = np.array([[axes]])
+    elif n_rows == 1 or n_cols == 1:
+      axes = axes.reshape(n_rows, n_cols)
+
+    for b in range(B):
+      row, col = divmod(b, n_cols)
+      ax = axes[row, col]
+
+      ts_b = jax.tree_util.tree_map(lambda x: x[b], all_timesteps)
+      actions_b = np.array(all_actions[b])
+      nT = len(ts_b.reward)
+
+      # Detect first episode
+      is_first = np.array(ts_b.first())
+      ep_starts = list(np.where(is_first)[0])
+      if not ep_starts or ep_starts[0] != 0:
+        ep_starts = [0] + ep_starts
+      ep_start = ep_starts[0]
+      ep_end = ep_starts[1] if len(ep_starts) > 1 else nT
+
+      maze_height, maze_width, _ = ts_b.state.grid[0].shape
+      initial_state = jax.tree_util.tree_map(lambda x: x[ep_start], ts_b.state)
+      img = render_fn(initial_state)
+      ep_positions = jax.tree_util.tree_map(
+        lambda x: x[ep_start : ep_end - 1], ts_b.state.agent_pos
+      )
+      ep_actions = actions_b[ep_start : ep_end - 1]
+      renderer.place_arrows_on_image(
+        img, ep_positions, ep_actions, maze_height, maze_width, arrow_scale=5, ax=ax
+      )
+      goal_name = task_object_to_name(ts_b.state.task_object[ep_start])
+      total_reward = float(np.array(ts_b.reward[ep_start:ep_end]).sum())
+      ax.set_title(f"b{b} {goal_name} r={total_reward:.1f}", fontsize=9)
+      ax.axis("off")
+
+    # Hide unused axes
+    for idx in range(B, n_rows * n_cols):
+      row, col = divmod(idx, n_cols)
+      axes[row, col].set_visible(False)
+
+    fig.tight_layout()
+    return fig
 
   def callback(d):
-    plot_unified(d)
+    unified_fig = plot_unified(d)
+    grid_fig = plot_episode_grid(d)
+    if wandb.run is not None:
+      log_data = {}
+      if unified_fig is not None:
+        log_data["learner_example/unified"] = wandb.Image(unified_fig)
+      if grid_fig is not None:
+        log_data["learner_example/episode_grid"] = wandb.Image(grid_fig)
+      if log_data:
+        wandb.log(log_data)
+    if unified_fig is not None:
+      plt.close(unified_fig)
+    if grid_fig is not None:
+      plt.close(grid_fig)
 
   n_updates = data["n_updates"] + 1
   if config["LEARNER_EXTRA_LOG_PERIOD"] > 0:
