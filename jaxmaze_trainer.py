@@ -235,6 +235,7 @@ def run_single(config: dict, save_path: str = None):
   env = mt_env.HouseMaze(
     task_runner=task_runner,
     num_categories=200,
+    curriculum_strategy=config.get("CURRICULUM_STRATEGY", None),
   )
 
   env = jaxmaze_utils.AutoResetWrapper(env)
@@ -514,12 +515,12 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [2]},
-        #"env.exp": {"values": ["two_paths", "shortcut"]},
+        # "env.exp": {"values": ["two_paths", "shortcut"]},
         "env.exp": {"values": ["preplay_test_big"]},
-        #"TOTAL_BATCH_SIZE": {"values": [1280*2, 1280]},
+        # "TOTAL_BATCH_SIZE": {"values": [1280*2, 1280]},
         "TARGET_UPDATE_INTERVAL": {"values": [1_000]},
-        "MASK_DECLINING_THRESHOLD": {"values": [.25, .5, .75]},
-        "MASK_DECLINING_MODEL": {"values": ['greedy_online_episode']},
+        "MASK_DECLINING_THRESHOLD": {"values": [0.25, 0.5, 0.75]},
+        "MASK_DECLINING_MODEL": {"values": ["greedy_online_episode"]},
         "TOTAL_TIMESTEPS": {"values": [5_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
@@ -536,10 +537,11 @@ def sweep(search: str = ""):
         "SEED": {"values": [4]},
         "env.exp": {"values": ["preplay_test_big"]},
         "ALL_GOALS_TD": {"values": ["mb_peng_lambda"]},
-        "ALL_GOALS_COEFF": {"values": [1.0, .5]},
-        "DYNA_COEFF": {"values": [5.0, 2.0, 1.0]},
-        "SIM_PENG_TRACE_CUTTING": {"values": [True]},
-        "TARGET_UPDATE_INTERVAL": {"values": [1_000]},
+        "ALL_GOALS_COEFF": {"values": [1.0, 0.5]},
+        "DYNA_COEFF": {"values": [2.0, 1.0]},
+        "CURRICULUM_STRATEGY": {"values": ["half_uniform_half_far"]},
+        "SIM_PENG_TRACE_CUTTING": {"values": [True, False]},
+        #"TARGET_UPDATE_INTERVAL": {"values": [1_000]},
         "TOTAL_TIMESTEPS": {"values": [10_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],

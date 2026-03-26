@@ -649,7 +649,7 @@ class PreplayLossFn:
       "q_target": target_q_t,
       "target_q_values": target_preds.q_vals,
       "loss_rewards": rewards,
-      "lambda_": lambda_
+      "lambda": lambda_,
     }
     return batch_td_error, batch_loss_mean, metrics, log_info
 
@@ -1616,7 +1616,8 @@ class PreplayLossFn:
         ontask_lambda = jnp.where(
           ontask_on_policy[None],  # [1, total_sims] -> broadcast [S+1, total_sims]
           self.lambda_,  # scalar -> broadcast [S+1, total_sims]
-          (ontask_selector == all_t_a).astype(jnp.float32) * self.lambda_,  # [S+1, total_sims]
+          (ontask_selector == all_t_a).astype(jnp.float32)
+          * self.lambda_,  # [S+1, total_sims]
         )  # [S+1, total_sims]
       else:
         ontask_lambda = None
@@ -1654,7 +1655,8 @@ class PreplayLossFn:
         offtask_lambda = jnp.where(
           offtask_on_policy[None],  # [1, total_sims] -> broadcast [S+1, total_sims]
           self.lambda_,  # scalar -> broadcast [S+1, total_sims]
-          (offtask_selector == all_t_a).astype(jnp.float32) * self.lambda_,  # [S+1, total_sims]
+          (offtask_selector == all_t_a).astype(jnp.float32)
+          * self.lambda_,  # [S+1, total_sims]
         )  # [S+1, total_sims]
       else:
         offtask_lambda = None
@@ -3432,38 +3434,46 @@ def jaxmaze_learner_log_extra(
     return fig
 
   def plot_episode_grid(d):
-    """Grid of all batch episodes showing maze + trajectory arrows."""
+    """Grid of episode resets from a single B dim, showing curriculum positions."""
     if "online_all_batches" not in d:
       return None
     all_timesteps = d["online_all_batches"]["timesteps"]
     all_actions = d["online_all_batches"]["actions"]
-    B = len(all_timesteps.reward)
 
-    n_cols = ceil(B**0.5)
-    n_rows = ceil(B / n_cols)
+    # Use first B dimension and find all episode resets within it
+    ts_b = jax.tree_util.tree_map(lambda x: x[0], all_timesteps)
+    actions_b = np.array(all_actions[0])
+    nT = len(ts_b.reward)
+
+    is_first = np.array(ts_b.first())
+    ep_starts = list(np.where(is_first)[0])
+
+    # Skip the initial partial episode — first real reset is ep_starts[0]
+    # Each subsequent ep_start is a curriculum-selected reset
+    # Collect episodes: (ep_start, ep_end) pairs
+    episodes = []
+    for i, start in enumerate(ep_starts):
+      end = ep_starts[i + 1] if i + 1 < len(ep_starts) else nT
+      episodes.append((start, end))
+
+    n_eps = len(episodes)
+    if n_eps == 0:
+      return None
+
+    n_cols = min(n_eps, ceil(n_eps**0.5))
+    n_rows = ceil(n_eps / n_cols)
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows))
     if n_rows == 1 and n_cols == 1:
       axes = np.array([[axes]])
     elif n_rows == 1 or n_cols == 1:
       axes = axes.reshape(n_rows, n_cols)
 
-    for b in range(B):
-      row, col = divmod(b, n_cols)
+    maze_height, maze_width, _ = ts_b.state.grid[0].shape
+
+    for ep_i, (ep_start, ep_end) in enumerate(episodes):
+      row, col = divmod(ep_i, n_cols)
       ax = axes[row, col]
 
-      ts_b = jax.tree_util.tree_map(lambda x: x[b], all_timesteps)
-      actions_b = np.array(all_actions[b])
-      nT = len(ts_b.reward)
-
-      # Detect first episode
-      is_first = np.array(ts_b.first())
-      ep_starts = list(np.where(is_first)[0])
-      if not ep_starts or ep_starts[0] != 0:
-        ep_starts = [0] + ep_starts
-      ep_start = ep_starts[0]
-      ep_end = ep_starts[1] if len(ep_starts) > 1 else nT
-
-      maze_height, maze_width, _ = ts_b.state.grid[0].shape
       initial_state = jax.tree_util.tree_map(lambda x: x[ep_start], ts_b.state)
       img = render_fn(initial_state)
       ep_positions = jax.tree_util.tree_map(
@@ -3475,11 +3485,16 @@ def jaxmaze_learner_log_extra(
       )
       goal_name = task_object_to_name(ts_b.state.task_object[ep_start])
       total_reward = float(np.array(ts_b.reward[ep_start:ep_end]).sum())
-      ax.set_title(f"b{b} {goal_name} r={total_reward:.1f}", fontsize=9)
+      loc_idx = int(ts_b.state.curriculum_loc_idx[ep_start])
+      apos = ts_b.state.agent_pos[ep_start]
+      ax.set_title(
+        f"e{ep_i} {goal_name} r={total_reward:.1f} loc={loc_idx} pos=({int(apos[0])},{int(apos[1])})",
+        fontsize=8,
+      )
       ax.axis("off")
 
     # Hide unused axes
-    for idx in range(B, n_rows * n_cols):
+    for idx in range(n_eps, n_rows * n_cols):
       row, col = divmod(idx, n_cols)
       axes[row, col].set_visible(False)
 
