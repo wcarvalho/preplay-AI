@@ -649,7 +649,7 @@ class PreplayLossFn:
       "q_target": target_q_t,
       "target_q_values": target_preds.q_vals,
       "loss_rewards": rewards,
-      "lambda_": lambda_.mean()
+      "lambda_": lambda_
     }
     return batch_td_error, batch_loss_mean, metrics, log_info
 
@@ -1614,9 +1614,9 @@ class PreplayLossFn:
         )  # [total_sims]
         ontask_selector = jnp.argmax(ontask_q_on, axis=-1)  # [S+1, total_sims]
         ontask_lambda = jnp.where(
-          ontask_on_policy[None],  # [1, total_sims]
-          self.lambda_,
-          (ontask_selector == all_t_a) * self.lambda_,
+          ontask_on_policy[None],  # [1, total_sims] -> broadcast [S+1, total_sims]
+          self.lambda_,  # scalar -> broadcast [S+1, total_sims]
+          (ontask_selector == all_t_a).astype(jnp.float32) * self.lambda_,  # [S+1, total_sims]
         )  # [S+1, total_sims]
       else:
         ontask_lambda = None
@@ -1652,9 +1652,9 @@ class PreplayLossFn:
         )  # [total_sims]
         offtask_selector = jnp.argmax(offtask_q_on, axis=-1)  # [S+1, total_sims]
         offtask_lambda = jnp.where(
-          offtask_on_policy[None],  # [1, total_sims]
-          self.lambda_,
-          (offtask_selector == all_t_a) * self.lambda_,
+          offtask_on_policy[None],  # [1, total_sims] -> broadcast [S+1, total_sims]
+          self.lambda_,  # scalar -> broadcast [S+1, total_sims]
+          (offtask_selector == all_t_a).astype(jnp.float32) * self.lambda_,  # [S+1, total_sims]
         )  # [S+1, total_sims]
       else:
         offtask_lambda = None
