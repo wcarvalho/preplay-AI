@@ -538,12 +538,12 @@ def sweep(search: str = ""):
         "ALL_GOALS_TD": {"values": ["mb_peng_lambda"]},
         "ALL_GOALS_COEFF": {"values": [1.0, .5]},
         "DYNA_COEFF": {"values": [5.0, 2.0, 1.0]},
-        "SIM_PENG_TRACE_CUTTING": {"values": [True]},
+        "SIM_PENG_TRACE_CUTTING": {"values": [True, False]},
         "TARGET_UPDATE_INTERVAL": {"values": [1_000]},
         "TOTAL_TIMESTEPS": {"values": [10_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-search-1-distance-curriculum",
+      "group": "preplay-search-2-distance-curriculum",
     }
 
   elif search == "her":
