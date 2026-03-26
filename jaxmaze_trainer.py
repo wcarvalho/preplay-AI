@@ -523,7 +523,7 @@ def sweep(search: str = ""):
         "TOTAL_TIMESTEPS": {"values": [5_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-search-1-episode-masking",
+      "group": "preplay-search-2-episode-masking",
     }
   elif search == "preplay2":
     sweep_config = {
@@ -538,12 +538,13 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["preplay_test_big"]},
         #"TOTAL_BATCH_SIZE": {"values": [1280*2, 1280]},
         "TARGET_UPDATE_INTERVAL": {"values": [1_000]},
-        "MASK_DECLINING_THRESHOLD": {"values": [.25, .5, .75]},
-        "MASK_DECLINING_MODEL": {"values": ['']},
+        #"MASK_DECLINING_THRESHOLD": {"values": [.25, .5, .75]},
+        "TD_NORM_STYLE": {"values": ['symlog', 'per_goal']},
         "TOTAL_TIMESTEPS": {"values": [5_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "preplay-search-1-td-normalization",
+    }
 
   elif search == "her":
     sweep_config = {
