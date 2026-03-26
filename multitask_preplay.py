@@ -1075,6 +1075,88 @@ class PreplayLossFn:
         ag_log_info.update(extras)
       return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
 
+    elif self.all_goals_td == "mb_retrace":
+      # Retrace (multi-step) where on-policy, 1-step model where off-policy.
+      selector_actions = jnp.argmax(online_preds_g.q_vals, axis=-1)  # [T]
+      selector_a_is_online_a = selector_actions == actions  # [T]
+
+      # Lambda target with trace cutting: lambda=0 where off-policy
+      lambda_ = selector_a_is_online_a * self.all_goals_lambda  # [T]
+      target_q_t_online = losses.q_learning_lambda_target(
+        q_t=target_preds_g.q_vals[1:],  # [T-1, A]
+        r_t=rewards[1:],  # [T-1]
+        discount_t=discounts[1:],  # [T-1]
+        is_last_t=is_last[1:],  # [T-1]
+        a_t=selector_actions[1:],  # [T-1]
+        lambda_=lambda_[1:],  # [T-1]
+      )  # [T-1]
+      target_q_t_online = target_q_t_online * timestep.discount[:-1]  # [T-1]
+
+      # 1-step model-based targets
+      T = actions.shape[0]
+      h_t_online = online_preds_g.state  # [T, ...]
+      h_t_target = target_preds_g.state  # [T, ...]
+      target_q_t_model = jax.vmap(model_based_target_q)(
+        h_t_online,
+        h_t_target,
+        timestep_w_g,
+        selector_actions,
+        jax.random.split(key_grad, T),
+      )  # [T]
+      target_q_t_model = target_q_t_model[:-1] * timestep.discount[:-1]  # [T-1]
+
+      # Replacement: retrace where on-policy, model where off-policy
+      qa_tm1 = rlax.batched_index(
+        online_preds_g.q_vals[:-1], selector_actions[:-1]
+      )  # [T-1]
+      online_td = target_q_t_online - qa_tm1  # [T-1]
+      model_td = target_q_t_model - qa_tm1  # [T-1]
+
+      online_mask = selector_a_is_online_a[:-1].astype(jnp.float32)  # [T-1]
+      model_mask = 1.0 - online_mask  # [T-1]
+
+      online_loss = 0.5 * jnp.square(online_td) * online_mask * loss_mask[:-1]
+      model_loss = 0.5 * jnp.square(model_td) * model_mask * loss_mask[:-1]
+
+      ag_loss_per_t = (
+        self.all_goals_coeff * online_loss + dyna_coeff * model_loss
+      )  # [T-1]
+      ag_batch_loss = ag_loss_per_t.sum(0) / loss_mask[:-1].sum(0).clip(min=1)
+      ag_td_error = (online_td * online_mask + model_td * model_mask) * loss_mask[
+        :-1
+      ]  # [T-1]
+
+      target_tm1 = jnp.where(
+        selector_a_is_online_a[:-1], target_q_t_online, target_q_t_model
+      )  # [T-1]
+
+      ag_metrics = {
+        "0.q_loss": ag_loss_per_t.mean(),
+        "0.q_loss_online": online_loss.mean(),
+        "0.q_loss_model": model_loss.mean(),
+        "0.q_td": jnp.abs(ag_td_error).mean(),
+        "1.reward": rewards.mean(),
+      }
+      ag_log_info = {
+        "timesteps": timestep_w_g,
+        "actions": actions,
+        "td_errors": ag_td_error,
+        "non_terminal": timestep_w_g.discount,
+        "loss_mask": loss_mask,
+        "q_values": online_preds_g.q_vals,
+        "q_loss": ag_loss_per_t,
+        "q_target": target_tm1,
+        "target_q_values": target_preds_g.q_vals,  # [T, A]
+        "behavior_q_values": online_preds.q_vals,
+        "loss_rewards": rewards,
+        "target_q_t_lambda": target_q_t_online,
+        "target_q_t_model": target_q_t_model,
+      }
+      if self.make_log_extras is not None:
+        extras = self.make_log_extras(timestep_w_g, goal=new_goal)
+        ag_log_info.update(extras)
+      return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
+
     elif "mb_peng_lambda" in self.all_goals_td:
       selector_actions = jnp.argmax(online_preds_g.q_vals, axis=-1)
       selector_a_is_online_a = selector_actions == actions
