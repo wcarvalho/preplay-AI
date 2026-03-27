@@ -540,11 +540,11 @@ def sweep(search: str = ""):
         "ALL_GOALS_COEFF": {"values": [1.0, .5]},
         "DYNA_COEFF": {"values": [2.0, 1.0]},
         "SIM_PENG_TRACE_CUTTING": {"values": [True, False]},
-        "TARGET_UPDATE_INTERVAL": {"values": [1_000]},
+        "CURRICULUM_STRATEGY": {"values": ['half_uniform_half_far']},
         "TOTAL_TIMESTEPS": {"values": [10_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-search-2-distance-curriculum",
+      "group": "preplay-search-3-distance-curriculum",
     }
 
   elif search == "her":
