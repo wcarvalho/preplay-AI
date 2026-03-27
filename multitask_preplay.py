@@ -526,6 +526,10 @@ class PreplayLossFn:
   keep_greedy_aligned: bool = False  # OR with greedy(on)==greedy(off)
   all_goals_dyna_coeff: float = None  # None → use all_goals_coeff
   td_norm_style: str = "none"  # "none", "symlog", "per_goal", "symlog+per_goal"
+  cql_alpha: float = 0.0  # CQL(H) regularizer coefficient; 0.0 = disabled
+  cql_temperature: float = (
+    1.0  # CQL logsumexp temperature; lower = sharper penalty on max Q
+  )
 
   def __call__(
     self,
@@ -785,6 +789,24 @@ class PreplayLossFn:
 
     return td_error, batch_loss, all_metrics
 
+  def _cql_penalty(self, q_vals, actions, mask):
+    """CQL(H) penalty: logsumexp(Q) - Q(s, a_data), masked and scaled.
+
+    Args:
+      q_vals: [T, A] online Q-values
+      actions: [T] actions taken in data
+      mask: [T] loss mask
+    Returns:
+      scaled_penalty: [T] alpha-scaled CQL penalty (for adding to loss)
+      raw_mean: scalar unscaled mean penalty (for logging)
+    """
+    if self.cql_alpha == 0.0:
+      return jnp.zeros_like(mask), 0.0
+    penalty = losses.cql_loss(q_vals, actions, self.cql_temperature)  # [T]
+    masked = penalty * mask
+    raw_mean = masked.sum() / mask.sum().clip(min=1)
+    return self.cql_alpha * masked, raw_mean
+
   def all_goals_loss_fn(
     self,
     new_goal,
@@ -882,14 +904,14 @@ class PreplayLossFn:
         params,
         next_rnn_out_online,
         new_goal,
-        method=self.network.main_task_q_fn,
+        method=self.network.off_task_q_fn,
       )
       selector_action = jnp.argmax(q_online, -1)
       q_target = self.network.apply(
         target_params,
         next_rnn_out_target,
         new_goal,
-        method=self.network.main_task_q_fn,
+        method=self.network.off_task_q_fn,
       )
       max_q = rlax.batched_index(q_target, selector_action)
       return reward + next_timestep.discount * self.discount * max_q
@@ -948,6 +970,14 @@ class PreplayLossFn:
       ag_td_error = target_tm1 - qa_tm1  # [T-1]
 
     elif self.all_goals_td == "qlearning":
+      # Peng trace cutting: cut lambda when greedy != behavior action
+      if self.peng_trace_cutting:
+        selector_actions_g = jnp.argmax(online_preds_g.q_vals, axis=-1)  # [T]
+        selector_a_is_online_a = selector_actions_g == actions  # [T]
+        ag_lambda = selector_a_is_online_a * self.all_goals_lambda  # [T]
+      else:
+        ag_lambda = self.all_goals_lambda
+
       ag_td_error, ag_batch_loss, ag_metrics, ag_log_info = self.loss_fn(
         timestep=timestep_w_g,  # [T, ...]
         online_preds=online_preds_g,  # .q_vals: [T, A]
@@ -957,9 +987,21 @@ class PreplayLossFn:
         is_last=make_float(timestep.last()),  # [T]
         non_terminal=timestep.discount,  # [T]
         loss_mask=is_truncated(timestep),  # [T]
-        lambda_override=self.all_goals_lambda,
+        lambda_override=ag_lambda,
       )  # returns [T-1], [N], dict, dict
       ag_batch_loss = self.all_goals_coeff * ag_batch_loss
+
+      # CQL regularizer
+      ql_mask = is_truncated(timestep)[:-1]  # [T-1]
+      cql_per_t, cql_mean = self._cql_penalty(
+        online_preds_g.q_vals[:-1],  # [T-1, A]
+        actions[:-1],  # [T-1]
+        ql_mask,  # [T-1]
+      )
+      cql_batch = cql_per_t.sum() / ql_mask.sum().clip(min=1)
+      ag_batch_loss = ag_batch_loss + cql_batch
+      ag_metrics["0.cql_penalty"] = cql_mean
+
       if self.make_log_extras is not None:
         extras = self.make_log_extras(timestep_w_g, goal=new_goal)
         ag_log_info.update(extras)
@@ -1279,6 +1321,15 @@ class PreplayLossFn:
         ag_loss_per_t = (
           self.all_goals_coeff * online_loss + dyna_coeff * model_loss
         )  # [T-1]
+
+        # CQL regularizer
+        cql_per_t, cql_mean = self._cql_penalty(
+          online_preds_g.q_vals[:-1],  # [T-1, A]
+          actions[:-1],  # [T-1]
+          effective_mask,  # [T-1]
+        )
+        ag_loss_per_t = ag_loss_per_t + cql_per_t  # [T-1]
+
         ag_batch_loss = ag_loss_per_t.sum(0) / effective_mask.sum(0).clip(min=1)
         ag_td_error = (
           online_td * online_mask + model_td * model_mask
@@ -1294,12 +1345,24 @@ class PreplayLossFn:
           "0.q_loss_online": online_loss.mean(),
           "0.q_loss_model": model_loss.mean(),
           "0.q_td": jnp.abs(ag_td_error).mean(),
+          "0.greedy_aligned_frac": selector_a_is_online_a[:-1]
+          .astype(jnp.float32)
+          .mean(),
+          "0.model_usage_frac": (model_mask * effective_mask).sum()
+          / effective_mask.sum().clip(min=1),
+          "0.target_gap_model_lambda": (
+            (target_q_t_model - target_q_t_online) * effective_mask
+          ).sum()
+          / effective_mask.sum().clip(min=1),
           "0.declining_mask_frac": (1.0 - td_loss_mask).mean(),
+          "0.cql_penalty": cql_mean,
           "1.reward": rewards.mean(),
         }
         ag_log_info = {
           "timesteps": timestep_w_g,
           "actions": actions,
+          "selector_actions": selector_actions,
+          "selector_aligned": selector_a_is_online_a,
           "td_errors": ag_td_error,
           "non_terminal": timestep_w_g.discount,
           "loss_mask": loss_mask,
@@ -1312,6 +1375,8 @@ class PreplayLossFn:
           "target_q_t_lambda": target_q_t_online,
           "target_q_t_model": target_q_t_model,
           "td_mask": td_loss_mask,
+          "online_mask": online_mask,
+          "model_mask": model_mask,
         }
         if self.make_log_extras is not None:
           extras = self.make_log_extras(timestep_w_g, goal=new_goal)
@@ -1404,9 +1469,19 @@ class PreplayLossFn:
       / loss_mask[:-1].sum(0)
     )
 
+    # CQL regularizer
+    cql_per_t, cql_mean = self._cql_penalty(
+      online_preds_g.q_vals[:-1],  # [T-1, A]
+      actions[:-1],  # [T-1]
+      loss_mask[:-1],  # [T-1]
+    )
+    cql_batch = cql_per_t.sum() / loss_mask[:-1].sum().clip(min=1)
+    ag_batch_loss = ag_batch_loss + cql_batch
+
     ag_metrics = {
       "0.q_loss": ag_loss_per_t.mean(),
       "0.q_td": jnp.abs(ag_td_error).mean(),
+      "0.cql_penalty": cql_mean,
       "1.reward": rewards.mean(),
     }
     ag_log_info = {
@@ -1833,6 +1908,8 @@ def make_loss_fn_class(config, **kwargs) -> PreplayLossFn:
     keep_greedy_aligned=config.get("KEEP_GREEDY_ALIGNED", False),
     all_goals_dyna_coeff=config.get("ALL_GOALS_DYNA_COEFF", None),
     td_norm_style=config.get("TD_NORM_STYLE", "none"),
+    cql_alpha=config.get("CQL_ALPHA", 0.0),
+    cql_temperature=config.get("CQL_TEMPERATURE", 1.0),
     **kwargs,
   )
 
