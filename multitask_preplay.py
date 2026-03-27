@@ -860,7 +860,14 @@ class PreplayLossFn:
     # Would need off-task-specific discounts if episodes could continue after on-task pickup.
     rewards = make_float(goal_rewards) - self.step_cost
     discounts = timestep.discount * self.discount
-    loss_mask = is_truncated(timestep)
+    # Mask out timesteps where new_goal matches the on-task goal
+    # vmap over T because goal can change within an episode
+    ontask_goals = jax.vmap(lambda ts: self.get_main_goal(ts)[0])(timestep)  # [T, G]
+    different_goal = jnp.any(new_goal[None] != ontask_goals, axis=-1).astype(
+      jnp.float32
+    )  # [T]
+
+    loss_mask = is_truncated(timestep) * different_goal  # [T]
     is_last = make_float(timestep.last())
 
     # Model-based 1-step target: r + γ Q(s', argmax_a' Q_online(s', a'), g)
@@ -986,13 +993,13 @@ class PreplayLossFn:
         rewards=goal_rewards,  # [T]
         is_last=make_float(timestep.last()),  # [T]
         non_terminal=timestep.discount,  # [T]
-        loss_mask=is_truncated(timestep),  # [T]
+        loss_mask=loss_mask,  # [T]
         lambda_override=ag_lambda,
       )  # returns [T-1], [N], dict, dict
       ag_batch_loss = self.all_goals_coeff * ag_batch_loss
 
       # CQL regularizer
-      ql_mask = is_truncated(timestep)[:-1]  # [T-1]
+      ql_mask = loss_mask[:-1]  # [T-1]
       cql_per_t, cql_mean = self._cql_penalty(
         online_preds_g.q_vals[:-1],  # [T-1, A]
         actions[:-1],  # [T-1]
