@@ -534,18 +534,18 @@ def sweep(search: str = ""):
       },
       "parameters": {
         "ALG": {"values": ["preplay"]},
-        "SEED": {"values": [4]},
-        "env.exp": {"values": ["preplay_test_big"]},
-        "ALL_GOALS_TD": {"values": ["mb_peng_lambda", "qlearning"]},
+        "SEED": {"values": [3]},
+        "env.exp": {"values": ["exp4", "two_paths"]},
+        "ALL_GOALS_TD": {"values": ["qlearning", "mb_peng_lambda"]},
         "ALL_GOALS_COEFF": {"values": [1.0]},
         "DYNA_COEFF": {"values": [2.0]},
-        "CQL_ALPHA": {"values": [1e-4, 1e-5, 1e-6]},
-        "CQL_TEMPERATURE": {"values": [1, 1e-1]},
+        "CQL_ALPHA": {"values": [1e-3, 1e-4]},
+        #"CQL_TEMPERATURE": {"values": [1, 1e-1]},
         "TARGET_UPDATE_INTERVAL": {"values": [1_000]},
-        "TOTAL_TIMESTEPS": {"values": [10_000_000]},
+        "TOTAL_TIMESTEPS": {"values": [50_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-search-cql+-2",
+      "group": "preplay-search-cql+-3",
     }
 
   elif search == "her":
