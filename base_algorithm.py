@@ -1425,13 +1425,21 @@ def make_train(
 
       # --- Save params periodically (NUM_CHECKPOINTS, default 20 = every 5%) ---
       if save_path is not None and chunk % checkpoint_every == 0:
-        save_training_state(
+
+        def _save_callback(params, n_updates):
+          save_training_state(
+            params,
+            config,
+            save_path,
+            config["ALG"],
+            idx=chunk // checkpoint_every,
+            n_updates=int(n_updates),
+          )
+
+        jax.debug.callback(
+          _save_callback,
           runner_state.train_state.params,
-          config,
-          save_path,
-          config["ALG"],
-          idx=chunk // checkpoint_every,
-          n_updates=int(runner_state.train_state.n_updates),
+          runner_state.train_state.n_updates,
         )
 
     # Final eval
@@ -1439,12 +1447,16 @@ def make_train(
 
     # Final save
     if save_path is not None:
-      save_training_state(
-        runner_state.train_state.params,
-        config,
-        save_path,
-        config["ALG"],
-      )
+
+      def _save_final_callback(params):
+        save_training_state(
+          params,
+          config,
+          save_path,
+          config["ALG"],
+        )
+
+      jax.debug.callback(_save_final_callback, runner_state.train_state.params)
 
     return {"runner_state": runner_state}
 

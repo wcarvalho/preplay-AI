@@ -389,7 +389,7 @@ def run_single(config: dict, save_path: str = None):
     if base_name == "vbb":
       base_maker = vbb
     elif base_name == "base":
-      import archive.base_algorithm as base_algorithm
+      import base_algorithm
 
       base_maker = base_algorithm
     elif base_name == "base2":

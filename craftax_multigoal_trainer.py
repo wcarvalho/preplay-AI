@@ -399,7 +399,7 @@ def run_single(config: dict, save_path: str = None):
       vmap_env=vmap_env,
     )
   elif config["ALG"] == "her":
-    train_fn = base_algorithm.make_train(
+    train_fn = vbb.make_train(
       config=config,
       save_path=save_path,
       env=vec_env,

@@ -417,13 +417,13 @@ def default_craftax_log_fn(trajectory, update_step, config):
       info,
     )
 
-    def callback(metric, achievements, update_step, config):
+    def callback(metric, achievements, update_step):
       if update_step % one_twenth != 0:
         return
       to_log = create_log_dict(metric, achievements, config)
       batch_log(update_step, to_log, config)
 
-    jax.debug.callback(callback, metric, achievements, update_step, config)
+    jax.debug.callback(callback, metric, achievements, update_step)
 
   jax.lax.cond(
     should_save,
@@ -547,7 +547,7 @@ def run_single(config: dict, save_path: str = None):
       model_env=env,
       make_logger=partial(
         make_logger,
-        #learner_log_extra=multitask_preplay.learner_log_extra,
+        # learner_log_extra=multitask_preplay.learner_log_extra,
       ),
       train_env_params=env_params,
       test_env_params=test_env_params,
@@ -806,7 +806,7 @@ def sweep(search: str = ""):
   #    "parameters": {
   #      "ALG": {"values": ["dyna"]},
   #      "NUM_ENV_SEEDS": {"values": [512]},
-  #      "SEED": {"values": list(range(1, 5))},
+  #      "SEED": {"values": list(range(5))},
   #      "BACKTRACKING": {"values": [False]},
   #    },
   #    "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
@@ -818,7 +818,7 @@ def sweep(search: str = ""):
   #    "parameters": {
   #      "ALG": {"values": ["preplay"]},
   #      "NUM_ENV_SEEDS": {"values": [512]},
-  #      "SEED": {"values": list(range(1, 5))},
+  #      "SEED": {"values": list(range(5))},
   #      "BACKTRACKING": {"values": [False]},
   #    },
   #    "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
@@ -830,7 +830,7 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "NUM_ENV_SEEDS": {"values": [512]},
-        "SEED": {"values": list(range(1, 5))},
+        "SEED": {"values": list(range(5))},
         "MAIN_COEFF": {"values": [0.0]},
         # "OFFTASK_COEFF": {"values": [1.]},
       },
@@ -843,7 +843,7 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "NUM_ENV_SEEDS": {"values": [512]},
-        "SEED": {"values": list(range(1, 5))},
+        "SEED": {"values": list(range(5))},
         "MAINQ_COEFF": {"values": [0.0]},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
@@ -859,7 +859,7 @@ def sweep(search: str = ""):
       "metric": metric,
       "parameters": {
         "NUM_ENV_SEEDS": {"values": [512]},
-        "SEED": {"values": list(range(1, 5))},
+        "SEED": {"values": list(range(5))},
         "USE_PRECONDITION": {"values": [False]},
       },
       "overrides": ["alg=qlearning_craftax", "rlenv=craftax-10m", "user=wilka"],
@@ -871,7 +871,7 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["qlearning_sf_aux"]},
         "NUM_ENV_SEEDS": {"values": [512]},
-        "SEED": {"values": list(range(1, 5))},
+        "SEED": {"values": list(range(5))},
         "USE_PRECONDITION": {"values": [False]},
       },
       "overrides": ["alg=ql-sf", "rlenv=craftax-10m", "user=wilka"],
@@ -883,7 +883,7 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["dyna"]},
         "NUM_ENV_SEEDS": {"values": [512]},
-        "SEED": {"values": list(range(1, 5))},
+        "SEED": {"values": list(range(5))},
         "USE_PRECONDITION": {"values": [False]},
       },
       "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
@@ -895,7 +895,7 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "NUM_ENV_SEEDS": {"values": [512]},
-        "SEED": {"values": list(range(1, 5))},
+        "SEED": {"values": list(range(5))},
         "USE_PRECONDITION": {"values": [False]},
       },
       "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
