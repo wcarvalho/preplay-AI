@@ -8,13 +8,13 @@ HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue crafta
   app.parallel=none \
   app.debug=True \
   app.wandb=False \
-  app.search=preplay-final
+  app.search=her-final
 
 RUNNING ON SLURM:
 RL_RESULTS_DIR=/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results \
 JAX_PLATFORMS=cpu python craftax_multigoal_trainer.py \
   app.parallel=slurm \
-  app.search=usfa
+  app.search=her-final
 """
 
 import os

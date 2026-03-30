@@ -7,14 +7,14 @@ HYDRA_FULL_ERROR=1 \
 RL_RESULTS_DIR=/tmp/rl_results \
 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue jaxmaze_trainer.py \
   app.debug=True \
-  app.wandb=True \
+  app.wandb=False \
   app.search=preplay
 
 RUNNING ON SLURM:
 RL_RESULTS_DIR=/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results \
 JAX_PLATFORMS=cpu python jaxmaze_trainer.py \
   app.parallel=slurm \
-  app.search=her2
+  app.search=her-test-small
 """
 
 from typing import Any, Callable, Dict, Union, Optional, Tuple
