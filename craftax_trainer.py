@@ -641,7 +641,7 @@ def sweep(search: str = ""):
         "NUM_ENV_SEEDS": {"values": [0]},
         "SEED": {"values": list(range(1, 2))},
       },
-      "overrides": ["alg=ql", "rlenv=craftax-10m", "user=wilka"],
+      "overrides": ["alg=qlearning_craftax", "rlenv=craftax-10m", "user=wilka"],
       "group": "ql-24-achievable",
     }
   elif search == "ql_sf":
@@ -656,7 +656,7 @@ def sweep(search: str = ""):
         "AUX_COEFF": {"values": [1e-6, 1e-7]},
         "USE_PRECONDITION": {"values": [True]},
       },
-      "overrides": ["alg=ql", "rlenv=craftax-10m", "user=wilka"],
+      "overrides": ["alg=qlearning_craftax", "rlenv=craftax-10m", "user=wilka"],
       "group": "ql-sf-16-achievable",
     }
   elif search == "usfa":
@@ -761,7 +761,7 @@ def sweep(search: str = ""):
         "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512]},
         "SEED": {"values": list(range(1, 6))},
       },
-      "overrides": ["alg=ql", "rlenv=craftax-10m", "user=wilka"],
+      "overrides": ["alg=qlearning_craftax", "rlenv=craftax-10m", "user=wilka"],
       "group": "ql-final-5",
     }
   elif search == "ql_sf-final":
@@ -862,7 +862,7 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 5))},
         "USE_PRECONDITION": {"values": [False]},
       },
-      "overrides": ["alg=ql", "rlenv=craftax-10m", "user=wilka"],
+      "overrides": ["alg=qlearning_craftax", "rlenv=craftax-10m", "user=wilka"],
       "group": "ql-precondition-1",
     }
   elif search == "ql_sf-precondition":

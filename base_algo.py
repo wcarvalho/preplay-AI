@@ -1385,16 +1385,16 @@ def make_train(
       )
 
       #########################################################
-      # 5. Every 20% of training, save parameters
+      # 5. Periodically save parameters (NUM_CHECKPOINTS, default 20 = every 5%)
       #########################################################
-      one_tenth = config["NUM_UPDATES"] // 5
+      checkpoint_interval = config["NUM_UPDATES"] // config.get("NUM_CHECKPOINTS", 20)
       if save_path is not None:
 
         def save_params(params, n_updates):
-          idx = int(n_updates // one_tenth)
+          idx = int(n_updates // checkpoint_interval)
           save_training_state(params, config, save_path, config["ALG"], idx, n_updates)
 
-        should_save = (train_state.n_updates % one_tenth == 0) & (
+        should_save = (train_state.n_updates % checkpoint_interval == 0) & (
           train_state.n_updates > 0
         )
 

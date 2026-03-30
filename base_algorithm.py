@@ -1321,6 +1321,8 @@ def make_train(
     # Adjust num_chunks to not exceed total steps
     num_chunks = num_train_steps // inner_steps
 
+    checkpoint_every = max(1, num_chunks // config.get("NUM_CHECKPOINTS", 20))
+
     print(
       f"Training: {num_train_steps} updates in {num_chunks} chunks of {inner_steps} steps"
     )
@@ -1421,14 +1423,14 @@ def make_train(
       if online_trajectory_log_fn is not None:
         online_trajectory_log_fn(last_traj, runner_state.train_state.n_updates, config)
 
-      # --- Save params every 10 chunks (~10% of training) ---
-      if save_path is not None and chunk % 10 == 0:
+      # --- Save params periodically (NUM_CHECKPOINTS, default 20 = every 5%) ---
+      if save_path is not None and chunk % checkpoint_every == 0:
         save_training_state(
           runner_state.train_state.params,
           config,
           save_path,
           config["ALG"],
-          idx=chunk // 10,
+          idx=chunk // checkpoint_every,
           n_updates=int(runner_state.train_state.n_updates),
         )
 

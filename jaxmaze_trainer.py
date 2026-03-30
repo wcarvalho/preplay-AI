@@ -441,26 +441,24 @@ def run_single(config: dict, save_path: str = None):
 
 def sweep(search: str = ""):
   search = search or "ql"
+  base = {"metric": {
+          "name": "evaluator_performance/0.0 avg_episode_return",
+          "goal": "maximize",
+        }}
   if search == "ql":
     sweep_config = {
-      "metric": {
-        "name": "evaluator_performance/0.0 avg_episode_return",
-        "goal": "maximize",
-      },
+      **base,
       "parameters": {
         "SEED": {"values": list(range(1))},
         "env.exp": {"values": ["exp4"]},
         "NUM_STARTING_LOCS": {"values": [40, 50]},
       },
-      "overrides": ["alg=ql", "rlenv=jaxmaze", "user=wilka"],
+      "overrides": ["alg=qlearning_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "ql-12-test",
     }
   elif search == "ql2":
     sweep_config = {
-      "metric": {
-        "name": "evaluator_performance/0.0 avg_episode_return",
-        "goal": "maximize",
-      },
+      **base,
       "parameters": {
         "SEED": {"values": list(range(1))},
         "env.exp": {"values": ["exp4"]},
@@ -469,15 +467,12 @@ def sweep(search: str = ""):
         "NUM_EMBED_LAYERS": {"values": [1, 0]},
         # "AGENT_RNN_DIM": {"values": [1024]},
       },
-      "overrides": ["alg=ql", "rlenv=jaxmaze", "user=wilka"],
+      "overrides": ["alg=qlearning_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "ql-11-fixed-obs-large-rnn-cat",
     }
   elif search == "usfa":
     sweep_config = {
-      "metric": {
-        "name": "evaluator_performance/0.0 avg_episode_return",
-        "goal": "maximize",
-      },
+      **base,
       "parameters": {
         "SEED": {"values": list(range(1, 2))},
         "env.exp": {"values": ["exp4"]},
@@ -485,15 +480,12 @@ def sweep(search: str = ""):
         "LEARN_VECTORS": {"values": ["TRAIN", "ALL_TASKS"]},
         # "VIS_COEFF": {"values": [0.0, 0.1]},
       },
-      "overrides": ["alg=usfa", "rlenv=jaxmaze", "user=wilka"],
+      "overrides": ["alg=usfa_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "usfa-landmark-3",
     }
   elif search == "dyna":
     sweep_config = {
-      "metric": {
-        "name": "evaluator_performance/0.0 avg_episode_return",
-        "goal": "maximize",
-      },
+      **base,
       "parameters": {
         "ALG": {"values": ["dyna"]},
         "SEED": {"values": list(range(1))},
@@ -503,15 +495,12 @@ def sweep(search: str = ""):
         # "OFFTASK_SIMULATION": {"values": [False]},
         # "TOTAL_TIMESTEPS": {"values": [100_000_000]},
       },
-      "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
+      "overrides": ["alg=dyna_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "dyna-new-4",
     }
   elif search == "preplay":
     sweep_config = {
-      "metric": {
-        "name": "evaluator_performance/0.0 avg_episode_return",
-        "goal": "maximize",
-      },
+      **base,
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [2]},
@@ -528,33 +517,24 @@ def sweep(search: str = ""):
     }
   elif search == "preplay2":
     sweep_config = {
-      "metric": {
-        "name": "evaluator_performance/0.0 avg_episode_return",
-        "goal": "maximize",
-      },
+      **base,
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": [4]},
         "env.exp": {"values": ["preplay_test_big"]},
-        "ALL_GOALS_TD": {"values": ["mb_peng_lambda", "qlearning"]},
         "ALL_GOALS_COEFF": {"values": [1.0]},
         "DYNA_COEFF": {"values": [2.0]},
         "CQL_ALPHA": {"values": [1, 1e-1, 1e-2]},
         "CQL_TEMPERATURE": {"values": [1, 1e-1]},
-        "SIM_PENG_TRACE_CUTTING": {"values": [True]},
         "TARGET_UPDATE_INTERVAL": {"values": [1_000]},
         "TOTAL_TIMESTEPS": {"values": [10_000_000]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "preplay-search-2-distance-curriculum",
     }
-
   elif search == "her":
     sweep_config = {
-      "metric": {
-        "name": "evaluator_performance/0.0 avg_episode_return",
-        "goal": "maximize",
-      },
+      **base,
       "parameters": {
         "ALG": {"values": ["her"]},
         "SEED": {"values": [1]},
@@ -566,10 +546,7 @@ def sweep(search: str = ""):
     }
   elif search == "her2":
     sweep_config = {
-      "metric": {
-        "name": "evaluator_performance/0.0 avg_episode_return",
-        "goal": "maximize",
-      },
+      **base,
       "parameters": {
         "ALG": {"values": ["her"]},
         "SEED": {"values": [3]},
@@ -579,87 +556,54 @@ def sweep(search: str = ""):
       "group": "her-debug-2",
     }
 
-  # elif search == "dynaq_shared":
-  #  sweep_config = {
-  #    "metric": {
-  #      "name": "evaluator_performance/0.0 avg_episode_return",
-  #      "goal": "maximize",
-  #    },
-  #    "parameters": {
-  #      "ALG": {"values": ["dynaq_shared"]},
-  #      "SEED": {"values": list(range(1, 2))},
-  #      "env.exp": {"values": ["exp4"]},
-  #      "GAMMA": {"values": [0.99, 0.992]},
-  #      "STEP_COST": {"values": [0.0001]},
-  #      "NUM_Q_LAYERS": {"values": [1, 2, 3]},
-  #      "Q_HIDDEN_DIM": {"values": [512, 1024]},
-  #    },
-  #    "overrides": ["alg=preplay", "rlenv=jaxmaze", "user=wilka"],
-  #    "group": "dynaq-big-6",
-  #  }
   # =================================================================
   # final
   # =================================================================
   elif search == "ql-final":
     sweep_config = {
-      "metric": {
-        "name": "evaluator_performance/0.0 avg_episode_return",
-        "goal": "maximize",
-      },
+      **base,
       "parameters": {
         "SEED": {"values": list(range(1, 11))},
         "env.exp": {"values": ["exp4"]},
       },
-      "overrides": ["alg=ql", "rlenv=jaxmaze", "user=wilka"],
-      "group": "ql-final-epsilon-1",
-    }
-  elif search == "usfa-final":
-    sweep_config = {
-      "metric": {
-        "name": "evaluator_performance/0.0 avg_episode_return",
-        "goal": "maximize",
-      },
-      "parameters": {
-        "SEED": {"values": list(range(1, 11))},
-        "env.exp": {"values": ["exp4"]},
-      },
-      "overrides": ["alg=usfa", "rlenv=jaxmaze", "user=wilka"],
-      "group": "usfa-final-epsilon-1",
-    }
-  elif search == "her-final":
-    sweep_config = {
-      "metric": {
-        "name": "evaluator_performance/0.0 avg_episode_return",
-        "goal": "maximize",
-      },
-      "parameters": {
-        "ALG": {"values": ["her"]},
-        "SEED": {"values": list(range(1, 11))},
-        "env.exp": {"values": ["exp4"]},
-      },
-      "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-final-epsilon-1",
+      "overrides": ["alg=qlearning_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
+      "group": "ql-pnas-revision-1",
     }
   elif search == "dyna-final":
     sweep_config = {
-      "metric": {
-        "name": "evaluator_performance/0.0 avg_episode_return",
-        "goal": "maximize",
-      },
+        **base,
+        "parameters": {
+            "ALG": {"values": ["dyna"]},
+            "SEED": {"values": list(range(1, 11))},
+            "env.exp": {"values": ["exp4"]},
+        },
+        "overrides": ["alg=dyna_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
+        "group": "dyna-pnas-revision-1",
+    }
+  elif search == "her-final":
+    sweep_config = {
+        **base,
+        "parameters": {
+            "ALG": {"values": ["her"]},
+            "SEED": {"values": list(range(1, 11))},
+            "env.exp": {"values": ["exp4"]},
+        },
+        "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
+        "group": "her-pnas-revision-1",
+    }
+  elif search == "usfa-final":
+    sweep_config = {
+      **base,
       "parameters": {
-        "ALG": {"values": ["dyna"]},
         "SEED": {"values": list(range(1, 11))},
         "env.exp": {"values": ["exp4"]},
       },
-      "overrides": ["alg=dyna_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "dyna-final-epsilon-1",
+      "overrides": ["alg=usfa_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
+      "group": "usfa-pnas-revision-1",
     }
   elif search == "preplay-final":
     sweep_config = {
-      "metric": {
-        "name": "evaluator_performance/0.0 avg_episode_return",
-        "goal": "maximize",
-      },
+      **base,
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": list(range(1, 11))},
@@ -669,12 +613,9 @@ def sweep(search: str = ""):
       "group": "preplay-final-epsilon-1",
     }
 
-  elif search == "preplay-ablation":
+  elif search == "preplay-policy-ablation":
     sweep_config = {
-      "metric": {
-        "name": "evaluator_performance/0.0 avg_episode_return",
-        "goal": "maximize",
-      },
+      **base,
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": list(range(1, 5))},
@@ -684,16 +625,50 @@ def sweep(search: str = ""):
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "preplay-ablation-rotations-5",
     }
+  elif search == "preplay-all-goals-ablation":
+    sweep_config = {
+        **base,
+        "parameters": {
+            "ALG": {"values": ["preplay"]},
+            "SEED": {"values": list(range(5))},
+            "ALL_GOALS_COEFF": {"values": [0.0]},
+            "env.exp": {"values": ["exp4"]},
+        },
+        "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
+        "group": "preplay-ablation-rotations-5",
+    }
+  elif search == "preplay-peng-ablation":
+    sweep_config = {
+        **base,
+        "parameters": {
+            "ALG": {"values": ["preplay"]},
+            "SEED": {"values": list(range(5))},
+            "OFFTASK_USE_PENG": {"values": [False]},
+            "env.exp": {"values": ["exp4"]},
+        },
+        "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
+        "group": "preplay-ablation-rotations-5",
+    }
+  elif search == "preplay-cql-ablation":
+    sweep_config = {
+        **base,
+        "parameters": {
+            "ALG": {"values": ["preplay"]},
+            "SEED": {"values": list(range(5))},
+            "CQL_ALPHA": {"values": [0.0]},
+            "env.exp": {"values": ["exp4"]},
+        },
+        "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
+        "group": "preplay-ablation-rotations-5",
+    }
   elif search == "her-test-small":
     sweep_config = {
-      "metric": {
-        "name": "evaluator_performance/0.0 avg_episode_return",
-        "goal": "maximize",
-      },
+      **base,
       "parameters": {
         "ALG": {"values": ["her"]},
-        "SEED": {"values": list(range(3, 7))},
+        "SEED": {"values": list(range(5))},
         "TOTAL_TIMESTEPS": {"values": [10_000_000]},
+        "ALL_GOALS_COEFF": {"values": [0.0]},
         "env.exp": {"values": ["her_test_small"]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
@@ -701,15 +676,12 @@ def sweep(search: str = ""):
     }
   elif search == "her-test-big":
     sweep_config = {
-      "metric": {
-        "name": "evaluator_performance/0.0 avg_episode_return",
-        "goal": "maximize",
-      },
+      **base,
       "parameters": {
         "ALG": {"values": ["her"]},
         "SEED": {"values": list(range(5))},
         "ALL_GOALS_COEFF": {"values": [0.0, 1.0]},
-        "TOTAL_TIMESTEPS": {"values": [30_000_000]},
+        "TOTAL_TIMESTEPS": {"values": [15_000_000]},
         "env.exp": {"values": ["her_test_big"]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
