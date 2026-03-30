@@ -38,8 +38,8 @@ import rlax
 import wandb
 from flax import struct
 from gymnax.environments import environment
-from base_algo import TimeStep
-import base_algo as base
+from base_simple import TimeStep
+import base_simple as base
 import losses
 
 make_optimizer = base.make_optimizer
@@ -928,148 +928,6 @@ def create_data_plots(d_, reward_info, is_her=False, subfig=None, goal_index=-1)
   return fig1, axes1, fig2, axes2
 
 
-def jaxmaze_learner_log_fn_old(
-  data: dict,
-  config: dict,
-  action_names: dict,
-  render_fn: Callable,
-  extract_task_info: Callable[[TimeStep], flax.struct.PyTreeNode] = lambda t: t,
-  get_task_name: Callable = lambda t: "Task",
-):
-  def plot_individual(d, setting: str):
-    from math import ceil
-
-    is_her = setting == "her"
-    # [B, T, ...] --> [T, ...]
-    d_ = jax.tree_util.tree_map(lambda x: x[0], d)
-    reward_info = d_["reward_info"]
-
-    # Compute image sequence info first for layout
-    timesteps: TimeStep = d_["timesteps"]
-    nT = len(timesteps.reward)
-    n_episode_steps = min(nT, config.get("MAX_EPISODE_LOG_LEN", 40))
-
-    ncols_img = 5
-    n_image_rows = ceil(n_episode_steps / ncols_img)
-
-    # Create combined figure with subfigures
-    n_cols = 2 if is_her else 1
-    width = 0.3
-    height = 2
-    fig_width = max(2, int(width * nT))
-
-    # Use maze dimensions to compute tight image cell sizes
-    maze_height, maze_width, _ = timesteps.state.grid[0].shape
-    img_cell_height = maze_height / 10.0  # scale down for figure inches
-    img_cell_width = maze_width / 10.0
-    row_height_img = img_cell_height * 2
-    top_height = height * 3
-    bottom_height = row_height_img * n_image_rows
-
-    fig_combined = plt.figure(
-      figsize=(int(fig_width * n_cols * 3 / 4), top_height + bottom_height)
-    )
-    subfigs = fig_combined.subfigures(
-      2, 1, height_ratios=[top_height, bottom_height], hspace=0.02
-    )
-
-    # Top: reward computation plots
-    goal_index = int(d_.get("goal_index", -1))
-    _, axes1, fig2, axes2 = create_data_plots(
-      d_, reward_info, is_her=is_her, subfig=subfigs[0], goal_index=goal_index
-    )
-
-    # Bottom: image sequence (tight spacing based on maze dimensions)
-    axes_img = subfigs[1].subplots(
-      n_image_rows, ncols_img, gridspec_kw={"hspace": 0.3, "wspace": 0.05}
-    )
-    if n_image_rows == 1:
-      axes_img = axes_img[None, :]  # ensure 2D
-
-    for idx in range(n_episode_steps):
-      row, col = divmod(idx, ncols_img)
-      ax = axes_img[row, col]
-      state_at_t = jax.tree_util.tree_map(lambda x: x[idx], timesteps.state)
-      img = render_fn(state_at_t)
-      ax.imshow(img)
-      # Add black border around first timestep
-      if timesteps.first()[idx]:
-        rect = Rectangle(
-          (0, 0),
-          img.shape[1],
-          img.shape[0],
-          linewidth=10,
-          edgecolor="black",
-          facecolor="none",
-        )
-        ax.add_patch(rect)
-
-      # Add colored borders based on reward and state_features
-      reward = float(timesteps.reward[idx])
-      her_reward = float(reward_info["reward"][idx])
-      features = timesteps.observation.state_features[idx]
-
-      # Determine border color (YELLOW for mismatch is highest priority)
-      rewards_mismatch = abs(reward - her_reward) > 1e-5
-      has_reward = reward > 0
-      has_features = features.sum() > 0
-
-      if has_reward:
-        color = "red"
-        add_border = True
-      elif has_features:
-        color = "blue"
-        add_border = True
-      else:
-        add_border = False
-
-      if add_border:
-        rect = Rectangle(
-          (0, 0),
-          img.shape[1],
-          img.shape[0],
-          linewidth=6,
-          edgecolor=color,
-          facecolor="none",
-        )
-        ax.add_patch(rect)
-
-      ax.set_title(f"t={idx}, r_t={reward:.1f}, r_h={her_reward:.1f}", fontsize=10)
-      ax.axis("off")
-    # Hide unused subplots
-    for idx in range(n_episode_steps, n_image_rows * ncols_img):
-      row, col = divmod(idx, ncols_img)
-      axes_img[row, col].axis("off")
-
-    subfigs[1].subplots_adjust(hspace=0.05, wspace=0.05)
-    fig_combined.tight_layout(pad=0.5)
-
-    if wandb.run is not wandb.sdk.lib.disabled.RunDisabled:
-      wandb.log(
-        {
-          f"learner_example/{setting}/reward_computation": wandb.Image(fig_combined),
-          f"learner_example/{setting}/training_metrics": wandb.Image(fig2),
-        }
-      )
-    plt.close(fig_combined)
-    plt.close(fig2)
-
-  # this will be the value after update is applied
-  n_updates = data["n_updates"] + 1
-  is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
-
-  def plot_both(d):
-    # plot_individual(d["online"], "online")
-    plot_individual(d["her"], "her")
-
-  jax.lax.cond(
-    is_log_time,
-    lambda d: jax.debug.callback(plot_both, d),
-    lambda d: None,
-    data,
-  )
-
-
 def jaxmaze_learner_log_fn(
   data: dict,
   config: dict,
@@ -1455,32 +1313,6 @@ class DuellingDotMLP(nn.Module):
 
     return q_values
 
-
-class DotMLP(nn.Module):
-  hidden_dim: int
-  num_actions: int = 0
-  num_layers: int = 1
-  norm_type: str = "none"
-  activation: str = "relu"
-  activate_final: bool = True
-  use_bias: bool = False
-
-  @nn.compact
-  def __call__(self, x, task, train: bool = False):
-    task_dim = task.shape[-1]
-    mlp = base.MLP(
-      hidden_dim=self.hidden_dim,
-      num_layers=self.num_layers,
-      use_bias=self.use_bias,
-      out_dim=self.num_actions * task_dim,
-    )
-    assert self.num_actions > 0, "must have at least one action"
-
-    sf = sf.reshape(self.num_actions, task_dim)  # [A, C]
-
-    q_values = (sf * task[None, :]).sum(-1)  # [A]
-
-    return q_values
 
 
 # --------------------

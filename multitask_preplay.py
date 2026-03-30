@@ -747,16 +747,27 @@ class PreplayLossFn:
       online_preds: Predictions with state [T, ...]
       target_preds: Predictions with state [T, ...]
     """
-    unroll = functools.partial(self.network.apply, method=self.network.unroll)
+    unroll_offtask = functools.partial(
+      self.network.apply, method=self.network.unroll_offtask
+    )
 
     if self.place_goal_in_timestep:
       place_goal_in_timestep = jax.vmap(self.place_goal_in_timestep, (0, None), 0)
       # [T, D] <- [T, D], [G]
       timestep_w_g = place_goal_in_timestep(timestep, new_goal)
+    else:
+      timestep_w_g = timestep
+
+    # broadcast goal to [T, G] for off-task Q-head
+    task = jnp.broadcast_to(
+      new_goal, (timestep_w_g.reward.shape[0], new_goal.shape[-1])
+    )
 
     key_grad, rng_1, rng_2 = jax.random.split(key_grad, 3)
-    online_preds_g, _ = unroll(params, online_state, timestep_w_g, rng_1)
-    target_preds_g, _ = unroll(target_params, target_state, timestep_w_g, rng_2)
+    online_preds_g, _ = unroll_offtask(params, online_state, timestep_w_g, rng_1, task)
+    target_preds_g, _ = unroll_offtask(
+      target_params, target_state, timestep_w_g, rng_2, task
+    )
 
     goal_rewards = self.compute_rewards(timestep_w_g, new_goal)
 
@@ -1262,6 +1273,22 @@ class PreplayAgent(nn.Module):
     predictions = Predictions(q_vals=q_vals, state=new_rnn_states)
     return predictions, new_rnn_state
 
+  def unroll_offtask(
+    self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey, task
+  ) -> Tuple[Predictions, RnnState]:
+    """Like unroll, but uses off_task_q_fn with an explicit task vector."""
+    rng, rnn_rng = jax.random.split(rng)
+    embedding = jax.vmap(self.observation_encoder)(xs.observation)
+    rnn_in = vbb.RNNInput(obs=embedding, reset=xs.first())
+    new_rnn_state, new_rnn_states = self.rnn.unroll(rnn_state, rnn_in, rnn_rng)
+    rnn_out = self.rnn.output_from_state(new_rnn_states)
+    if embedding.ndim == 3:
+      q_vals = jax.vmap(self.off_task_q_fn)(rnn_out, task)
+    else:
+      q_vals = self.off_task_q_fn(rnn_out, task)
+    predictions = Predictions(q_vals=q_vals, state=new_rnn_states)
+    return predictions, new_rnn_state
+
   def apply_model(self, state, action, rng):
     B = action.shape[0]
 
@@ -1552,9 +1579,6 @@ def make_train_craftax_singlegoal(**kwargs):
       assert goal_onehot.ndim == achievements.ndim - 1
       coeff_mask = goal_onehot.astype(jnp.float32)[None]  # [1, num_sims, G]
     else:
-      import ipdb
-
-      ipdb.set_trace()
       assert goal_onehot.ndim == achievements.ndim
       coeff_mask = goal_onehot.astype(jnp.float32)  # [T, num_sims, G]
     offtask_reward = (achievements * achievement_coefficients * coeff_mask).sum(
@@ -1574,10 +1598,7 @@ def make_train_craftax_singlegoal(**kwargs):
              or [G] zeros when expand_across_simulations=False
     """
     if not expand_across_simulations:
-      import ipdb
-
-      ipdb.set_trace()
-      return jnp.zeros(timestep.observation.achievements.shape[-1:])  # [G]
+      return jnp.zeros(timestep.observation.achievements.shape)  # [G]
     return jnp.zeros(
       (num_ontask_simulations, timestep.observation.achievements.shape[-1])
     )  # [num_ontask_simulations, G]

@@ -8,7 +8,7 @@ HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue crafta
   app.parallel=none \
   app.debug=True \
   app.wandb=False \
-  app.search=preplay-final
+  app.search=her-final
 
 RUNNING ON SLURM:
 RL_RESULTS_DIR=/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results \
@@ -399,7 +399,7 @@ def run_single(config: dict, save_path: str = None):
       vmap_env=vmap_env,
     )
   elif config["ALG"] == "her":
-    train_fn = base_algorithm.make_train(
+    train_fn = vbb.make_train(
       config=config,
       save_path=save_path,
       env=vec_env,
