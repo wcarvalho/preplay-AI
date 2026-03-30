@@ -970,9 +970,9 @@ if __name__ == "__main__":
     "EPSILON_FINISH": 0.1,
     # Logging
     "LEARNER_LOG_PERIOD": 1,
-    "LEARNER_EXTRA_LOG_PERIOD": 0,
+    "LEARNER_EXTRA_LOG_PERIOD": 10_000_000_000,
     "EVAL_LOG_PERIOD": 1,
-    "GRADIENT_LOG_PERIOD": 0,
+    "GRADIENT_LOG_PERIOD": 10_000_000_000,
     "EVAL_EPISODES": 1,
     "EVAL_STEPS": 10,
     "ALG": "dyna",
