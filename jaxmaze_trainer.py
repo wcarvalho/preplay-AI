@@ -8,7 +8,7 @@ RL_RESULTS_DIR=/tmp/rl_results \
 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue jaxmaze_trainer.py \
   app.debug=True \
   app.wandb=False \
-  app.search=preplay
+  app.search=ql
 
 RUNNING ON SLURM:
 RL_RESULTS_DIR=/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results \
@@ -612,7 +612,7 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["exp4"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-final-epsilon-1",
+      "group": "preplay-pnas-revision-1",
     }
 
   elif search == "preplay-policy-ablation":
@@ -637,7 +637,7 @@ def sweep(search: str = ""):
             "env.exp": {"values": ["exp4"]},
         },
         "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-        "group": "preplay-ablation-rotations-5",
+        "group": "preplay-all-goals-ablation-pnas-revision-1",
     }
   elif search == "preplay-peng-ablation":
     sweep_config = {
@@ -649,7 +649,7 @@ def sweep(search: str = ""):
             "env.exp": {"values": ["exp4"]},
         },
         "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-        "group": "preplay-ablation-rotations-5",
+        "group": "preplay-peng-ablation-pnas-revision-1",
     }
   elif search == "preplay-cql-ablation":
     sweep_config = {
@@ -661,7 +661,7 @@ def sweep(search: str = ""):
             "env.exp": {"values": ["exp4"]},
         },
         "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-        "group": "preplay-ablation-rotations-5",
+        "group": "preplay-cql-ablation-pnas-revision-1",
     }
   elif search == "her-test-small":
     sweep_config = {
@@ -669,12 +669,12 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["her"]},
         "SEED": {"values": list(range(5))},
-        "TOTAL_TIMESTEPS": {"values": [10_000_000]},
+        "TOTAL_TIMESTEPS": {"values": [5_000_000]},
         "ALL_GOALS_COEFF": {"values": [0.0]},
         "env.exp": {"values": ["her_test_small"]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-test-small-1",
+      "group": "her-test-small-pnas-revision-1",
     }
   elif search == "her-test-big":
     sweep_config = {
@@ -687,7 +687,7 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["her_test_big"]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-test-big-1",
+      "group": "her-test-big-pnas-revision-1",
     }
 
   else:

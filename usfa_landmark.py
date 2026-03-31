@@ -33,6 +33,7 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
 
   extract_cumulants: Callable = lambda data: data.timestep.observation.state_features
   extract_task: Callable = lambda data: data.timestep.observation.task_w
+  offtask_use_peng: bool = True
 
   def error(
     self,
@@ -64,15 +65,24 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
       return x.astype(jnp.float32)
 
     discounts = float(data.discount) * self.discount
-    lambda_ = jnp.ones_like(data.discount) * self.lambda_
     is_last = float(data.is_last)
+
+    # Compute per-policy lambda with Peng's trace cutting for off-policy policies
+    if self.offtask_use_peng and online_preds.is_collection_policy is not None:
+      # selector_actions: [T+1, B, N], data.action: [T+1, B]
+      peng_lambda = (selector_actions == data.action[:, :, None]).astype(jnp.float32) * self.lambda_
+      is_cp = online_preds.is_collection_policy  # [T+1, B, N]
+      lambda_ = jnp.where(is_cp, self.lambda_, peng_lambda)  # [T+1, B, N]
+    else:
+      N = selector_actions.shape[2]
+      lambda_ = jnp.ones((*data.discount.shape, N)) * self.lambda_  # [T+1, B, N]
 
     # Prepare loss (via vmaps)
     # vmap over batch dimension (B), return B in dim=1
     td_error_fn = jax.vmap(losses.q_learning_lambda_td, in_axes=1, out_axes=1)
     # vmap over policy dimension (N), return N in dim=2
     td_error_fn = jax.vmap(
-      td_error_fn, in_axes=(2, None, 2, 2, None, None, None, None), out_axes=2
+      td_error_fn, in_axes=(2, None, 2, 2, None, None, None, 2), out_axes=2
     )
 
     # vmap over cumulant dimension (C), return in dim=3
@@ -153,6 +163,7 @@ class USFAPreds(NamedTuple):
   policy: jnp.ndarray  # policy vector
   task: jnp.ndarray  # task vector (potentially embedded)
   gpi_tasks: jnp.ndarray  # task vectors
+  is_collection_policy: Optional[jnp.ndarray] = None  # [T, B, N]
 
 
 def extract_timestep_input(timestep: TimeStep):
@@ -354,6 +365,14 @@ class UsfaAgent(nn.Module):
       xs.observation.task_w,
     )
 
+    if self.learn_z_vectors == "ALL_TASKS":
+      # learn_w_vectors: [N, C], xs.observation.task_w: [T, B, C]
+      is_collection_policy = jnp.all(
+        jnp.abs(learn_w_vectors[None, None] - xs.observation.task_w[:, :, None, :]) < 1e-6,
+        axis=-1,
+      )  # [T, B, N]
+      predictions = predictions._replace(is_collection_policy=is_collection_policy)
+
     return predictions, new_rnn_state
 
 
@@ -515,6 +534,7 @@ def make_train(
       UsfaR2D2LossFn,
       discount=config["GAMMA"],
       step_cost=config.get("STEP_COST", 0.001),
+      offtask_use_peng=config.get("OFFTASK_USE_PENG", True),
     )
 
   return vbb.make_train(

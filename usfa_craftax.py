@@ -25,6 +25,7 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
   extract_task: Callable = lambda data: data.timestep.observation.task_w
   aux_coeff: float = 1.0
   q_coeff: float = 1.0
+  offtask_use_peng: bool = True
 
   def error(
     self,
@@ -62,8 +63,17 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
       return x.astype(jnp.float32)
 
     discounts = float(data.discount) * self.discount
-    lambda_ = jnp.ones_like(data.discount) * self.lambda_
     is_last = float(data.is_last)
+
+    # Compute per-policy lambda with Peng's trace cutting for off-policy policies
+    if self.offtask_use_peng and online_preds.is_collection_policy is not None:
+      # selector_actions: [T+1, B, N], data.action: [T+1, B]
+      peng_lambda = (selector_actions == data.action[:, :, None]).astype(jnp.float32) * self.lambda_
+      is_cp = online_preds.is_collection_policy  # [T+1, B, N]
+      lambda_ = jnp.where(is_cp, self.lambda_, peng_lambda)  # [T+1, B, N]
+    else:
+      N = selector_actions.shape[2]
+      lambda_ = jnp.ones((*data.discount.shape, N)) * self.lambda_  # [T+1, B, N]
 
     # Prepare loss (via vmaps)
     # vmap over batch dimension (B), return B in dim=1
@@ -74,7 +84,7 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
     )
     # vmap over policy dimension (N), return N in dim=2
     td_error_fn = jax.vmap(
-      td_error_fn, in_axes=(2, None, 2, 2, None, None, None, None), out_axes=2
+      td_error_fn, in_axes=(2, None, 2, 2, None, None, None, 2), out_axes=2
     )
 
     # vmap over cumulant dimension (C), return in dim=3
@@ -177,6 +187,7 @@ def make_loss_fn_class(config) -> vbb.RecurrentLossFn:
     step_cost=config.get("STEP_COST", 0.0),
     aux_coeff=config.get("AUX_COEFF", 1.0),
     q_coeff=config.get("Q_COEFF", 1.0),
+    offtask_use_peng=config.get("OFFTASK_USE_PENG", True),
     tx_pair=(
       rlax.SIGNED_HYPERBOLIC_PAIR
       if config.get("TX_PAIR", "none") == "hyperbolic"
@@ -441,6 +452,14 @@ class UsfaAgent(nn.Module):
       learn_w_vectors,
       xs.observation.task_w,
     )
+
+    if self.learn_z_vectors == "ALL_TASKS":
+      # learn_w_vectors: [N, C], xs.observation.task_w: [T, B, C]
+      is_collection_policy = jnp.all(
+        jnp.abs(learn_w_vectors[None, None] - xs.observation.task_w[:, :, None, :]) < 1e-6,
+        axis=-1,
+      )  # [T, B, N]
+      predictions = predictions._replace(is_collection_policy=is_collection_policy)
 
     return predictions, new_rnn_state
 
