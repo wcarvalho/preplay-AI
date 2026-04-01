@@ -569,7 +569,7 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["exp4"]},
       },
       "overrides": ["alg=qlearning_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "ql-pnas-revision-1",
+      "group": "ql-pnas-revision-2",
     }
   elif search == "dyna-final":
     sweep_config = {
@@ -580,7 +580,7 @@ def sweep(search: str = ""):
             "env.exp": {"values": ["exp4"]},
         },
         "overrides": ["alg=dyna_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-        "group": "dyna-pnas-revision-1",
+        "group": "dyna-pnas-revision-2",
     }
   elif search == "her-final":
     sweep_config = {
@@ -591,7 +591,7 @@ def sweep(search: str = ""):
             "env.exp": {"values": ["exp4"]},
         },
         "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-        "group": "her-pnas-revision-1",
+        "group": "her-pnas-revision-2",
     }
   elif search == "usfa-final":
     sweep_config = {
@@ -601,7 +601,7 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["exp4"]},
       },
       "overrides": ["alg=usfa_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "usfa-pnas-revision-1",
+      "group": "usfa-pnas-revision-2",
     }
   elif search == "preplay-final":
     sweep_config = {
@@ -612,7 +612,7 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["exp4"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-pnas-revision-1",
+      "group": "preplay-pnas-revision-2",
     }
 
   elif search == "preplay-policy-ablation":
@@ -637,7 +637,7 @@ def sweep(search: str = ""):
             "env.exp": {"values": ["exp4"]},
         },
         "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-        "group": "preplay-all-goals-ablation-pnas-revision-1",
+        "group": "preplay-all-goals-ablation-pnas-revision-2",
     }
   elif search == "preplay-peng-ablation":
     sweep_config = {
@@ -649,7 +649,7 @@ def sweep(search: str = ""):
             "env.exp": {"values": ["exp4"]},
         },
         "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-        "group": "preplay-peng-ablation-pnas-revision-1",
+        "group": "preplay-peng-ablation-pnas-revision-2",
     }
   elif search == "preplay-cql-ablation":
     sweep_config = {
@@ -661,7 +661,7 @@ def sweep(search: str = ""):
             "env.exp": {"values": ["exp4"]},
         },
         "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-        "group": "preplay-cql-ablation-pnas-revision-1",
+        "group": "preplay-cql-ablation-pnas-revision-2",
     }
   elif search == "her-test-small":
     sweep_config = {
@@ -674,7 +674,7 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["her_test_small"]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-test-small-pnas-revision-1",
+      "group": "her-test-small-pnas-revision-2",
     }
   elif search == "her-test-big":
     sweep_config = {
@@ -687,7 +687,7 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["her_test_big"]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-test-big-pnas-revision-1",
+      "group": "her-test-big-pnas-revision-2",
     }
 
   else:

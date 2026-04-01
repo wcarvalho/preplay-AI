@@ -12,19 +12,19 @@ STATUS_FILE = "revision_experiments_jaxmaze_status.yaml"
 
 # (search_name, partition)
 EXPERIMENTS = [
-  # HER ablations
-  ("her-test-small", "kempner"),
-  ("her-test-big", "kempner"),
   # rerunning baselines
   ("ql-final", "kempner"),
-  ("dyna-final", "kempner"),
-  ("her-final", "kempner"),
-  ("usfa-final", "kempner"),
-  ("preplay-final", "kempner_h100"),
-  # Preplay ablations
-  ("preplay-all-goals-ablation", "kempner_h100"),
-  ("preplay-cql-ablation", "kempner_h100"),
-  ("preplay-peng-ablation", "kempner_h100"),
+  #("dyna-final", "kempner"),
+  #("her-final", "kempner"),
+  #("usfa-final", "kempner"),
+  #("preplay-final", "kempner_h100"),
+  ## HER ablations
+  ##("her-test-small", "kempner"),
+  #("her-test-big", "kempner"),
+  ## Preplay ablations
+  #("preplay-all-goals-ablation", "kempner_h100"),
+  #("preplay-cql-ablation", "kempner_h100"),
+  #("preplay-peng-ablation", "kempner_h100"),
 ]
 
 # partitions that require an explicit account override

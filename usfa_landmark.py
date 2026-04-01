@@ -534,7 +534,7 @@ def make_train(
       UsfaR2D2LossFn,
       discount=config["GAMMA"],
       step_cost=config.get("STEP_COST", 0.001),
-      offtask_use_peng=config.get("OFFTASK_USE_PENG", True),
+      offtask_use_peng=config.get("OFFTASK_USE_PENG", False),
     )
 
   return vbb.make_train(

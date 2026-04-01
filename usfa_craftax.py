@@ -187,7 +187,7 @@ def make_loss_fn_class(config) -> vbb.RecurrentLossFn:
     step_cost=config.get("STEP_COST", 0.0),
     aux_coeff=config.get("AUX_COEFF", 1.0),
     q_coeff=config.get("Q_COEFF", 1.0),
-    offtask_use_peng=config.get("OFFTASK_USE_PENG", True),
+    offtask_use_peng=config.get("OFFTASK_USE_PENG", False),
     tx_pair=(
       rlax.SIGNED_HYPERBOLIC_PAIR
       if config.get("TX_PAIR", "none") == "hyperbolic"
