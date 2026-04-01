@@ -491,7 +491,7 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 3))},
         "FIXED_EPSILON": {"values": [1, 2]},
       },
-      "overrides": ["alg=dyna", "rlenv=craftax-dyna-multigoal", "user=wilka"],
+      "overrides": ["alg=dyna_craftax", "rlenv=craftax-dyna-multigoal", "user=wilka"],
       "group": "dyna-testing-4",
     }
   elif search == "preplay":
@@ -530,7 +530,7 @@ def sweep(search: str = ""):
         "ALG": {"values": ["qlearning"]},
         "SEED": {"values": list(range(1, 11))},
       },
-      "overrides": ["alg=qlearning_craftax", "rlenv=craftax-multigoal", "user=wilka"],
+      "overrides": ["alg=qlearning_craftax_multigoal", "rlenv=craftax-multigoal", "user=wilka"],
       "group": "ql-pnas-revision-1",
     }
   elif search == "usfa-final":
@@ -557,7 +557,7 @@ def sweep(search: str = ""):
     sweep_config = {
       "metric": metric,
       "parameters": {
-        "ALG": {"values": ["dyna"]},
+        "ALG": {"values": ["dyna_craftax"]},
         "SEED": {"values": list(range(1, 11))},
       },
       "overrides": ["alg=dyna_craftax", "rlenv=craftax-dyna-multigoal", "user=wilka"],

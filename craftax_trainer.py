@@ -700,7 +700,7 @@ def sweep(search: str = ""):
         "NUM_SIMULATIONS": {"values": [4]},
         "FIXED_EPSILON": {"values": [2]},
       },
-      "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "overrides": ["alg=dyna_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "dyna-19-epsilon",
     }
   elif search == "preplay":
@@ -724,22 +724,8 @@ def sweep(search: str = ""):
         "NUM_ENV_SEEDS": {"values": [128, 512]},
         "COMBINE_REAL_SIM": {"values": [True, False]},
       },
-      "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "overrides": ["alg=dyna_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "dyna-combine-1",
-    }
-  elif search == "pqn":
-    sweep_config = {
-      "metric": metric,
-      "parameters": {
-        "FIXED_EPSILON": {"values": [0, 2]},
-        "LAMBDA": {"values": [0.95, 0.5]},
-        "MAX_GRAD_NORM": {"values": [0.5, 10]},
-        "LR_LINEAR_DECAY": {"values": [True, False]},
-        "LR": {"values": [0.001, 0.0003]},
-        "NUM_ENVS": {"values": [256]},
-      },
-      "overrides": ["alg=pqn-craftax", "rlenv=craftax-10m", "user=wilka"],
-      "group": "pqn-7",
     }
   elif search == "her":
     sweep_config = {
@@ -783,7 +769,7 @@ def sweep(search: str = ""):
         "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512]},
         "SEED": {"values": list(range(1, 6))},
       },
-      "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "overrides": ["alg=dyna_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "dyna-final-5",
     }
   elif search == "preplay-final":
@@ -809,7 +795,7 @@ def sweep(search: str = ""):
   #      "SEED": {"values": list(range(5))},
   #      "BACKTRACKING": {"values": [False]},
   #    },
-  #    "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
+  #    "overrides": ["alg=dyna_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
   #    "group": "dyna-backtracking-1",
   #  }
   # elif search == "preplay-backtracking":
@@ -886,7 +872,7 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(5))},
         "USE_PRECONDITION": {"values": [False]},
       },
-      "overrides": ["alg=dyna", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "overrides": ["alg=dyna_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "dyna-precondition-1",
     }
   elif search == "preplay-precondition":
