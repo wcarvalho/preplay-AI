@@ -741,7 +741,7 @@ def make_craftax_agent(
       out_dim=env.action_space(env_params).n,
       activation=config["ACTIVATION"],
       activate_final=False,
-      use_bias=config.get("USE_BIAS", True),
+      use_bias=True,
     ),
     env=model_env,
     env_params=model_env_params,

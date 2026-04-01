@@ -13,7 +13,7 @@ STATUS_FILE = "revision_experiments_craftax_multigoal_status.yaml"
 # (search_name, partition)
 EXPERIMENTS = [
   # rerunning baselines
-  #("her-final", "kempner_h100"),
+  # ("her-final", "kempner_h100"),
   ("ql-final", "kempner_h100"),
   ("dyna-final", "kempner_h100"),
   ("usfa-final", "kempner_h100"),
@@ -91,10 +91,10 @@ def main():
   debug = "--debug" in sys.argv
   skip_passed = "--no-skip" not in sys.argv
 
-  status = load_status()
+  status = load_status() if debug else {}
 
   for search, partition in EXPERIMENTS:
-    if skip_passed and status.get(search) == "ok":
+    if debug and skip_passed and status.get(search) == "ok":
       print(f"\nSkipping {search} (already passed, edit {STATUS_FILE} to rerun)")
       continue
 
@@ -109,12 +109,14 @@ def main():
 
     result = subprocess.run(cmd, env=env)
     if result.returncode == 0:
-      status[search] = "ok"
-      save_status(status)
+      if debug:
+        status[search] = "ok"
+        save_status(status)
       print(f"  {search}: OK")
     else:
-      status[search] = f"failed (exit {result.returncode})"
-      save_status(status)
+      if debug:
+        status[search] = f"failed (exit {result.returncode})"
+        save_status(status)
       print(f"  WARNING: {search} exited with code {result.returncode}")
       if debug:
         print("  Stopping on first failure in debug mode.")

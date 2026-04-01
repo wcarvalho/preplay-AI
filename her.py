@@ -502,8 +502,8 @@ class HerLossFn(base.RecurrentLossFn):
         expanded_goal = jax.tree_util.tree_map(expand, new_goal)
 
         apply_q = functools.partial(self.network.apply, method=self.network.apply_q)
-        on_preds = apply_q(params, online_preds.rnn_states, expanded_goal)
-        tar_preds = apply_q(target_params, target_preds.rnn_states, expanded_goal)
+        online_preds_new_g = apply_q(params, online_preds.rnn_states, expanded_goal)
+        target_preds_new_g = apply_q(target_params, target_preds.rnn_states, expanded_goal)
 
         reward_info = self.her_reward_fn(timestep, new_goal)
 
@@ -518,7 +518,7 @@ class HerLossFn(base.RecurrentLossFn):
         loss_mask = is_truncated(timestep) * different_goal  # [T]
 
         # Peng's Q-lambda: cut trace where greedy != taken action (off-policy only)
-        selector = jnp.argmax(on_preds.q_vals, axis=-1)  # [T]
+        selector = jnp.argmax(online_preds_new_g.q_vals, axis=-1)  # [T]
         peng_lambda = (selector == actions).astype(jnp.float32) * self.lambda_
         lambda_ = jnp.where(
           collection_goal_is_eval_goal, self.lambda_, peng_lambda
@@ -526,8 +526,8 @@ class HerLossFn(base.RecurrentLossFn):
 
         ag_td_error, ag_batch_loss, ag_metrics, ag_log_info = self.loss_fn(
           timestep=timestep,
-          online_preds=on_preds,
-          target_preds=tar_preds,
+          online_preds=online_preds_new_g,
+          target_preds=target_preds_new_g,
           actions=actions,
           rewards=reward_info["reward"],
           is_last=make_float(timestep.last()),
@@ -539,7 +539,7 @@ class HerLossFn(base.RecurrentLossFn):
         # CQL penalty on off-policy timesteps
         cql_mask = different_goal[:-1] * loss_mask[:-1]  # [T-1]
         cql_per_t, cql_mean = self._cql_penalty(
-          on_preds.q_vals[:-1],  # [T-1, A]
+          online_preds_new_g.q_vals[:-1],  # [T-1, A]
           actions[:-1],  # [T-1]
           cql_mask,  # [T-1]
         )
@@ -743,7 +743,7 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
       env=config["ENV"],
       position_goals=config.get("POSITION_GOALS", False),
     ),
-    cql_alpha=config.get("CQL_ALPHA", 1e-2),
+    cql_alpha=config.get("CQL_ALPHA", 1e-3),
     cql_temperature=config.get("CQL_TEMPERATURE", 1.0),
   )
 

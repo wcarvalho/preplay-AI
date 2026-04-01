@@ -712,7 +712,7 @@ def sweep(search: str = ""):
         "NUM_ENV_SEEDS": {"values": [128, 512]},
         "COMBINE_REAL_SIM": {"values": [True, False]},
       },
-      "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "overrides": ["alg=preplay_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "preplay-combine-2",
     }
   elif search == "dyna":
@@ -794,7 +794,7 @@ def sweep(search: str = ""):
         "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512]},
         "SEED": {"values": list(range(1, 6))},
       },
-      "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "overrides": ["alg=preplay_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "preplay-final-5",
     }
   ############################################################
@@ -821,7 +821,7 @@ def sweep(search: str = ""):
   #      "SEED": {"values": list(range(5))},
   #      "BACKTRACKING": {"values": [False]},
   #    },
-  #    "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
+  #    "overrides": ["alg=preplay_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
   #    "group": "preplay-backtracking-1",
   #  }
   elif search == "preplay-main-loss-coeff":
@@ -834,7 +834,7 @@ def sweep(search: str = ""):
         "MAIN_COEFF": {"values": [0.0]},
         # "OFFTASK_COEFF": {"values": [1.]},
       },
-      "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "overrides": ["alg=preplay_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "preplay-main-loss-coeff-1",
     }
   elif search == "preplay-main-q-coeff":
@@ -846,7 +846,7 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(5))},
         "MAINQ_COEFF": {"values": [0.0]},
       },
-      "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "overrides": ["alg=preplay_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "preplay-main-q-coeff-1",
     }
 
@@ -898,7 +898,7 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(5))},
         "USE_PRECONDITION": {"values": [False]},
       },
-      "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "overrides": ["alg=preplay_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "preplay-precondition-1",
     }
   elif search == "preplay-benchmark":
@@ -909,7 +909,7 @@ def sweep(search: str = ""):
         "NUM_ENV_SEEDS": {"values": [0]},
         "SEED": {"values": list(range(1, 11))},
       },
-      "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "overrides": ["alg=preplay_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "preplay-benchmark-0-5",
     }
   elif search == "preplay-benchmark-10k":
@@ -920,7 +920,7 @@ def sweep(search: str = ""):
         "NUM_ENV_SEEDS": {"values": [10_000]},
         "SEED": {"values": list(range(1, 11))},
       },
-      "overrides": ["alg=preplay", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "overrides": ["alg=preplay_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "preplay-benchmark-10k-5",
     }
   else:

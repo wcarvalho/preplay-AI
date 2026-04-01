@@ -506,7 +506,7 @@ def sweep(search: str = ""):
         "OBS_INCLUDE_GOAL": {"values": [True, False]},
         "OPTIMISTIC_RESET_RATIO": {"values": [1]},
       },
-      "overrides": ["alg=preplay", "rlenv=craftax-dyna-multigoal", "user=wilka"],
+      "overrides": ["alg=preplay_craftax", "rlenv=craftax-dyna-multigoal", "user=wilka"],
       "group": "preplay-testing-7",
     }
   elif search == "her":
@@ -560,7 +560,7 @@ def sweep(search: str = ""):
         "ALG": {"values": ["dyna"]},
         "SEED": {"values": list(range(1, 11))},
       },
-      "overrides": ["alg=dyna", "rlenv=craftax-dyna-multigoal", "user=wilka"],
+      "overrides": ["alg=dyna_craftax", "rlenv=craftax-dyna-multigoal", "user=wilka"],
       "group": "dyna-pnas-revision-1",
     }
 
@@ -571,7 +571,7 @@ def sweep(search: str = ""):
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": list(range(14, 17))},
       },
-      "overrides": ["alg=preplay", "rlenv=craftax-dyna-multigoal", "user=wilka"],
+      "overrides": ["alg=preplay_craftax", "rlenv=craftax-dyna-multigoal", "user=wilka"],
       "group": "preplay-pnas-revision-1",
     }
 

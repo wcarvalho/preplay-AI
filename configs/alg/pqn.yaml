@@ -37,7 +37,7 @@ NUM_EPOCHS: 4
 NUM_MINIBATCHES: 4
 
 # epsilon-greedy
-FIXED_EPSILON: 1 # range of epsilons
+FIXED_EPSILON: 2 # range of epsilons
 EPSILON_START: 1.0
 EPSILON_FINISH: 0.05
 EPSILON_ANNEAL_TIME: null

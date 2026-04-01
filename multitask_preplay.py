@@ -533,13 +533,13 @@ class PreplayLossFn:
     is_last = make_float(is_last)
     discounts = make_float(non_terminal) * self.discount
 
-    if collection_goal_is_eval_goal is None or not self.offtask_use_peng:
-      lambda_ = jnp.ones_like(non_terminal) * self.lambda_
-    else:
-      collection_goal_is_eval_goal = make_float(collection_goal_is_eval_goal)
-      selector = jnp.argmax(online_preds.q_vals, axis=-1)  # [T, ...]
-      peng_lambda = (selector == actions).astype(jnp.float32) * self.lambda_
-      lambda_ = jnp.where(collection_goal_is_eval_goal, self.lambda_, peng_lambda)
+    lambda_ = jnp.ones_like(non_terminal) * self.lambda_
+    if self.offtask_use_peng:
+      if collection_goal_is_eval_goal is not None:
+        collection_goal_is_eval_goal = make_float(collection_goal_is_eval_goal)
+        selector = jnp.argmax(online_preds.q_vals, axis=-1)  # [T, ...]
+        peng_lambda = (selector == actions).astype(jnp.float32) * self.lambda_
+        lambda_ = jnp.where(collection_goal_is_eval_goal, self.lambda_, peng_lambda)
 
     has_batch_dim = rewards.ndim == 2
     td_error_fn = losses.q_learning_lambda_td
@@ -1333,7 +1333,7 @@ def make_craftax_singlegoal_agent(
       activation=config["ACTIVATION"],
       norm_type=config.get("NORM_TYPE", "none"),
       structured_inputs=config.get("STRUCTURED_INPUTS", False),
-      use_bias=config.get("USE_BIAS", True),
+      use_bias=True,
       include_achievable=config.get("INCLUDE_ACHIEVABLE", True),
       action_dim=env.action_space(env_params).n,
     ),
@@ -1343,7 +1343,7 @@ def make_craftax_singlegoal_agent(
       num_layers=config.get("NUM_Q_LAYERS", 1),
       activation=config["ACTIVATION"],
       activate_final=False,
-      use_bias=config.get("USE_BIAS", True),
+      use_bias=True,
       out_dim=env.action_space(env_params).n,
     ),
     off_task_q_head=QFnCls(
@@ -1351,7 +1351,7 @@ def make_craftax_singlegoal_agent(
       num_layers=config.get("NUM_AUX_LAYERS", 0),
       activation=config["ACTIVATION"],
       activate_final=False,
-      use_bias=config.get("USE_BIAS", True),
+      use_bias=True,
       out_dim=env.action_space(env_params).n,
     ),
     env=model_env,
@@ -1399,7 +1399,7 @@ def make_craftax_multigoal_agent(
       num_layers=config["NUM_MLP_LAYERS"],
       activation=config["ACTIVATION"],
       norm_type=config.get("NORM_TYPE", "none"),
-      use_bias=config.get("USE_BIAS", True),
+      use_bias=True,
       include_goal=config.get("OBS_INCLUDE_GOAL", False),
       action_dim=env.action_space(env_params).n,
     ),
@@ -1409,7 +1409,7 @@ def make_craftax_multigoal_agent(
       num_layers=config.get("NUM_PRED_LAYERS", 1),
       activation=config["ACTIVATION"],
       activate_final=False,
-      use_bias=config.get("USE_BIAS", True),
+      use_bias=True,
       out_dim=env.action_space(env_params).n,
     ),
     env=model_env,
@@ -1470,7 +1470,7 @@ def make_jaxmaze_multigoal_agent(
       num_layers=config.get("NUM_PRED_LAYERS", 1),
       activation=config["ACTIVATION"],
       activate_final=False,
-      use_bias=config.get("USE_BIAS", False),
+      use_bias=False,
       out_dim=env.num_actions(env_params),
     ),
     env=model_env,
