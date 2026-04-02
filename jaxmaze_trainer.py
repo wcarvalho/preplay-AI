@@ -571,17 +571,6 @@ def sweep(search: str = ""):
       "overrides": ["alg=qlearning_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "ql-pnas-revision-2",
     }
-  elif search == "dyna-final":
-    sweep_config = {
-        **base,
-        "parameters": {
-            "ALG": {"values": ["dyna"]},
-            "SEED": {"values": list(range(1, 11))},
-            "env.exp": {"values": ["exp4"]},
-        },
-        "overrides": ["alg=dyna_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-        "group": "dyna-pnas-revision-2",
-    }
   elif search == "her-final":
     sweep_config = {
         **base,
@@ -603,6 +592,17 @@ def sweep(search: str = ""):
       "overrides": ["alg=usfa_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
       "group": "usfa-pnas-revision-2",
     }
+  elif search == "dyna-final":
+    sweep_config = {
+        **base,
+        "parameters": {
+            "ALG": {"values": ["dyna"]},
+            "SEED": {"values": list(range(1, 11))},
+            "env.exp": {"values": ["exp4"]},
+        },
+        "overrides": ["alg=dyna_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
+        "group": "dyna-pnas-revision-3",
+    }
   elif search == "preplay-final":
     sweep_config = {
       **base,
@@ -612,7 +612,7 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["exp4"]},
       },
       "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-pnas-revision-2",
+      "group": "preplay-pnas-revision-4",
     }
 
   elif search == "preplay-policy-ablation":

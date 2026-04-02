@@ -13,11 +13,11 @@ STATUS_FILE = "revision_experiments_jaxmaze_status.yaml"
 # (search_name, partition)
 EXPERIMENTS = [
   # rerunning baselines
-  ("ql-final", "kempner"),
-  #("dyna-final", "kempner"),
-  #("her-final", "kempner"),
+  #("ql-final", "kempner"),
   #("usfa-final", "kempner"),
-  #("preplay-final", "kempner_h100"),
+  #("dyna-final", "gpu_h200"),
+  ("preplay-final", "gpu_h200"),
+  #("her-final", "kempner"),
   ## HER ablations
   ##("her-test-small", "kempner"),
   #("her-test-big", "kempner"),
