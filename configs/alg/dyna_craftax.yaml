@@ -47,7 +47,7 @@ SIM_EPSILON_SETTING: 1  # range of epsilons
 STEP_COST: 0.0
 
 # Online epsilon settings
-FIXED_EPSILON: 1  # range of epsilons
+FIXED_EPSILON: 1  # doable in model-based
 EPSILON_START: 1.0
 EPSILON_FINISH: 0.05
 EPSILON_ANNEAL_TIME: 5e5

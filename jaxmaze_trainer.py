@@ -683,7 +683,7 @@ def sweep(search: str = ""):
         "ALG": {"values": ["her"]},
         "SEED": {"values": list(range(5))},
         "ALL_GOALS_COEFF": {"values": [0.0, 1.0]},
-        "TOTAL_TIMESTEPS": {"values": [15_000_000]},
+        "TOTAL_TIMESTEPS": {"values": [20_000_000]},
         "env.exp": {"values": ["her_test_big"]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],

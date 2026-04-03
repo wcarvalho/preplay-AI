@@ -13,7 +13,7 @@ STATUS_FILE = "revision_experiments_craftax_multigoal_status.yaml"
 # (search_name, partition)
 EXPERIMENTS = [
   # rerunning baselines
-  # ("her-final", "kempner_h100"),
+  ("her-final", "kempner_h100"),
   ("ql-final", "kempner_h100"),
   ("dyna-final", "kempner_h100"),
   ("usfa-final", "kempner_h100"),

@@ -3,16 +3,14 @@ name = "preplay-ai"
 version = "0.1.0"
 description = "Multitask Preplay - Model-based RL research in JAX"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 authors = [
     {name = "Wilka Carvalho", email = "wcarvalho92@gmail.com"},
 ]
 dependencies = [
     # JAX ecosystem
-    "jax[cuda12]==0.4.35; sys_platform == 'linux'",
-    "jax==0.4.35; sys_platform == 'darwin'",
-    "jaxlib==0.4.34",
-    "nvidia-cudnn-cu12>=9.1,<9.4; sys_platform == 'linux'",
+    "jax==0.4.22",
+    "jaxlib==0.4.22",
     "flax==0.8.4",
     "optax==0.2.1",
     "chex==0.1.86",

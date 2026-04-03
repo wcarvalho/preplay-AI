@@ -1184,7 +1184,7 @@ def make_loss_fn_class(config, **kwargs) -> PreplayLossFn:
     online_task_coeff=config.get("MAINQ_COEFF", 1.0),
     all_goals_coeff=config.get("ALL_GOALS_COEFF", 1.0),
     offtask_use_peng=config.get("OFFTASK_USE_PENG", True),
-    cql_alpha=config.get("CQL_ALPHA", 0.0),
+    cql_alpha=config.get("CQL_ALPHA", 1e-3),
     cql_temperature=config.get("CQL_TEMPERATURE", 1.0),
     **kwargs,
   )
@@ -1777,23 +1777,6 @@ def make_train_craftax_multigoal(**kwargs):
     )  # [num_offtask_simulations-1]
     return jnp.concatenate((jnp.array([0.0]), epsilons))  # [num_offtask_simulations]
 
-  def sample_all_tasks(timestep, key):
-    """Return all tasks as one-hot identity matrix.
-
-    Args:
-      timestep: single timestep (no batch/time dims), task_w is [1, G]
-      key: random key (unused)
-    Returns:
-      goals: [G, G] identity matrix (all one-hot goal vectors)
-      achievable: [G] uniform achievability
-      any_achievable: scalar bool
-    """
-    num_goals = timestep.observation.task_w.shape[-1]
-    goals = jnp.eye(num_goals)  # [G, G] identity = all one-hots
-    achievable = jnp.ones(num_goals)
-    any_achievable = jnp.bool_(True)
-    return goals, achievable, any_achievable
-
   def sample_nontask_visible_goals(timestep, key, num_offtask_goals):
     """Sample goals from nearby non-task objects.
 
@@ -1821,6 +1804,23 @@ def make_train_craftax_multigoal(**kwargs):
       goals, num_classes=num_classes, dtype=timestep.observation.task_w.dtype
     )  # [N, G]
     any_achievable = achievable.sum() > 0.1
+    return goals, achievable, any_achievable
+
+  def sample_all_tasks(timestep, key):
+    """Return all tasks as one-hot identity matrix.
+
+    Args:
+      timestep: single timestep (no batch/time dims), task_w is [1, G]
+      key: random key (unused)
+    Returns:
+      goals: [G, G] identity matrix (all one-hot goal vectors)
+      achievable: [G] uniform achievability
+      any_achievable: scalar bool
+    """
+    num_goals = timestep.observation.task_w.shape[-1]
+    goals = jnp.eye(num_goals)  # [G, G] identity = all one-hots
+    achievable = jnp.ones(num_goals)
+    any_achievable = jnp.bool_(True)
     return goals, achievable, any_achievable
 
   def compute_rewards(timesteps, goal_onehot, expand_g_across_time=True):

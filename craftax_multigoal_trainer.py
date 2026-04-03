@@ -8,7 +8,7 @@ HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue crafta
   app.parallel=none \
   app.debug=True \
   app.wandb=False \
-  app.search=her-final
+  app.search=ql
 
 RUNNING ON SLURM:
 RL_RESULTS_DIR=/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results \
@@ -528,40 +528,40 @@ def sweep(search: str = ""):
       "metric": metric,
       "parameters": {
         "ALG": {"values": ["qlearning"]},
-        "SEED": {"values": list(range(1, 11))},
+        "SEED": {"values": list(range(1, 2))},
       },
       "overrides": ["alg=qlearning_craftax_multigoal", "rlenv=craftax-multigoal", "user=wilka"],
-      "group": "ql-pnas-revision-1",
+      "group": "ql-pnas-revision-3",
     }
   elif search == "usfa-final":
     sweep_config = {
       "metric": metric,
       "parameters": {
         "ALG": {"values": ["usfa"]},
-        "SEED": {"values": list(range(1, 11))},
+        "SEED": {"values": list(range(1, 2))},
       },
       "overrides": ["alg=usfa_craftax", "rlenv=craftax-multigoal", "user=wilka"],
-      "group": "usfa-pnas-revision-1",
+      "group": "usfa-pnas-revision-3",
     }
   elif search == "her-final":
     sweep_config = {
       "metric": metric,
       "parameters": {
         "ALG": {"values": ["her"]},
-        "SEED": {"values": list(range(1, 11))},
+        "SEED": {"values": list(range(1, 2))},
       },
       "overrides": ["alg=her", "rlenv=craftax-multigoal", "user=wilka"],
-      "group": "her-pnas-revision-1",
+      "group": "her-pnas-revision-3",
     }
   elif search == "dyna-final":
     sweep_config = {
       "metric": metric,
       "parameters": {
-        "ALG": {"values": ["dyna_craftax"]},
-        "SEED": {"values": list(range(1, 11))},
+        "ALG": {"values": ["dyna"]},
+        "SEED": {"values": list(range(1, 2))},
       },
       "overrides": ["alg=dyna_craftax", "rlenv=craftax-dyna-multigoal", "user=wilka"],
-      "group": "dyna-pnas-revision-1",
+      "group": "dyna-pnas-revision-3",
     }
 
   elif search == "preplay-final":
@@ -569,10 +569,10 @@ def sweep(search: str = ""):
       "metric": metric,
       "parameters": {
         "ALG": {"values": ["preplay"]},
-        "SEED": {"values": list(range(14, 17))},
+        "SEED": {"values": list(range(1, 2))},
       },
       "overrides": ["alg=preplay_craftax", "rlenv=craftax-dyna-multigoal", "user=wilka"],
-      "group": "preplay-pnas-revision-1",
+      "group": "preplay-pnas-revision-3",
     }
 
   else:
