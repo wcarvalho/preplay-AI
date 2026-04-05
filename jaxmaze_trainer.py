@@ -26,15 +26,11 @@ from flax import struct
 import functools
 import jax.numpy as jnp
 import time
-import pickle
 
 
 import hydra
 from omegaconf import DictConfig
 
-
-from safetensors.flax import save_file, load_file
-from flax.traverse_util import flatten_dict, unflatten_dict
 
 import numpy as np
 
@@ -119,73 +115,11 @@ def task_from_variables(variables, keys, label2name):
   return f"{label} \n {exp_name}"
 
 
-def save_training_state(
-  params: Dict, config: Dict, save_path: str, alg_name: str
-) -> None:
-  """Save model parameters and config to disk.
-
-  Args:
-      params: Model parameters to save
-      config: Configuration dictionary to save
-      save_path: Directory to save files in
-      alg_name: Name of algorithm for file naming
-  """
-  os.makedirs(save_path, exist_ok=True)
-
-  # Save parameters
-  param_path = os.path.join(save_path, f"{alg_name}.safetensors")
-  flattened_dict = flatten_dict(params, sep=",")
-  save_file(flattened_dict, param_path)
-  print(f"Parameters saved in {param_path}")
-
-  # Save config
-  config_path = os.path.join(save_path, f"{alg_name}.config")
-  import pickle
-
-  with open(config_path, "wb") as f:
-    pickle.dump(config, f)
-  print(f"Config saved in {config_path}")
-
-
-def load_training_state(
-  save_path: str, alg_name: str
-) -> Tuple[Optional[Dict], Optional[Dict]]:
-  """Load model parameters and config from disk if they exist.
-
-  Args:
-      save_path: Directory containing saved files
-      alg_name: Name of algorithm for file naming
-
-  Returns:
-      Tuple of (parameters dict, config dict) if files exist, else (None, None)
-  """
-  if save_path is None:
-    return None, None
-
-  param_path = os.path.join(save_path, f"{alg_name}.safetensors")
-  config_path = os.path.join(save_path, f"{alg_name}.config")
-
-  if not (os.path.exists(param_path) and os.path.exists(config_path)):
-    return None, None
-
-  print(f"Loading parameters from {param_path}")
-  # Load and unflatten parameters
-  flattened_params = load_file(param_path)
-  params = unflatten_dict(flattened_params, sep=",")
-
-  # Load config
-  with open(config_path, "rb") as f:
-    saved_config = pickle.load(f)
-  print("Loaded previous training configuration")
-
-  return params, saved_config
-
-
 def run_single(config: dict, save_path: str = None):
-  # Try to load previous training state
-  initial_params = None
+  # Try to load previous training state (full checkpoint or params-only)
+  checkpoint_data = None
   if save_path is not None:
-    initial_params, _ = load_training_state(save_path, config["ALG"])
+    checkpoint_data = vbb.load_checkpoint(save_path, config["ALG"])
 
   rng = jax.random.PRNGKey(config["SEED"])
   ###################
@@ -280,7 +214,7 @@ def run_single(config: dict, save_path: str = None):
       train_env_params=env_params,
       test_env_params=test_env_params,
       ObserverCls=observer_class,
-      initial_params=initial_params,
+      checkpoint_data=checkpoint_data,
       make_agent=qlearning_jaxmaze.make_jaxmaze_agent,
       make_optimizer=qlearning_jaxmaze.make_optimizer,
       make_loss_fn_class=qlearning_jaxmaze.make_loss_fn_class,
@@ -309,7 +243,7 @@ def run_single(config: dict, save_path: str = None):
       train_env_params=env_params,
       test_env_params=test_env_params,
       ObserverCls=observer_class,
-      initial_params=initial_params,
+      checkpoint_data=checkpoint_data,
       make_agent=functools.partial(
         usfa_jaxmaze.make_agent,
         train_tasks=train_tasks,
@@ -341,7 +275,7 @@ def run_single(config: dict, save_path: str = None):
       train_env_params=env_params,
       test_env_params=test_env_params,
       ObserverCls=observer_class,
-      initial_params=initial_params,
+      checkpoint_data=checkpoint_data,
       make_agent=dyna.make_jaxmaze_agent,
       make_logger=functools.partial(
         make_logger,
@@ -361,7 +295,7 @@ def run_single(config: dict, save_path: str = None):
       train_env_params=env_params,
       test_env_params=test_env_params,
       ObserverCls=observer_class,
-      initial_params=initial_params,
+      checkpoint_data=checkpoint_data,
       model_env=env,
       make_logger=functools.partial(
         make_logger,
@@ -398,6 +332,13 @@ def run_single(config: dict, save_path: str = None):
       base_maker = base_algorithm2
     else:
       raise NotImplementedError(config["base"])
+    # vbb supports checkpoint_data; other bases only support initial_params
+    if base_name == "vbb":
+      checkpoint_kwarg = {"checkpoint_data": checkpoint_data}
+    else:
+      checkpoint_kwarg = {
+        "initial_params": checkpoint_data.get("params") if checkpoint_data else None
+      }
     train_fn = base_maker.make_train(
       config=config,
       env=env,
@@ -405,7 +346,7 @@ def run_single(config: dict, save_path: str = None):
       train_env_params=env_params,
       test_env_params=test_env_params,
       ObserverCls=observer_class,
-      initial_params=initial_params,
+      **checkpoint_kwarg,
       make_agent=her.make_jaxmaze_agent,
       make_optimizer=her.make_optimizer,
       make_loss_fn_class=her.make_loss_fn_class,
@@ -540,11 +481,14 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["her"]},
         "SEED": {"values": [1]},
-        "env.exp": {"values": ["her_test_big", "exp4"]},
+        "env.exp": {"values": ["her_test_big"]},
+        "ALL_GOALS_COEFF": {"values": [1.0]},
+        "CQL_ALPHA": {"values": [1e-3, 1e-4, 1e-2]},
+        "TOTAL_TIMESTEPS": {"values": [20_000_000]},
         "NUM_HER_GOALS": {"values": [1]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-exp-9",
+      "group": "her-final-test-1",
     }
   elif search == "her2":
     sweep_config = {
@@ -611,8 +555,12 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 11))},
         "env.exp": {"values": ["exp4"]},
       },
-      "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-      "group": "preplay-pnas-revision-4",
+      "overrides": [
+        "alg=preplay_jaxmaze",
+        "rlenv=jaxmaze",
+        "user=wilka",
+      ],
+      "group": "preplay-pnas-revision-5",
     }
 
   elif search == "preplay-policy-ablation":

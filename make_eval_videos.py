@@ -141,18 +141,59 @@ def download_checkpoint(
   return ckpt_dir
 
 
+def load_config(config_path: Path) -> dict:
+  """Load config from a pickle file."""
+  with open(config_path, "rb") as f:
+    return pickle.load(f)
+
+
+def load_params(param_path: Path) -> dict:
+  """Load model parameters from a safetensors file."""
+  flattened_params = load_file(str(param_path))
+  return unflatten_dict(flattened_params, sep=",")
+
+
 def load_checkpoint(ckpt_dir: Path):
   """Load params and config from checkpoint directory."""
-  param_path = ckpt_dir / "preplay.safetensors"
-  config_path = ckpt_dir / "preplay.config"
-
-  flattened_params = load_file(str(param_path))
-  params = unflatten_dict(flattened_params, sep=",")
-
-  with open(config_path, "rb") as f:
-    config = pickle.load(f)
-
+  params = load_params(ckpt_dir / "preplay.safetensors")
+  config = load_config(ckpt_dir / "preplay.config")
   return params, config
+
+
+def discover_local_checkpoints(local_dir: Path):
+  """Find all checkpoint files in a local directory, sorted by training progress.
+
+  Returns list of (safetensor_path, label, progress_pct).
+  E.g.: [(Path(".../preplay_1.safetensors"), "ckpt_1_20pct", 20), ...]
+  """
+  # Find the config file to determine algorithm name
+  config_files = list(local_dir.glob("*.config"))
+  if not config_files:
+    print(f"No .config file found in {local_dir}")
+    sys.exit(1)
+  alg_name = config_files[0].stem  # e.g. "preplay"
+
+  safetensor_files = list(local_dir.glob(f"{alg_name}*.safetensors"))
+  if not safetensor_files:
+    print(f"No {alg_name}*.safetensors files found in {local_dir}")
+    sys.exit(1)
+
+  checkpoints = []
+  for f in safetensor_files:
+    stem = f.stem  # e.g. "preplay_1" or "preplay"
+    if "_" in stem and stem.rsplit("_", 1)[1].isdigit():
+      idx = int(stem.rsplit("_", 1)[1])
+      pct = idx * 20
+      label = f"ckpt_{idx}_{pct}pct"
+    else:
+      # Final checkpoint (no index suffix)
+      idx = 999  # sort last
+      pct = 100
+      label = "ckpt_final_100pct"
+    checkpoints.append((f, label, pct, idx))
+
+  checkpoints.sort(key=lambda x: x[3])
+  return [(path, label, pct) for path, label, pct, _ in checkpoints]
 
 
 def setup_env_and_agent(config, wandb_name: str = ""):
@@ -698,9 +739,263 @@ def render_last_frame(
   return frame
 
 
+def process_checkpoint(
+  args, params, env, env_params, test_env_params, agent,
+  image_dict, keys, action_names, video_dir, gamma,
+  progress_label="",
+):
+  """Run episodes and render outputs for a single set of model params.
+
+  Returns list of generated file paths.
+  """
+  # Find the level with rotation=(0,0) and pin to it
+  rotations = jnp.asarray(test_env_params.reset_params.rotation)  # [num_levels, 2]
+  level_idx = None
+  for i in range(rotations.shape[0]):
+    if int(rotations[i, 0]) == 0 and int(rotations[i, 1]) == 0:
+      level_idx = i
+      break
+  if level_idx is None:
+    print("  ERROR: No level with rotation=(0,0) found")
+    return []
+
+  # Create single-level env_params so random level selection is deterministic
+  single_reset = jax.tree_map(
+    lambda x: x[level_idx : level_idx + 1], test_env_params.reset_params
+  )
+  base_params = test_env_params.replace(reset_params=single_reset)
+
+  # Get train/test objects for this specific level
+  train_objects = test_env_params.reset_params.train_objects[level_idx]
+  test_objects = test_env_params.reset_params.test_objects[level_idx]
+
+  print(f"  Train objects: {[keys[int(o)] for o in train_objects]}")
+  print(f"  Test objects: {[keys[int(o)] for o in test_objects]}")
+
+  video_dir.mkdir(parents=True, exist_ok=True)
+
+  rng = jax.random.PRNGKey(42)
+  num_groups = len(train_objects)
+  generated_files = []
+
+  for group_idx in range(num_groups):
+    train_goal = keys[int(train_objects[group_idx])]
+    test_goal = keys[int(test_objects[group_idx])]
+
+    train_params = base_params.replace(
+      force_room=jnp.array(True),
+      default_room=jnp.array(group_idx),
+      p_test_sample_train=1.0,
+    )
+    test_params = base_params.replace(
+      force_room=jnp.array(True),
+      default_room=jnp.array(group_idx),
+      p_test_sample_train=0.0,
+    )
+
+    for epsilon in args.epsilon:
+      eps_label = f"eps{epsilon:.2f}".replace(".", "")
+      prog_suffix = f" [{progress_label}]" if progress_label else ""
+
+      def generate_outputs(ep_steps, base_name, title):
+        """Generate last_frame PNG (and optionally video) for an episode."""
+        png_path = video_dir / f"{base_name}.png"
+        render_last_frame(
+          ep_steps, image_dict, action_names, png_path, title=title, gamma=gamma
+        )
+        generated_files.append(png_path)
+        if args.video:
+          mp4_path = video_dir / f"{base_name}.mp4"
+          make_video(
+            ep_steps,
+            image_dict,
+            action_names,
+            mp4_path,
+            title=title,
+            fps=args.fps,
+            gamma=gamma,
+          )
+          generated_files.append(mp4_path)
+
+      def run_and_render(ep_params, goal_name, task_type, start_pos=None):
+        """Run model + optimal episodes, generate outputs for both."""
+        nonlocal rng
+        suffix = f"_{eps_label}"
+        pos_label = ""
+        if start_pos is not None:
+          suffix += "_halfway"
+          pos_label = " [halfway]"
+
+        # Model actions
+        rng, ep_rng = jax.random.split(rng)
+        model_steps = run_episode(
+          env,
+          ep_params,
+          agent,
+          params,
+          ep_rng,
+          max_steps=args.max_steps,
+          epsilon=epsilon,
+          start_pos=start_pos,
+        )
+        actual = keys[int(model_steps[0]["state"].task_object)]
+        print(f"    Model: task={actual}, steps={len(model_steps)}")
+        generate_outputs(
+          model_steps,
+          f"model_{task_type}_{goal_name}{suffix}",
+          f"Model {task_type}: {goal_name} (eps={epsilon}){pos_label}{prog_suffix}",
+        )
+
+        # Optimal actions
+        if args.optimal:
+          rng, ep_rng = jax.random.split(rng)
+          opt_steps = run_episode_optimal(
+            env,
+            ep_params,
+            agent,
+            params,
+            ep_rng,
+            max_steps=args.max_steps,
+            start_pos=start_pos,
+          )
+          print(f"    Optimal: steps={len(opt_steps)}")
+          generate_outputs(
+            opt_steps,
+            f"optimal_{task_type}_{goal_name}{suffix}",
+            f"Optimal {task_type}: {goal_name}{pos_label}{prog_suffix}",
+          )
+
+        return model_steps
+
+      # Skip if outputs already exist
+      check_png = video_dir / f"model_train_{train_goal}_{eps_label}.png"
+      check_optimal = video_dir / f"optimal_train_{train_goal}_{eps_label}.png"
+      all_exist = check_png.exists() and (not args.optimal or check_optimal.exists())
+      if all_exist and not args.force:
+        print(f"\n  Skipping group {group_idx} eps={epsilon} — outputs exist")
+        rng, _ = jax.random.split(rng)
+        rng, _ = jax.random.split(rng)
+        continue
+
+      # Train task — original start
+      print(f"\n  === Group {group_idx} Train: {train_goal} (eps={epsilon}) ===")
+      train_steps = run_and_render(train_params, train_goal, "train")
+
+      # Train task — halfway start
+      if args.halfway:
+        state0 = train_steps[0]["state"]
+        path = find_optimal_path(
+          np.array(state0.grid),
+          np.array(state0.agent_pos),
+          int(state0.task_object),
+          pass_through_objects=True,
+        )
+        if path is not None and len(path) > 2:
+          midpoint = path[len(path) // 2]
+          print(f"    Halfway: {np.array(state0.agent_pos)} -> {midpoint}")
+          run_and_render(train_params, train_goal, "train", start_pos=midpoint)
+
+      # Test task — original start
+      print(f"\n  === Group {group_idx} Test: {test_goal} (eps={epsilon}) ===")
+      test_steps = run_and_render(test_params, test_goal, "test")
+
+      # Test task — halfway start
+      if args.halfway:
+        state0 = test_steps[0]["state"]
+        path = find_optimal_path(
+          np.array(state0.grid),
+          np.array(state0.agent_pos),
+          int(state0.task_object),
+          pass_through_objects=True,
+        )
+        if path is not None and len(path) > 2:
+          midpoint = path[len(path) // 2]
+          print(f"    Halfway: {np.array(state0.agent_pos)} -> {midpoint}")
+          run_and_render(test_params, test_goal, "test", start_pos=midpoint)
+
+  return generated_files
+
+
+def main_local(args):
+  """Process all checkpoints in a local directory."""
+  local_dir = args.local_dir.resolve()
+
+  # Parse metadata from path: .../save_data/{group}/{wandb_name}/{seed}/
+  seed_name = local_dir.name
+  wandb_name = local_dir.parent.name
+  group_name = local_dir.parent.parent.name
+
+  print(f"Local mode: {group_name}/{wandb_name}/{seed_name}")
+
+  # Discover all checkpoints
+  checkpoints = discover_local_checkpoints(local_dir)
+  print(f"Found {len(checkpoints)} checkpoint(s):")
+  for _, label, pct in checkpoints:
+    print(f"  {label} ({pct}%)")
+
+  # Load config once
+  config_files = list(local_dir.glob("*.config"))
+  config = load_config(config_files[0])
+  gamma = config.get("GAMMA", 0.99)
+
+  # Setup env + agent once
+  wn = wandb_name if args.wandb_name is None else args.wandb_name
+  print("  Setting up environment and agent...")
+  (
+    env,
+    env_params,
+    test_env_params,
+    agent,
+    image_dict,
+    keys,
+    action_names,
+    task_objects,
+    _train_objects,
+    _test_objects,
+    train_tasks,
+    test_tasks,
+  ) = setup_env_and_agent(config, wandb_name=wn)
+
+  # Process each checkpoint
+  all_generated = []
+  for ckpt_path, label, pct in checkpoints:
+    print(f"\n{'#' * 70}")
+    print(f"# Checkpoint: {label} ({pct}% trained)")
+    print(f"{'#' * 70}")
+
+    params = load_params(ckpt_path)
+    video_dir = local_dir / "videos" / label
+
+    generated = process_checkpoint(
+      args, params, env, env_params, test_env_params, agent,
+      image_dict, keys, action_names, video_dir, gamma,
+      progress_label=f"{pct}% trained",
+    )
+    all_generated.extend(generated)
+    print(f"  Outputs saved to: {video_dir}")
+
+  # Write video_links.txt
+  links_path = local_dir / "videos" / "video_links.txt"
+  links_path.parent.mkdir(parents=True, exist_ok=True)
+  with open(links_path, "w") as f:
+    for p in all_generated:
+      f.write(f"{p}\n")
+  print(f"\nVideo links written to: {links_path}")
+
+  print(f"\nDone. Processed {len(checkpoints)} checkpoint(s).")
+  return 0
+
+
 def main():
   parser = argparse.ArgumentParser(description="Generate preplay evaluation videos")
-  parser.add_argument("wandb_name", help="Wandb run name (the directory name)")
+  parser.add_argument("wandb_name", nargs="?", default=None, help="Wandb run name (the directory name)")
+  parser.add_argument(
+    "--local-dir",
+    type=Path,
+    default=None,
+    help="Local checkpoint directory (bypasses SSH/SCP). "
+    "Processes all checkpoints in the directory.",
+  )
   parser.add_argument(
     "--out",
     type=Path,
@@ -740,6 +1035,12 @@ def main():
     help="Also generate optimal (BFS) episodes alongside model episodes",
   )
   args = parser.parse_args()
+
+  if args.local_dir is not None:
+    return main_local(args)
+
+  if args.wandb_name is None:
+    parser.error("wandb_name is required when --local-dir is not used")
 
   args.out = args.out.expanduser()
   args.out.mkdir(parents=True, exist_ok=True)
@@ -797,166 +1098,10 @@ def main():
       test_tasks,
     ) = setup_env_and_agent(config, wandb_name=wandb_name)
 
-    # Find the level with rotation=(0,0) and pin to it
-    rotations = jnp.asarray(test_env_params.reset_params.rotation)  # [num_levels, 2]
-    level_idx = None
-    for i in range(rotations.shape[0]):
-      if int(rotations[i, 0]) == 0 and int(rotations[i, 1]) == 0:
-        level_idx = i
-        break
-    if level_idx is None:
-      print("  ERROR: No level with rotation=(0,0) found")
-      continue
-
-    # Create single-level env_params so random level selection is deterministic
-    single_reset = jax.tree_map(
-      lambda x: x[level_idx : level_idx + 1], test_env_params.reset_params
+    generated_files = process_checkpoint(
+      args, params, env, env_params, test_env_params, agent,
+      image_dict, keys, action_names, video_dir, gamma,
     )
-    base_params = test_env_params.replace(reset_params=single_reset)
-
-    # Get train/test objects for this specific level
-    train_objects = test_env_params.reset_params.train_objects[level_idx]
-    test_objects = test_env_params.reset_params.test_objects[level_idx]
-
-    print(f"  Train objects: {[keys[int(o)] for o in train_objects]}")
-    print(f"  Test objects: {[keys[int(o)] for o in test_objects]}")
-
-    video_dir.mkdir(parents=True, exist_ok=True)
-
-    rng = jax.random.PRNGKey(42)
-    num_groups = len(train_objects)
-
-    for group_idx in range(num_groups):
-      train_goal = keys[int(train_objects[group_idx])]
-      test_goal = keys[int(test_objects[group_idx])]
-
-      train_params = base_params.replace(
-        force_room=jnp.array(True),
-        default_room=jnp.array(group_idx),
-        p_test_sample_train=1.0,
-      )
-      test_params = base_params.replace(
-        force_room=jnp.array(True),
-        default_room=jnp.array(group_idx),
-        p_test_sample_train=0.0,
-      )
-
-      for epsilon in args.epsilon:
-        eps_label = f"eps{epsilon:.2f}".replace(".", "")
-
-        def generate_outputs(ep_steps, base_name, title):
-          """Generate last_frame PNG (and optionally video) for an episode."""
-          png_path = video_dir / f"{base_name}.png"
-          render_last_frame(
-            ep_steps, image_dict, action_names, png_path, title=title, gamma=gamma
-          )
-          if args.video:
-            mp4_path = video_dir / f"{base_name}.mp4"
-            make_video(
-              ep_steps,
-              image_dict,
-              action_names,
-              mp4_path,
-              title=title,
-              fps=args.fps,
-              gamma=gamma,
-            )
-
-        def run_and_render(ep_params, goal_name, task_type, start_pos=None):
-          """Run model + optimal episodes, generate outputs for both."""
-          nonlocal rng
-          suffix = f"_{eps_label}"
-          pos_label = ""
-          if start_pos is not None:
-            suffix += "_halfway"
-            pos_label = " [halfway]"
-
-          # Model actions
-          rng, ep_rng = jax.random.split(rng)
-          model_steps = run_episode(
-            env,
-            ep_params,
-            agent,
-            params,
-            ep_rng,
-            max_steps=args.max_steps,
-            epsilon=epsilon,
-            start_pos=start_pos,
-          )
-          actual = keys[int(model_steps[0]["state"].task_object)]
-          print(f"    Model: task={actual}, steps={len(model_steps)}")
-          generate_outputs(
-            model_steps,
-            f"model_{task_type}_{goal_name}{suffix}",
-            f"Model {task_type}: {goal_name} (eps={epsilon}){pos_label}",
-          )
-
-          # Optimal actions
-          if args.optimal:
-            rng, ep_rng = jax.random.split(rng)
-            opt_steps = run_episode_optimal(
-              env,
-              ep_params,
-              agent,
-              params,
-              ep_rng,
-              max_steps=args.max_steps,
-              start_pos=start_pos,
-            )
-            print(f"    Optimal: steps={len(opt_steps)}")
-            generate_outputs(
-              opt_steps,
-              f"optimal_{task_type}_{goal_name}{suffix}",
-              f"Optimal {task_type}: {goal_name}{pos_label}",
-            )
-
-          return model_steps
-
-        # Skip if outputs already exist
-        check_png = video_dir / f"model_train_{train_goal}_{eps_label}.png"
-        check_optimal = video_dir / f"optimal_train_{train_goal}_{eps_label}.png"
-        all_exist = check_png.exists() and (not args.optimal or check_optimal.exists())
-        if all_exist and not args.force:
-          print(f"\n  Skipping group {group_idx} eps={epsilon} — outputs exist")
-          rng, _ = jax.random.split(rng)
-          rng, _ = jax.random.split(rng)
-          continue
-
-        # Train task — original start
-        print(f"\n  === Group {group_idx} Train: {train_goal} (eps={epsilon}) ===")
-        train_steps = run_and_render(train_params, train_goal, "train")
-
-        # Train task — halfway start
-        if args.halfway:
-          state0 = train_steps[0]["state"]
-          path = find_optimal_path(
-            np.array(state0.grid),
-            np.array(state0.agent_pos),
-            int(state0.task_object),
-            pass_through_objects=True,
-          )
-          if path is not None and len(path) > 2:
-            midpoint = path[len(path) // 2]
-            print(f"    Halfway: {np.array(state0.agent_pos)} -> {midpoint}")
-            run_and_render(train_params, train_goal, "train", start_pos=midpoint)
-
-        # Test task — original start
-        print(f"\n  === Group {group_idx} Test: {test_goal} (eps={epsilon}) ===")
-        test_steps = run_and_render(test_params, test_goal, "test")
-
-        # Test task — halfway start
-        if args.halfway:
-          state0 = test_steps[0]["state"]
-          path = find_optimal_path(
-            np.array(state0.grid),
-            np.array(state0.agent_pos),
-            int(state0.task_object),
-            pass_through_objects=True,
-          )
-          if path is not None and len(path) > 2:
-            midpoint = path[len(path) // 2]
-            print(f"    Halfway: {np.array(state0.agent_pos)} -> {midpoint}")
-            run_and_render(test_params, test_goal, "test", start_pos=midpoint)
 
     print(f"  Outputs saved to: {video_dir}")
 

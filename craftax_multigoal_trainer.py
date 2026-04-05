@@ -8,7 +8,7 @@ HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue crafta
   app.parallel=none \
   app.debug=True \
   app.wandb=False \
-  app.search=ql
+  app.search=preplay-final
 
 RUNNING ON SLURM:
 RL_RESULTS_DIR=/n/holylfs06/LABS/kempner_fellow_wcarvalho/jax_rl_results \
@@ -499,12 +499,13 @@ def sweep(search: str = ""):
       "metric": metric,
       "parameters": {
         "ALG": {"values": ["preplay"]},
-        "SEED": {"values": list(range(1, 2))},
-        "SHARE_Q_FN": {"values": [True, False]},
+        "FIXED_EPSILON": {"values": [1,2]},
+        "CQL_ALPHA": {"values": [0, 1e-3, 1e-4]},
+        "SEED": {"values": [2]},
         # "WINDOW_SIZE": {"values": [.5, 1.0]},
-        "NUM_PRED_LAYERS": {"values": [2, 3]},
-        "OBS_INCLUDE_GOAL": {"values": [True, False]},
-        "OPTIMISTIC_RESET_RATIO": {"values": [1]},
+        #"NUM_PRED_LAYERS": {"values": [2, 3]},
+        #"OBS_INCLUDE_GOAL": {"values": [True, False]},
+        #"OPTIMISTIC_RESET_RATIO": {"values": [1]},
       },
       "overrides": ["alg=preplay_craftax", "rlenv=craftax-dyna-multigoal", "user=wilka"],
       "group": "preplay-testing-7",
@@ -572,7 +573,7 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 2))},
       },
       "overrides": ["alg=preplay_craftax", "rlenv=craftax-dyna-multigoal", "user=wilka"],
-      "group": "preplay-pnas-revision-3",
+      "group": "preplay-pnas-revision-4",
     }
 
   else:

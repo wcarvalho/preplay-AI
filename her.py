@@ -170,6 +170,24 @@ class RnnAgent(nn.Module):
 
     return Predictions(q_vals=q_vals, rnn_states=rnn_out)
 
+  def unroll_offtask(self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey, goal: Goal):
+    """Like unroll, but uses an explicit goal instead of extracting from timestep.
+
+    Called inside vmaps that strip the B dimension, so xs is [T, ...] not [T, B, ...].
+
+    rnn_state: [D] initial RNN state
+    xs: [T, ...] timestep sequence (should already have goal swapped in observation)
+    rng: random key
+    goal: GoalPosition with [T, D] fields (expanded over time)
+    """
+    embedding = jax.vmap(self.observation_encoder)(xs.observation)
+    rng, _rng = jax.random.split(rng)
+    rnn_in = RNNInput(obs=embedding, reset=xs.first())
+    new_rnn_state, rnn_out = self.rnn.unroll(rnn_state, rnn_in, _rng)
+    goal_embedding = jax.vmap(self.task_encoder)(goal)
+    q_vals = jax.vmap(self.q_fn)(rnn_out, goal_embedding)
+    return Predictions(q_vals=q_vals, rnn_states=rnn_out), new_rnn_state
+
   def initialize_carry(self, *args, **kwargs):
     """Initializes the RNN state."""
     return self.rnn.initialize_carry(*args, **kwargs)
@@ -217,6 +235,7 @@ class HerLossFn(base.RecurrentLossFn):
   online_reward_fn: Callable[[base.TimeStep], jax.Array] = None
   her_reward_fn: Callable[[base.TimeStep, Goal], jax.Array] = None
   goal_from_timestep: Callable[[base.TimeStep], Goal] = None
+  place_goal_in_timestep: Callable = None
   cql_alpha: float = 1.0
   cql_temperature: float = 1.0
 
@@ -392,22 +411,30 @@ class HerLossFn(base.RecurrentLossFn):
         timestep,
         actions,
         goal_logits,
-        online_preds,
-        target_preds,
+        online_state,
+        target_state,
       ):
         """new_goal is [D], goal_index is scalar, sub_key_grad is [2], ..."""
 
-        sub_key_grad, sub_key_grad_ = jax.random.split(sub_key_grad)
-        length = len(data.action)
+        # Swap goal into timestep observation for goal-conditioned RNN
+        place_goal_in_timestep = jax.vmap(self.place_goal_in_timestep, (0, None), 0)
+        timestep_w_g = place_goal_in_timestep(timestep, new_goal)
 
-        # [D] --> [T, D]
+        # Expand goal over time for Q-head
+        length = len(data.action)
         expand_over_time = lambda x: jnp.tile(x[None], [length, 1])
         expanded_new_goal = jax.tree_util.tree_map(expand_over_time, new_goal)
 
-        apply_q = functools.partial(self.network.apply, method=self.network.apply_q)
-        online_preds = apply_q(params, online_preds.rnn_states, expanded_new_goal)
-        target_preds = apply_q(
-          target_params, target_preds.rnn_states, expanded_new_goal
+        # Fresh RNN unroll from initial state
+        unroll_offtask = functools.partial(
+          self.network.apply, method=self.network.unroll_offtask
+        )
+        sub_key_grad, rng_1, rng_2 = jax.random.split(sub_key_grad, 3)
+        online_preds, _ = unroll_offtask(
+          params, online_state, timestep_w_g, rng_1, expanded_new_goal
+        )
+        target_preds, _ = unroll_offtask(
+          target_params, target_state, timestep_w_g, rng_2, expanded_new_goal
         )
 
         her_reward_info = self.her_reward_fn(timestep, new_goal)
@@ -423,6 +450,11 @@ class HerLossFn(base.RecurrentLossFn):
         achieved_something = (goal_logits.sum() > 1e-5).astype(loss_mask.dtype)
         loss_mask = loss_mask * achieved_something
 
+        # Peng's Q-lambda: HER goals are always off-policy, cut trace
+        # where greedy action under hindsight goal != action taken
+        selector = jnp.argmax(online_preds.q_vals, axis=-1)  # [T]
+        peng_lambda = (selector == actions).astype(jnp.float32) * self.lambda_
+
         modified_discount = timestep.discount
 
         td_error, batch_loss, metrics, log_info = self.loss_fn(
@@ -434,6 +466,7 @@ class HerLossFn(base.RecurrentLossFn):
           is_last=make_float(timestep.last()),
           non_terminal=modified_discount,
           loss_mask=loss_mask,
+          lambda_override=peng_lambda,  # [T] Peng trace-cut array
         )
         td_error = achieved_something * td_error
         batch_loss = achieved_something * batch_loss
@@ -447,7 +480,7 @@ class HerLossFn(base.RecurrentLossFn):
         return td_error, batch_loss, metrics, log_info
 
       her_loss_fn = jax.vmap(her_loss_fn, (0, 0, 0, None, None, None, None, None))  # N
-      her_loss_fn = jax.vmap(her_loss_fn, 1, 0)  # B
+      her_loss_fn = jax.vmap(her_loss_fn, (1, 1, 1, 1, 1, 1, 0, 0))  # B
 
       key_grad, key_grad_ = jax.random.split(key_grad[0])
       key_grad_ = jax.random.split(key_grad_, self.ngoals * B).reshape(
@@ -456,14 +489,14 @@ class HerLossFn(base.RecurrentLossFn):
 
       # [B, N, T], [B, N], [B, N, T], [B, N, T, D]
       _, her_loss, her_metrics, her_log_info = her_loss_fn(
-        new_goals,  # [N, B, D]
-        goal_indices,  # [N, B]
-        key_grad_,  # [N, B, 2]
-        data.timestep,  # [T, B, D]
-        data.action,  # [T, B]
-        logits,  # [T, B]
-        online_preds,  # [T, B, D]
-        target_preds,  # [T, B, D]
+        new_goals,        # [N, B, D]
+        goal_indices,     # [N, B]
+        key_grad_,        # [N, B, 2]
+        data.timestep,    # [T, B, D]
+        data.action,      # [T, B]
+        logits,           # [T, B]
+        online_state,     # [B, D]
+        target_state,     # [B, D]
       )
 
       loss = loss + self.her_coeff * her_loss.mean(1)
@@ -490,20 +523,35 @@ class HerLossFn(base.RecurrentLossFn):
         new_goal,
         timestep,
         actions,
-        online_preds,
-        target_preds,
+        online_state,
+        target_state,
+        key_grad,
       ):
         """All-goals Q-learning loss with Peng trace cutting + CQL.
 
         new_goal: GoalPosition with scalar fields [D], timestep: [T, ...]
+        Uses fresh RNN unroll from initial state with goal swapped into timestep.
         """
+        # Swap goal into timestep observation for goal-conditioned RNN
+        place_goal_in_timestep = jax.vmap(self.place_goal_in_timestep, (0, None), 0)
+        timestep_w_g = place_goal_in_timestep(timestep, new_goal)
+
+        # Expand goal over time for Q-head
         length = actions.shape[0]
         expand = lambda x: jnp.tile(x[None], [length, 1])
         expanded_goal = jax.tree_util.tree_map(expand, new_goal)
 
-        apply_q = functools.partial(self.network.apply, method=self.network.apply_q)
-        online_preds_new_g = apply_q(params, online_preds.rnn_states, expanded_goal)
-        target_preds_new_g = apply_q(target_params, target_preds.rnn_states, expanded_goal)
+        # Fresh RNN unroll from initial state
+        unroll_offtask = functools.partial(
+          self.network.apply, method=self.network.unroll_offtask
+        )
+        key_grad, rng_1, rng_2 = jax.random.split(key_grad, 3)
+        online_preds_new_g, _ = unroll_offtask(
+          params, online_state, timestep_w_g, rng_1, expanded_goal
+        )
+        target_preds_new_g, _ = unroll_offtask(
+          target_params, target_state, timestep_w_g, rng_2, expanded_goal
+        )
 
         reward_info = self.her_reward_fn(timestep, new_goal)
 
@@ -550,17 +598,22 @@ class HerLossFn(base.RecurrentLossFn):
         ag_log_info["reward_info"] = reward_info
         return ag_td_error, ag_batch_loss, ag_metrics, ag_log_info
 
-      # vmap over N goals, then over B batch
-      ag_fn = jax.vmap(all_goals_loss_fn, (0, None, None, None, None))  # N goals
-      ag_fn = jax.vmap(ag_fn, 1, 0)  # B batch (goals shared across batch)
+      N = all_goals.goal.shape[0]
+      key_grad, key_grad_ = jax.random.split(key_grad)
+      key_grad_ = jax.random.split(key_grad_, N * B).reshape(N, B, 2)
 
-      # , [B, N]
+      # vmap over N goals, then over B batch
+      ag_fn = jax.vmap(all_goals_loss_fn, (0, None, None, None, None, 0))  # N goals
+      ag_fn = jax.vmap(ag_fn, (1, 1, 1, 0, 0, 1))  # B batch
+
+      # [B, N]
       _, ag_loss, ag_metrics, ag_log_info = ag_fn(
-        all_goals,  # GoalPosition [N, D]
-        data.timestep,  # [T, B, ...]
-        data.action,  # [T, B]
-        online_preds,  # tree with [T, B, ...]
-        target_preds,  # tree with [T, B, ...]
+        all_goals,        # GoalPosition [N, B, D]
+        data.timestep,    # [T, B, ...]
+        data.action,      # [T, B]
+        online_state,     # [B, D]
+        target_state,     # [B, D]
+        key_grad_,        # [N, B, 2]
       )
       # only first goal
       all_log_info["all_goals"] = jax.tree_util.tree_map(
@@ -719,6 +772,18 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
       goal=goal_features, position=position_goal.astype(position_fn(timesteps).dtype)
     )
 
+  def place_goal_in_timestep(timestep, goal):
+    """Swap goal into timestep observation for goal-conditioned RNN.
+
+    Args:
+      timestep: single timestep (no batch/time dims)
+      goal: GoalPosition with scalar fields [D]
+    Returns:
+      new timestep with task_w replaced in observation
+    """
+    new_observation = timestep.observation.replace(task_w=goal.goal)
+    return timestep.replace(observation=new_observation)
+
   return functools.partial(
     HerLossFn,
     discount=config["GAMMA"],
@@ -743,6 +808,7 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
       env=config["ENV"],
       position_goals=config.get("POSITION_GOALS", False),
     ),
+    place_goal_in_timestep=place_goal_in_timestep,
     cql_alpha=config.get("CQL_ALPHA", 1e-3),
     cql_temperature=config.get("CQL_TEMPERATURE", 1.0),
   )
