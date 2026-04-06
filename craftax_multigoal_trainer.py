@@ -317,7 +317,7 @@ def run_single(config: dict, save_path: str = None):
   env = CraftaxMultiGoalSymbolicWebEnvNoAutoReset(static_env_params=static_env_params)
   default_params = craftax_simulation_configs.default_params
   env_params = default_params.replace(task_configs=train_configs)
-  test_env_params = default_params.replace(task_configs=test_configs)
+  test_env_params = default_params.replace(task_configs=test_configs, training=False)
 
   all_tasks = active_task_vectors  # relevant for successor features
 
@@ -391,7 +391,7 @@ def run_single(config: dict, save_path: str = None):
       model_env=env,
       make_logger=partial(
         make_logger,
-        #learner_log_extra=multitask_preplay.learner_log_extra,
+        learner_log_extra=multitask_preplay.craftax_learner_log_extra,
       ),
       train_env_params=env_params,
       test_env_params=test_env_params,
@@ -468,7 +468,11 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 3))},
         "FIXED_EPSILON": {"values": [0]},
       },
-      "overrides": ["alg=qlearning_craftax_multigoal", "rlenv=craftax-multigoal", "user=wilka"],
+      "overrides": [
+        "alg=qlearning_craftax_multigoal",
+        "rlenv=craftax-multigoal",
+        "user=wilka",
+      ],
       "group": "ql-testing-4",
     }
   elif search == "usfa":
@@ -499,16 +503,30 @@ def sweep(search: str = ""):
       "metric": metric,
       "parameters": {
         "ALG": {"values": ["preplay"]},
+<<<<<<< HEAD
         "FIXED_EPSILON": {"values": [1,2]},
         "CQL_ALPHA": {"values": [1e-4, 1e-5, 1e-6]},
+=======
+        "FIXED_EPSILON": {"values": [1, 2]},
+        "CQL_ALPHA": {"values": [0, 1e-3, 1e-4]},
+>>>>>>> 6d0616a4599acb948b477f854c020d2106b8afcf
         "SEED": {"values": [2]},
         # "WINDOW_SIZE": {"values": [.5, 1.0]},
-        #"NUM_PRED_LAYERS": {"values": [2, 3]},
-        #"OBS_INCLUDE_GOAL": {"values": [True, False]},
-        #"OPTIMISTIC_RESET_RATIO": {"values": [1]},
+        # "NUM_PRED_LAYERS": {"values": [2, 3]},
+        # "OBS_INCLUDE_GOAL": {"values": [True, False]},
+        # "OPTIMISTIC_RESET_RATIO": {"values": [1]},
       },
+<<<<<<< HEAD
       "overrides": ["alg=preplay_craftax", "rlenv=craftax-dyna-multigoal", "user=wilka"],
       "group": "preplay-testing-8",
+=======
+      "overrides": [
+        "alg=preplay_craftax",
+        "rlenv=craftax-dyna-multigoal",
+        "user=wilka",
+      ],
+      "group": "preplay-testing-7",
+>>>>>>> 6d0616a4599acb948b477f854c020d2106b8afcf
     }
   elif search == "her":
     sweep_config = {
@@ -531,7 +549,11 @@ def sweep(search: str = ""):
         "ALG": {"values": ["qlearning"]},
         "SEED": {"values": list(range(1, 2))},
       },
-      "overrides": ["alg=qlearning_craftax_multigoal", "rlenv=craftax-multigoal", "user=wilka"],
+      "overrides": [
+        "alg=qlearning_craftax_multigoal",
+        "rlenv=craftax-multigoal",
+        "user=wilka",
+      ],
       "group": "ql-pnas-revision-3",
     }
   elif search == "usfa-final":
@@ -572,7 +594,11 @@ def sweep(search: str = ""):
         "ALG": {"values": ["preplay"]},
         "SEED": {"values": list(range(1, 2))},
       },
-      "overrides": ["alg=preplay_craftax", "rlenv=craftax-dyna-multigoal", "user=wilka"],
+      "overrides": [
+        "alg=preplay_craftax",
+        "rlenv=craftax-dyna-multigoal",
+        "user=wilka",
+      ],
       "group": "preplay-pnas-revision-4",
     }
 
