@@ -500,7 +500,7 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "FIXED_EPSILON": {"values": [1,2]},
-        "CQL_ALPHA": {"values": [0, 1e-3, 1e-4]},
+        "CQL_ALPHA": {"values": [1e-4, 1e-5, 1e-6]},
         "SEED": {"values": [2]},
         # "WINDOW_SIZE": {"values": [.5, 1.0]},
         #"NUM_PRED_LAYERS": {"values": [2, 3]},
@@ -508,7 +508,7 @@ def sweep(search: str = ""):
         #"OPTIMISTIC_RESET_RATIO": {"values": [1]},
       },
       "overrides": ["alg=preplay_craftax", "rlenv=craftax-dyna-multigoal", "user=wilka"],
-      "group": "preplay-testing-7",
+      "group": "preplay-testing-8",
     }
   elif search == "her":
     sweep_config = {
