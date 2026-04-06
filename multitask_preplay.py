@@ -673,6 +673,13 @@ class PreplayLossFn:
       )
       batch_loss += all_goals_batch_loss.mean(1)  # coeff applied inside
       all_metrics.update({f"2.all_goals/{k}": v for k, v in all_goals_metrics.items()})
+      # all_goals_log_info N dim follows all_tasks ordering from sample_td_goals
+      # For craftax: sample_all_tasks returns eye(G) → idx 0=Diamond, 1=Sapphire, 2=Ruby
+      ALLGOALS_VIZ_IDX = 0
+      all_log_info["all_goals"] = jax.tree_util.tree_map(
+        lambda x: x[:, ALLGOALS_VIZ_IDX], all_goals_log_info
+      )
+      all_log_info["all_goals"]["goal"] = all_goals[:, ALLGOALS_VIZ_IDX]  # [B, G]
 
     # ---- Dyna/preplay loss ----
     if self.dyna_coeff > 0.0:
@@ -2651,6 +2658,618 @@ def jaxmaze_learner_log_extra(
       plt.close(unified_fig)
     if grid_fig is not None:
       plt.close(grid_fig)
+
+  n_updates = data["n_updates"] + 1
+  if config["LEARNER_EXTRA_LOG_PERIOD"] > 0:
+    is_log_time = n_updates % config["LEARNER_EXTRA_LOG_PERIOD"] == 0
+    jax.lax.cond(
+      is_log_time,
+      lambda d: jax.debug.callback(callback, d),
+      lambda d: None,
+      callback_data,
+    )
+
+
+##############################
+# learner_log_extra (craftax)
+##############################
+def craftax_learner_log_extra(
+  data: dict,
+  config: dict,
+):
+  """Visualize preplay training for craftax (mirrors jaxmaze_learner_log_extra)."""
+  from math import ceil
+  from matplotlib.patches import Rectangle  # noqa: F811
+  from craftax.craftax.constants import Achievement, Action, BLOCK_PIXEL_SIZE_IMG
+  from craftax.craftax.renderer import (
+    render_craftax_pixels as render_craftax_pixels_partial,
+  )
+
+  try:
+    import craftax_utils as _cu
+
+    # Check that the full-map renderer is actually available (not just the module)
+    _cu.render_craftax_pixels_full  # raises NameError if missing
+    craftax_full_render_fn = _cu.render_fn
+    place_arrows_on_image = _cu.place_arrows_on_image
+    _has_full_renderer = True
+  except (ImportError, NameError, AttributeError):
+    _has_full_renderer = False
+
+  # Goal index -> human-readable name
+  idx_to_achievement = {v: k for k, v in Achiement_to_idx.items()}
+  GOAL_NAMES = {}
+  for idx, ach_val in idx_to_achievement.items():
+    GOAL_NAMES[idx] = Achievement(ach_val).name.replace("COLLECT_", "")
+  action_names = {a.value: a.name for a in Action}
+
+  def goal_name_from_vec(goal_vec):
+    """Convert one-hot goal vector [G] to human name."""
+    idx = int(jnp.argmax(goal_vec))
+    return GOAL_NAMES.get(idx, f"Goal_{idx}")
+
+  def render_env_state(env_state):
+    """Render map from env_state. Returns float [0,1] for matplotlib."""
+    if _has_full_renderer:
+      return np.array(craftax_full_render_fn(env_state)) / 255.0
+    else:
+      img = render_craftax_pixels_partial(
+        env_state, block_pixel_size=BLOCK_PIXEL_SIZE_IMG
+      )
+      return np.array(img) / 255.0
+
+  # ---- Pre-index data outside callback (JAX land) ----
+  callback_data = {}
+
+  # Online: [B, T, ...] -> first batch -> [T, ...]
+  if "online" in data:
+    callback_data["online"] = jax.tree_util.tree_map(lambda x: x[0], data["online"])
+    # Keep full batch for episode grid plot
+    callback_data["online_all_batches"] = {
+      "timesteps": data["online"]["timesteps"],
+      "actions": data["online"]["actions"],
+    }
+
+  # All goals: [B, T, ...] -> first batch -> [T, ...]
+  if "all_goals" in data:
+    callback_data["all_goals"] = jax.tree_util.tree_map(
+      lambda x: x[0], data["all_goals"]
+    )
+
+  # Dyna: [B, T, S+1, total_sims, ...] -> batch=0, T=0, split dyna/preplay
+  if "dyna" in data:
+    dyna = data["dyna"]
+    dyna.pop("any_achievable", None)
+
+    # first batch & time
+    dyna = jax.tree_util.tree_map(lambda y: y[0, 0], dyna)
+
+    DYNA_IDX = 0
+    PREPLAY_IDX = 1
+    simulation_goals = dyna.pop("goal")
+    ontask_q_values = dyna.pop("sim_ontask_q_values")
+    offtask_q_values = dyna.pop("sim_offtask_q_values")
+    epsilon_values = dyna.pop("epsilon_values")
+
+    total_sims = simulation_goals.shape[0]
+
+    callback_data["dyna"] = jax.tree_util.tree_map(lambda x: x[:, DYNA_IDX], dyna)
+    callback_data["dyna"]["ontask_q_values"] = ontask_q_values[:, DYNA_IDX]
+    callback_data["dyna"]["offtask_q_values"] = offtask_q_values[:, DYNA_IDX]
+    callback_data["dyna"]["goal"] = simulation_goals[DYNA_IDX]
+    callback_data["dyna"]["epsilon"] = epsilon_values[DYNA_IDX]
+
+    if total_sims >= 2:
+      callback_data["preplay"] = jax.tree_util.tree_map(
+        lambda x: x[:, PREPLAY_IDX], dyna
+      )
+      callback_data["preplay"]["ontask_q_values"] = ontask_q_values[:, PREPLAY_IDX]
+      callback_data["preplay"]["offtask_q_values"] = offtask_q_values[:, PREPLAY_IDX]
+      callback_data["preplay"]["goal"] = simulation_goals[PREPLAY_IDX]
+      callback_data["preplay"]["epsilon"] = epsilon_values[PREPLAY_IDX]
+
+  def plot_q_heatmap(
+    ax,
+    q_values,
+    actions,
+    title,
+    nT,
+    action_names_=None,
+    show_numbers=True,
+    vmin=None,
+    vmax=None,
+  ):
+    """Draw Q-value heatmap [A, T] with argmax (red) and taken (white) rectangles."""
+    q_T = np.array(q_values[:nT]).T  # [A, T]
+    im = ax.imshow(
+      q_T,
+      aspect="auto",
+      cmap="coolwarm",
+      interpolation="nearest",
+      vmin=vmin,
+      vmax=vmax,
+    )
+    n_actions = q_T.shape[0]
+    for t in range(nT):
+      if show_numbers:
+        for a in range(n_actions):
+          ax.text(
+            t,
+            a,
+            f"{q_T[a, t]:.1f}",
+            ha="center",
+            va="center",
+            fontsize=10,
+            color="black",
+          )
+      best_a = int(np.argmax(q_values[t]))
+      ax.add_patch(
+        Rectangle(
+          (t - 0.45, best_a - 0.45),
+          0.9,
+          0.9,
+          linewidth=2,
+          edgecolor="black",
+          facecolor="none",
+        )
+      )
+      taken_a = int(actions[t])
+      ax.add_patch(
+        Rectangle(
+          (t - 0.35, taken_a - 0.35),
+          0.7,
+          0.7,
+          linewidth=3,
+          edgecolor="cyan",
+          facecolor="none",
+        )
+      )
+    ax.set_title(title, fontsize=22)
+    ax.set_yticks(range(q_T.shape[0]))
+    if action_names_:
+      ax.set_yticklabels([action_names_.get(i, str(i)) for i in range(q_T.shape[0])])
+    ax.set_xticks(range(nT))
+    return im
+
+  def plot_unified(d):
+    """Unified figure: up to 4 columns (online, all_goals, preplay, dyna) x 5 rows."""
+    column_order = ["online", "all_goals", "preplay", "dyna"]
+    col_names = [c for c in column_order if c in d]
+    if not col_names:
+      return None
+
+    col_data = {c: d[c] for c in col_names}
+    n_cols = len(col_names)
+    n_rows = 5
+
+    fig, axes = plt.subplots(
+      n_rows,
+      n_cols,
+      figsize=(10.4 * n_cols, 5.2 * n_rows),
+      gridspec_kw={"hspace": 0.4, "wspace": 0.3},
+    )
+    fig.set_dpi(150)
+    if n_cols == 1:
+      axes = axes[:, None]
+    if n_rows == 1:
+      axes = axes[None, :]
+
+    for ax_row in axes:
+      for ax in ax_row:
+        ax.tick_params(labelsize=18)
+
+    # Detect episodes from online timesteps
+    online_timesteps = None
+    online_episode_ranges = []
+    online_episode_starts = []
+    if "online" in col_data:
+      online_timesteps = col_data["online"]["timesteps"]
+      nT_online = len(online_timesteps.reward)
+      is_first = online_timesteps.first()
+      online_episode_starts = list(jnp.where(is_first)[0])
+      if not online_episode_starts or online_episode_starts[0] != 0:
+        online_episode_starts = [0] + online_episode_starts
+      for i, start in enumerate(online_episode_starts):
+        end = (
+          online_episode_starts[i + 1]
+          if i + 1 < len(online_episode_starts)
+          else nT_online
+        )
+        online_episode_ranges.append((int(start), int(end)))
+
+    # --- Row 0: Q-values line plot ---
+    for ci, col_name in enumerate(col_names):
+      ax = axes[0, ci]
+      cd = col_data[col_name]
+      actions_ = cd["actions"]
+      q_values = cd["q_values"]
+      q_target = cd["q_target"]
+      nT = len(actions_)
+      q_values_taken = rlax.batched_index(q_values, actions_)
+
+      if col_name in ("online", "all_goals"):
+        loss_rewards = cd.get("loss_rewards")
+        if loss_rewards is not None:
+          ax.plot(loss_rewards, label="Loss Reward", color="tab:cyan")
+        ax.plot(q_values_taken, label="Q-Values", color="tab:orange")
+        ax.plot(q_values.max(axis=-1), label="Q-Max", color="tab:green")
+        ax.plot(q_target, label="Q-Targets", color="tab:red")
+        tql = cd.get("target_q_t_lambda")
+        if tql is not None:
+          ax.plot(tql, label="Q-Target (λ)", color="blue")
+        tqm = cd.get("target_q_t_model")
+        if tqm is not None:
+          ax.plot(tqm, label="Q-Target (model)", color="grey")
+        qnd = cd.get("td_mask")
+        if qnd is not None:
+          ax.plot(qnd * 0.1, label="TD Mask", linestyle="--", color="purple")
+      else:
+        # preplay/dyna
+        simulation_reward = cd.get("simulation_reward")
+        if simulation_reward is not None:
+          ax.plot(simulation_reward, label="Sim rewards", color="tab:blue")
+        ax.plot(q_values_taken, label="Q-Values", color="tab:orange")
+        ax.plot(q_target, label="Q-Targets", color="tab:red")
+        loss_mask = cd.get("loss_mask")
+        if loss_mask is not None:
+          ax.plot(loss_mask * 0.5, label="Loss Mask", linestyle="--", color="black")
+
+      ax.set_title(f"{col_name} — Q-Values", fontsize=22)
+      ax.grid(True)
+      ax.set_xticks(range(nT))
+      ax.legend(fontsize=12)
+
+    # --- Row 1: Environment trajectory image ---
+    for ci, col_name in enumerate(col_names):
+      ax = axes[1, ci]
+      cd = col_data[col_name]
+
+      if col_name == "online" and online_timesteps is not None:
+        if len(online_episode_ranges) >= 1:
+          ep_start, ep_end = online_episode_ranges[0]
+          initial_env_state = jax.tree_util.tree_map(
+            lambda x: x[ep_start], online_timesteps.state.env_state
+          )
+          img = render_env_state(initial_env_state)
+          if _has_full_renderer:
+            maze_h = int(initial_env_state.map.shape[1])
+            maze_w = int(initial_env_state.map.shape[2])
+            ep_positions = online_timesteps.state.env_state.player_position[
+              ep_start : ep_end - 1
+            ]
+            ep_actions = cd["actions"][ep_start : ep_end - 1]
+            place_arrows_on_image(
+              img, ep_positions, ep_actions, maze_h, maze_w, arrow_scale=5, ax=ax
+            )
+          else:
+            ax.imshow(img)
+          task_w = online_timesteps.observation.task_w[ep_start]
+          goal_name = goal_name_from_vec(task_w)
+          total_reward = float(online_timesteps.reward[ep_start:ep_end].sum())
+          ax.set_title(
+            f"online — Ep 0 ({goal_name}, r={total_reward:.1f})", fontsize=22
+          )
+          ax.axis("off")
+        else:
+          ax.set_visible(False)
+
+      elif col_name == "all_goals":
+        goal = cd.get("goal")
+        timesteps = cd["timesteps"]
+        initial_env_state = jax.tree_util.tree_map(
+          lambda x: x[0], timesteps.state.env_state
+        )
+        img = render_env_state(initial_env_state)
+        ax.imshow(img)
+        task_w_0 = timesteps.observation.task_w[0]
+        task_goal_name = goal_name_from_vec(task_w_0)
+        if goal is not None:
+          ag_goal_name = goal_name_from_vec(goal)
+          ax.set_title(
+            f"all_goals — (eval={ag_goal_name}, task={task_goal_name})", fontsize=22
+          )
+        else:
+          ax.set_title(f"all_goals — ({task_goal_name})", fontsize=22)
+        ax.axis("off")
+
+      elif col_name in ("preplay", "dyna"):
+        timesteps = cd["timesteps"]
+        actions_ = cd["actions"]
+        goal = cd.get("goal")
+        initial_env_state = jax.tree_util.tree_map(
+          lambda x: x[0], timesteps.state.env_state
+        )
+        img = render_env_state(initial_env_state)
+        if _has_full_renderer:
+          maze_h = int(initial_env_state.map.shape[1])
+          maze_w = int(initial_env_state.map.shape[2])
+          in_episode = get_in_episode(timesteps)
+          ep_actions = actions_[in_episode][:-1]
+          ep_positions = timesteps.state.env_state.player_position[in_episode][:-1]
+          place_arrows_on_image(
+            img, ep_positions, ep_actions, maze_h, maze_w, arrow_scale=5, ax=ax
+          )
+        else:
+          ax.imshow(img)
+        task_w_0 = timesteps.observation.task_w[0]
+        t_goal_name = goal_name_from_vec(task_w_0)
+        if goal is not None:
+          sim_goal_name = goal_name_from_vec(goal)
+          ax.set_title(
+            f"{col_name} — (sim={sim_goal_name}, task={t_goal_name})", fontsize=22
+          )
+        else:
+          ax.set_title(f"{col_name} — ({t_goal_name})", fontsize=22)
+        ax.axis("off")
+      else:
+        ax.set_visible(False)
+
+    # --- Shared color scale for Q-value rows ---
+    all_q = []
+    for col_name in col_names:
+      cd = col_data[col_name]
+      nT = len(cd["actions"])
+      all_q.append(np.array(cd["q_values"][:nT]))
+      target_q = cd.get("target_q_values")
+      if target_q is not None:
+        all_q.append(np.array(target_q[:nT]))
+    all_q_flat = np.concatenate([q.ravel() for q in all_q])
+    q_vmin, q_vmax = float(all_q_flat.min()), float(all_q_flat.max())
+
+    # --- Row 2: Q-value heatmap [A, T] ---
+    im_q = None
+    for ci, col_name in enumerate(col_names):
+      ax = axes[2, ci]
+      cd = col_data[col_name]
+      actions_ = cd["actions"]
+      q_values = cd["q_values"]
+      nT = len(actions_)
+      if col_name in ("online", "all_goals"):
+        nT = min(nT, 20)
+      im_q = plot_q_heatmap(
+        ax,
+        q_values,
+        actions_,
+        f"{col_name} — Q-values",
+        nT,
+        action_names_=action_names,
+        show_numbers=col_name in ("preplay", "dyna"),
+        vmin=q_vmin,
+        vmax=q_vmax,
+      )
+    if im_q is not None:
+      fig.colorbar(im_q, ax=axes[2, :].tolist(), shrink=0.8, pad=0.02)
+
+    # --- Row 3: Target-net Q-value heatmap [A, T] ---
+    im_tq = None
+    for ci, col_name in enumerate(col_names):
+      ax = axes[3, ci]
+      cd = col_data[col_name]
+      target_q = cd.get("target_q_values")
+      if target_q is not None:
+        actions_ = cd["actions"]
+        nT = len(actions_)
+        if col_name in ("online", "all_goals"):
+          nT = min(nT, 20)
+        im_tq = plot_q_heatmap(
+          ax,
+          target_q,
+          actions_,
+          f"{col_name} — Target Q",
+          nT,
+          action_names_=action_names,
+          show_numbers=col_name in ("preplay", "dyna"),
+          vmin=q_vmin,
+          vmax=q_vmax,
+        )
+      else:
+        ax.set_visible(False)
+    if im_tq is not None:
+      fig.colorbar(im_tq, ax=axes[3, :].tolist(), shrink=0.8, pad=0.02)
+
+    # --- Row 4: Goal vectors ---
+    for ci, col_name in enumerate(col_names):
+      ax = axes[4, ci]
+      cd = col_data[col_name]
+      nT = len(cd["actions"])
+
+      if col_name in ("online", "all_goals"):
+        goal_tv = cd.get("goal_task_vector")
+        goal_ach = cd.get("goal_achievements")
+        if goal_tv is not None and goal_ach is not None:
+          combined = (goal_tv + goal_ach).T  # [D, T]
+          ax.imshow(
+            combined,
+            aspect="auto",
+            cmap="viridis",
+            interpolation="nearest",
+            vmin=0,
+            vmax=2,
+          )
+          ax.set_title(f"{col_name} — Task+Ach", fontsize=22)
+          ax.set_ylabel("Dims", fontsize=18)
+          n_dims = combined.shape[0]
+          ax.set_yticks(range(n_dims))
+          ytick_labels = [GOAL_NAMES.get(i, str(i)) for i in range(n_dims)]
+          ax.set_yticklabels(ytick_labels)
+          ax.set_xticks(range(nT))
+          ax.grid(True, axis="x", alpha=0.3, color="white")
+          loss_mask = cd.get("loss_mask")
+          if loss_mask is not None:
+            mask_diff = np.diff(np.concatenate([[0], loss_mask, [0]]))
+            starts = np.where(mask_diff == 1)[0]
+            ends = np.where(mask_diff == -1)[0] - 1
+            for s in starts:
+              ax.axvline(s - 0.5, color="red", linestyle="-", linewidth=1.5)
+            for e in ends:
+              ax.axvline(e + 0.5, color="red", linestyle="-", linewidth=1.5)
+          if col_name == "online" and online_episode_starts:
+            for ep_start in online_episode_starts[1:]:
+              ax.axvline(ep_start - 0.5, color="white", linestyle="-", linewidth=2)
+        else:
+          ax.set_visible(False)
+
+      elif col_name in ("preplay", "dyna"):
+        goal = cd.get("goal")
+        if goal is not None:
+          goal_2d = jnp.tile(goal[None, :], (nT, 1)).T  # [D, T]
+          ax.imshow(
+            goal_2d,
+            aspect="auto",
+            cmap="viridis",
+            interpolation="nearest",
+            vmin=0,
+            vmax=1,
+          )
+          ax.set_title(f"{col_name} — Goal Vector", fontsize=22)
+          ax.set_ylabel("Dims", fontsize=18)
+          n_dims = goal_2d.shape[0]
+          ax.set_yticks(range(n_dims))
+          ytick_labels = [GOAL_NAMES.get(i, str(i)) for i in range(n_dims)]
+          ax.set_yticklabels(ytick_labels)
+          ax.set_xticks(range(nT))
+          ax.grid(True, axis="x", alpha=0.3, color="white")
+        else:
+          ax.set_visible(False)
+      else:
+        ax.set_visible(False)
+
+    fig.tight_layout()
+    return fig
+
+  def plot_episode_grid(d):
+    """Grid of episode resets from a single B dim, showing trajectories."""
+    if "online_all_batches" not in d:
+      return None
+    all_timesteps = d["online_all_batches"]["timesteps"]
+    all_actions = d["online_all_batches"]["actions"]
+
+    # Use first B dimension and find all episode resets
+    ts_b = jax.tree_util.tree_map(lambda x: x[0], all_timesteps)
+    actions_b = np.array(all_actions[0])
+    nT = len(ts_b.reward)
+
+    is_first = np.array(ts_b.first())
+    ep_starts = list(np.where(is_first)[0])
+
+    episodes = []
+    for i, start in enumerate(ep_starts):
+      end = ep_starts[i + 1] if i + 1 < len(ep_starts) else nT
+      episodes.append((start, end))
+
+    n_eps = len(episodes)
+    if n_eps == 0:
+      return None
+
+    n_cols = min(n_eps, ceil(n_eps**0.5))
+    n_rows = ceil(n_eps / n_cols)
+    fig, axes_ = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows))
+    if n_rows == 1 and n_cols == 1:
+      axes_ = np.array([[axes_]])
+    elif n_rows == 1 or n_cols == 1:
+      axes_ = axes_.reshape(n_rows, n_cols)
+
+    for ep_i, (ep_start, ep_end) in enumerate(episodes):
+      row, col = divmod(ep_i, n_cols)
+      ax = axes_[row, col]
+
+      initial_env_state = jax.tree_util.tree_map(
+        lambda x: x[ep_start], ts_b.state.env_state
+      )
+      img = render_env_state(initial_env_state)
+      if _has_full_renderer:
+        maze_h = int(initial_env_state.map.shape[1])
+        maze_w = int(initial_env_state.map.shape[2])
+        ep_positions = ts_b.state.env_state.player_position[ep_start : ep_end - 1]
+        ep_actions = actions_b[ep_start : ep_end - 1]
+        place_arrows_on_image(
+          img, ep_positions, ep_actions, maze_h, maze_w, arrow_scale=5, ax=ax
+        )
+      else:
+        ax.imshow(img)
+      task_w = ts_b.observation.task_w[ep_start]
+      goal_name = goal_name_from_vec(task_w)
+      total_reward = float(np.array(ts_b.reward[ep_start:ep_end]).sum())
+      apos = ts_b.state.env_state.player_position[ep_start]
+      ax.set_title(
+        f"e{ep_i} {goal_name} r={total_reward:.1f} pos=({int(apos[0])},{int(apos[1])})",
+        fontsize=8,
+      )
+      ax.axis("off")
+
+    # Hide unused axes
+    for idx in range(n_eps, n_rows * n_cols):
+      row, col = divmod(idx, n_cols)
+      axes_[row, col].set_visible(False)
+
+    fig.tight_layout()
+    return fig
+
+  def plot_simulation_frames(d, key):
+    """Render per-frame grid for a simulation trajectory (preplay or dyna)."""
+    if key not in d:
+      return None
+    cd = d[key]
+    timesteps = cd["timesteps"]
+    actions_ = cd["actions"]
+    nT = len(timesteps.reward)
+    max_len = min(config.get("MAX_EPISODE_LOG_LEN", 40), nT)
+
+    frames = []
+    for idx in range(max_len):
+      env_state = jax.tree_util.tree_map(lambda x: x[idx], timesteps.state.env_state)
+      img = render_env_state(env_state)
+      frames.append(img)
+
+    actions_taken = [Action(int(a)).name for a in actions_[:max_len]]
+
+    def panel_title_fn(ts, i):
+      title = f"t={i}\n{actions_taken[i]}"
+      if i < nT - 1:
+        title += f"\nr={ts.reward[i + 1]:.2f}, γ={ts.discount[i + 1]}"
+      return title
+
+    goal = cd.get("goal")
+    goal_name = goal_name_from_vec(goal) if goal is not None else "?"
+    task_w_0 = timesteps.observation.task_w[0]
+    task_name = goal_name_from_vec(task_w_0)
+
+    fig = plot_frames(
+      timesteps=timesteps,
+      frames=frames,
+      panel_title_fn=panel_title_fn,
+      ncols=6,
+    )
+    fig.suptitle(f"{key} (sim={goal_name}, task={task_name})", fontsize=14)
+    return fig
+
+  def callback(d):
+    unified_fig = plot_unified(d)
+    grid_fig = plot_episode_grid(d)
+
+    # Per-frame simulation trajectory grids
+    figs_to_close = [unified_fig, grid_fig]
+    sim_figs = {}
+    for sim_key in ("preplay", "dyna"):
+      fig = plot_simulation_frames(d, sim_key)
+      if fig is not None:
+        sim_figs[sim_key] = fig
+        figs_to_close.append(fig)
+
+    if wandb.run is not None:
+      log_data = {}
+      if unified_fig is not None:
+        log_data["learner_example/unified"] = wandb.Image(unified_fig)
+      if grid_fig is not None:
+        log_data["learner_example/episode_grid"] = wandb.Image(grid_fig)
+      for sim_key, fig in sim_figs.items():
+        log_data[f"learner_example/{sim_key}_frames"] = wandb.Image(fig)
+      if log_data:
+        wandb.log(log_data)
+
+    for fig in figs_to_close:
+      if fig is not None:
+        plt.close(fig)
 
   n_updates = data["n_updates"] + 1
   if config["LEARNER_EXTRA_LOG_PERIOD"] > 0:

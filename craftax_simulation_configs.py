@@ -19,13 +19,14 @@ import jax
 import craftax_utils
 
 MAX_START_POSITIONS = 5
+MAX_WAYPOINTS = 100
 
 
 class TaskConfig(struct.PyTreeNode):
   """Configuration for a single experimental block"""
 
   world_seed: int
-  start_position: Tuple[int, int]
+  start_positions: jnp.ndarray  # [MAX_WAYPOINTS, 2], padded with -1
   goal_object: int = None
   placed_goals: List[Tuple[int, int]] = None
   placed_achievements: List[Tuple[int, int]] = None
@@ -48,7 +49,7 @@ TRAIN_EVAL_CONFIGS = []
 TEST_CONFIGS = []
 
 
-def get_path_waypoints(path, num: int = 20):
+def get_path_waypoints(path, num: int = MAX_WAYPOINTS):
   path = path[:-1]  # remove last point.
   if num <= 2:
     return np.array([path[0], path[-1]])
@@ -117,22 +118,25 @@ for block_config in PATHS_CONFIGS:
     if evaluation:
       waypoints = waypoints[:1]
 
+    # Pad waypoints to MAX_WAYPOINTS with -1
+    padded = np.full((MAX_WAYPOINTS, 2), -1, dtype=np.int32)
+    padded[: len(waypoints)] = waypoints
+
     def blocks_to_goals(blocks):
       return jnp.asarray([BLOCK_TO_GOAL[i] for i in blocks])
 
-    for waypoint in waypoints:
-      configs.append(
-        TaskConfig(
-          world_seed=world_seed,
-          start_position=waypoint,
-          goal_object=BLOCK_TO_GOAL[goal_object],
-          placed_goals=jnp.asarray(params.placed_goals),
-          placed_achievements=jnp.asarray(params.placed_achievements),
-          goal_locations=jnp.asarray(params.goal_locations),
-          train_objects=blocks_to_goals(block_config.train_objects),
-          test_objects=blocks_to_goals(block_config.test_objects),
-        )
+    configs.append(
+      TaskConfig(
+        world_seed=world_seed,
+        start_positions=jnp.asarray(padded),
+        goal_object=BLOCK_TO_GOAL[goal_object],
+        placed_goals=jnp.asarray(params.placed_goals),
+        placed_achievements=jnp.asarray(params.placed_achievements),
+        goal_locations=jnp.asarray(params.goal_locations),
+        train_objects=blocks_to_goals(block_config.train_objects),
+        test_objects=blocks_to_goals(block_config.test_objects),
       )
+    )
 
   for start_position in block_config.start_eval_positions:
     # first test
@@ -181,7 +185,7 @@ dummy_config = jax.tree_util.tree_map(lambda x: x[0], TRAIN_CONFIGS)
 default_params = MultigoalEnvParams().replace(
   world_seeds=(dummy_config.world_seed,),
   current_goal=dummy_config.goal_object.astype(jnp.int32),
-  start_positions=dummy_config.start_position.astype(jnp.int32),
+  start_positions=dummy_config.start_positions[0].astype(jnp.int32),
   placed_goals=dummy_config.placed_goals.astype(jnp.int32),
   placed_achievements=dummy_config.placed_achievements.astype(jnp.int32),
   goal_locations=dummy_config.goal_locations.astype(jnp.int32),

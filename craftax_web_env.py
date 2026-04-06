@@ -690,6 +690,7 @@ for idx, block_type in enumerate(
 @struct.dataclass
 class MultigoalEnvParams(EnvParams):
   task_configs: struct.PyTreeNode = None
+  training: bool = True
 
 
 @struct.dataclass
@@ -717,17 +718,41 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
   def reset(self, key: chex.PRNGKey, params: MultigoalEnvParams):
     """
     Sample a task config from the list of task configs.
-    Fill in information
+    Apply curriculum-based starting location sampling:
+      - Training: half_uniform_half_far (50% farthest, 50% uniform across waypoints)
+      - Test: always farthest (original starting location)
     """
+    key, key_task, key_pos, key_coin = jax.random.split(key, 4)
+
     n_tasks = len(params.task_configs.world_seed)
-    task_idx = jax.random.randint(key, (), 0, n_tasks)
+    task_idx = jax.random.randint(key_task, (), 0, n_tasks)
     index = lambda x: jax.lax.dynamic_index_in_dim(x, task_idx, keepdims=False)
     task_config = jax.tree_util.tree_map(index, params.task_configs)
+
+    # task_config.start_positions: [MAX_WAYPOINTS, 2], padded with -1
+    # Index 0 = farthest from goal (original starting location)
+    all_positions = task_config.start_positions  # [MAX_WAYPOINTS, 2]
+    valid = (all_positions >= 0).all(-1)  # [MAX_WAYPOINTS]
+
+    # Uniform sample from valid waypoints
+    logits = jnp.where(valid, 0.0, -1e8).astype(jnp.float32)
+    uniform_idx = jax.random.categorical(key_pos, logits)
+    uniform_pos = jax.lax.dynamic_index_in_dim(
+      all_positions, uniform_idx, keepdims=False
+    )
+
+    # Farthest position (index 0 = original starting location)
+    farthest_pos = all_positions[0]
+
+    # Training: 50/50 split between uniform and farthest
+    # Test: always farthest
+    use_uniform = jax.random.bernoulli(key_coin, 0.5) & params.training
+    start_position = jax.lax.select(use_uniform, uniform_pos, farthest_pos)
 
     params = params.replace(
       world_seeds=(task_config.world_seed,),
       current_goal=task_config.goal_object.astype(jnp.int32),
-      start_positions=task_config.start_position.astype(jnp.int32),
+      start_positions=start_position.astype(jnp.int32),  # (2,)
       placed_goals=task_config.placed_goals.astype(jnp.int32),  # Block type
       placed_achievements=task_config.placed_achievements.astype(
         jnp.int32
