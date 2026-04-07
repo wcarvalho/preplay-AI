@@ -635,7 +635,7 @@ def sweep(search: str = ""):
         "env.exp": {"values": ["her_test_big"]},
       },
       "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-      "group": "her-test-big-pnas-revision-2",
+      "group": "her-test-big-pnas-revision-3",
     }
 
   else:
