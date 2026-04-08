@@ -1796,8 +1796,8 @@ def make_train_craftax_multigoal(**kwargs):
       achievable: [G] achievability scores (nearby minus task objects)
       any_achievable: scalar bool
     """
-    is_object_nearby = timestep.observation.nearby_objects.astype(jnp.int32)  # [G, ...]
-    is_object_nearby = is_object_nearby.sum(-1)  # [G]
+    is_object_nearby = timestep.observation.nearby_objects.astype(jnp.int32)  # [N_placed, G]
+    is_object_nearby = is_object_nearby.sum(-2)  # [G]
     task_object = timestep.observation.task_w.astype(jnp.int32)  # [G]
     achievable = nn.relu((is_object_nearby - task_object).astype(jnp.float32))  # [G]
     achievable_ = achievable + 1e-5  # [G]
