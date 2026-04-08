@@ -512,7 +512,7 @@ def sweep(search: str = ""):
         # "OPTIMISTIC_RESET_RATIO": {"values": [1]},
       },
       "overrides": ["alg=preplay_craftax", "rlenv=craftax-dyna-multigoal", "user=wilka"],
-      "group": "preplay-testing-8",
+      "group": "preplay-testing-9-goal-mainq-sims",
     }
   elif search == "her":
     sweep_config = {
