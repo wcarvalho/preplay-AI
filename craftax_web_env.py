@@ -90,7 +90,7 @@ def is_game_over(state, params, static_env_params):
 
 @struct.dataclass
 class EnvParams:
-  max_timesteps: int = 100000
+  max_timesteps: int = 200
   day_length: int = 300
 
   always_diamond: bool = False
