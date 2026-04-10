@@ -242,6 +242,7 @@ def craftax_experience_logger(
   key: str = "train",
   num_seeds: int = None,
   trajectory: Optional[struct.PyTreeNode] = None,
+  log_details_period: int = 0,
   **kwargs,
 ):
   ############################################################
@@ -265,19 +266,138 @@ def craftax_experience_logger(
   metrics[f"{main_key}/num_learner_updates"] = train_state.n_updates
 
   ############################################################
-  # Observer logging
+  # Prepare data for image logging (env 0 only)
   ############################################################
+  # [T, ...] - trajectory data for first environment
+  env0_env_state = jax.tree_util.tree_map(
+    lambda x: x[:, 0], trajectory.timestep.state.env_state
+  )
+  env0_done = done[:, 0]  # [T]
+  env0_task_w = trajectory.timestep.observation.task_w[:, 0]  # [T, G]
+  env0_reward = trajectory.timestep.reward[:, 0]  # [T]
 
-  def callback(m, idx, lengths, returns):
+  ############################################################
+  # Callback: log metrics + optional episode images
+  ############################################################
+  def callback(m, n_logs, env_state, done_flags, task_w, rewards):
+    import matplotlib.pyplot as plt
+    from craftax.craftax.constants import Achievement, BLOCK_PIXEL_SIZE_IMG
+    from craftax.craftax.renderer import (
+      render_craftax_pixels as render_craftax_pixels_partial,
+    )
+
+    try:
+      import craftax_utils as _cu
+
+      _cu.render_craftax_pixels_full
+      render_fn = _cu.render_fn
+      has_full = True
+    except (ImportError, NameError, AttributeError):
+      has_full = False
+
+    def render_state(es):
+      if has_full:
+        return np.array(render_fn(es)) / 255.0
+      else:
+        return (
+          np.array(
+            render_craftax_pixels_partial(es, block_pixel_size=BLOCK_PIXEL_SIZE_IMG)
+          )
+          / 255.0
+        )
+
     if wandb.run is not None:
       wandb.log(m)
+
+    if (
+      log_details_period
+      and wandb.run is not None
+      and (int(n_logs) % int(log_details_period) == 0)
+    ):
+      from craftax_web_env import Achiement_to_idx
+
+      idx_to_ach = {v: k for k, v in Achiement_to_idx.items()}
+      goal_names = {
+        i: Achievement(av).name.replace("COLLECT_", "") for i, av in idx_to_ach.items()
+      }
+
+      # Find episode start indices (first step + steps after done)
+      done_np = np.array(done_flags)
+      done_indices = np.where(done_np)[0]
+      ep_starts = [0] + (done_indices + 1).tolist()
+      ep_starts = [s for s in ep_starts if s < len(done_np)]
+
+      max_episodes = min(5, len(ep_starts))
+      if max_episodes == 0:
+        return
+
+      ncols = 3  # start image, end image, path
+      nrows = max_episodes
+      fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 5 * nrows))
+      if nrows == 1:
+        axes = axes[np.newaxis, :]
+      axes = np.array(axes).reshape(nrows, ncols)
+
+      # Extract player positions [T, 2] with (row, col)
+      player_pos = np.array(env_state.player_position)
+      goal_pos = np.array(env_state.goal_location)  # [T, 2] with (row, col)
+
+      for ep_idx in range(max_episodes):
+        start = ep_starts[ep_idx]
+        end = done_indices[ep_idx] + 1 if ep_idx < len(done_indices) else len(done_np)
+
+        # Episode info
+        goal_idx = int(np.argmax(task_w[start]))
+        goal_name = goal_names.get(goal_idx, f"Goal_{goal_idx}")
+        ep_reward = float(rewards[start:end].sum())
+        ep_len = end - start
+        info_str = f"{goal_name}, r={ep_reward:.1f}, len={ep_len}"
+
+        # Col 0: Start state
+        ax_start = axes[ep_idx, 0]
+        start_state = jax.tree_util.tree_map(lambda x: x[start], env_state)
+        ax_start.imshow(render_state(start_state))
+        ax_start.set_title(f"Start: {info_str}", fontsize=9)
+        ax_start.axis("off")
+
+        # Col 1: End state
+        ax_end = axes[ep_idx, 1]
+        end_idx = min(end - 1, len(done_np) - 1)
+        end_state = jax.tree_util.tree_map(lambda x: x[end_idx], env_state)
+        ax_end.imshow(render_state(end_state))
+        ax_end.set_title(f"End: {info_str}", fontsize=9)
+        ax_end.axis("off")
+
+        # Col 2: Path on white background
+        ax_path = axes[ep_idx, 2]
+        ep_pos = player_pos[start:end]  # [ep_len, 2] with (row, col)
+        rows, cols = ep_pos[:, 0], ep_pos[:, 1]
+
+        ax_path.set_facecolor("white")
+        ax_path.plot(cols, rows, "-", color="royalblue", linewidth=1.5, alpha=0.8)
+        ax_path.plot(cols[0], rows[0], marker="*", color="green", markersize=14, zorder=5)
+        ax_path.plot(cols[-1], rows[-1], marker="s", color="red", markersize=10, zorder=5)
+        goal_row, goal_col = int(goal_pos[start, 0]), int(goal_pos[start, 1])
+        ax_path.plot(goal_col, goal_row, marker="o", color="gold", markersize=12, markeredgecolor="black", markeredgewidth=1.5, zorder=5)
+        ax_path.set_xlim(-0.5, 47.5)
+        ax_path.set_ylim(47.5, -0.5)  # invert y so row 0 is top
+        ax_path.set_aspect("equal")
+        ax_path.set_title(f"Path: {info_str}", fontsize=9)
+        ax_path.tick_params(labelsize=7)
+
+      fig.tight_layout()
+      if wandb.run is not None:
+        wandb.log({f"{main_key}_example/episodes": wandb.Image(fig)})
+      plt.close(fig)
 
   jax.debug.callback(
     callback,
     metrics,
-    observer_state.idx,
-    observer_state.episode_lengths,
-    observer_state.episode_returns,
+    train_state.n_logs,
+    env0_env_state,
+    env0_done,
+    env0_task_w,
+    env0_reward,
   )
 
 
@@ -501,18 +621,22 @@ def sweep(search: str = ""):
   elif search == "preplay":
     sweep_config = {
       "metric": metric,
-      "parameters": {
+      "parameters": [
+        {
         "ALG": {"values": ["preplay"]},
-        "FIXED_EPSILON": {"values": [1, 2]},
-        "CQL_ALPHA": {"values": [1e-2, 1e-3, 1e-4]},
+        "FIXED_EPSILON": {"values": [2]},
+        "CQL_ALPHA": {"values": [1e-1, 1e-2]},
         "SEED": {"values": [1, 2]},
-        # "WINDOW_SIZE": {"values": [.5, 1.0]},
-        # "NUM_PRED_LAYERS": {"values": [2, 3]},
-        # "OBS_INCLUDE_GOAL": {"values": [True, False]},
-        # "OPTIMISTIC_RESET_RATIO": {"values": [1]},
-      },
+        },
+        {
+        "ALG": {"values": ["preplay"]},
+        "FIXED_EPSILON": {"values": [1]},
+        "CQL_ALPHA": {"values": [1e-3]},
+        "SEED": {"values": [1, 2]},
+        }
+      ],
       "overrides": ["alg=preplay_craftax", "rlenv=craftax-dyna-multigoal", "user=wilka"],
-      "group": "preplay-testing-11-shorter",
+      "group": "preplay-testing-13-fixed-sampling",
     }
   elif search == "her":
     sweep_config = {
