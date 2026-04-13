@@ -717,8 +717,9 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "NUM_ENV_SEEDS": {"values": [512]},
-        "ALL_GOALS_COEFF": {"values": [0., 1.0]},
-        "OFFTASK_USE_PENG": {"values": [False]},
+        "ALL_GOALS_COEFF": {"values": [1.0]},
+        "OFFTASK_LOSS_COEFF": {"values": [1.0]},
+        "OFFTASK_USE_PENG": {"values": [True, False]},
         "SEED": {"values": list(range(1, 2))},
       },
       "overrides": ["alg=preplay_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
