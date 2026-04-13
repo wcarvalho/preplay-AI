@@ -740,8 +740,17 @@ def render_last_frame(
 
 
 def process_checkpoint(
-  args, params, env, env_params, test_env_params, agent,
-  image_dict, keys, action_names, video_dir, gamma,
+  args,
+  params,
+  env,
+  env_params,
+  test_env_params,
+  agent,
+  image_dict,
+  keys,
+  action_names,
+  video_dir,
+  gamma,
   progress_label="",
 ):
   """Run episodes and render outputs for a single set of model params.
@@ -967,8 +976,17 @@ def main_local(args):
     video_dir = local_dir / "videos" / label
 
     generated = process_checkpoint(
-      args, params, env, env_params, test_env_params, agent,
-      image_dict, keys, action_names, video_dir, gamma,
+      args,
+      params,
+      env,
+      env_params,
+      test_env_params,
+      agent,
+      image_dict,
+      keys,
+      action_names,
+      video_dir,
+      gamma,
       progress_label=f"{pct}% trained",
     )
     all_generated.extend(generated)
@@ -988,7 +1006,9 @@ def main_local(args):
 
 def main():
   parser = argparse.ArgumentParser(description="Generate preplay evaluation videos")
-  parser.add_argument("wandb_name", nargs="?", default=None, help="Wandb run name (the directory name)")
+  parser.add_argument(
+    "wandb_name", nargs="?", default=None, help="Wandb run name (the directory name)"
+  )
   parser.add_argument(
     "--local-dir",
     type=Path,
@@ -1099,8 +1119,17 @@ def main():
     ) = setup_env_and_agent(config, wandb_name=wandb_name)
 
     generated_files = process_checkpoint(
-      args, params, env, env_params, test_env_params, agent,
-      image_dict, keys, action_names, video_dir, gamma,
+      args,
+      params,
+      env,
+      env_params,
+      test_env_params,
+      agent,
+      image_dict,
+      keys,
+      action_names,
+      video_dir,
+      gamma,
     )
 
     print(f"  Outputs saved to: {video_dir}")

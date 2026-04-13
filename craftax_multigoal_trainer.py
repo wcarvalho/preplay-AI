@@ -377,10 +377,23 @@ def craftax_experience_logger(
 
         ax_path.set_facecolor("white")
         ax_path.plot(cols, rows, "-", color="royalblue", linewidth=1.5, alpha=0.8)
-        ax_path.plot(cols[0], rows[0], marker="*", color="green", markersize=14, zorder=5)
-        ax_path.plot(cols[-1], rows[-1], marker="s", color="red", markersize=10, zorder=5)
+        ax_path.plot(
+          cols[0], rows[0], marker="*", color="green", markersize=14, zorder=5
+        )
+        ax_path.plot(
+          cols[-1], rows[-1], marker="s", color="red", markersize=10, zorder=5
+        )
         goal_row, goal_col = int(goal_pos[start, 0]), int(goal_pos[start, 1])
-        ax_path.plot(goal_col, goal_row, marker="o", color="gold", markersize=12, markeredgecolor="black", markeredgewidth=1.5, zorder=5)
+        ax_path.plot(
+          goal_col,
+          goal_row,
+          marker="o",
+          color="gold",
+          markersize=12,
+          markeredgecolor="black",
+          markeredgewidth=1.5,
+          zorder=5,
+        )
         ax_path.set_xlim(-0.5, 47.5)
         ax_path.set_ylim(47.5, -0.5)  # invert y so row 0 is top
         ax_path.set_aspect("equal")
@@ -625,19 +638,23 @@ def sweep(search: str = ""):
       "metric": metric,
       "parameters": [
         {
-        "ALG": {"values": ["preplay"]},
-        "FIXED_EPSILON": {"values": [2]},
-        "CQL_ALPHA": {"values": [1e-1, 1e-2]},
-        "SEED": {"values": [1, 2]},
+          "ALG": {"values": ["preplay"]},
+          "FIXED_EPSILON": {"values": [2]},
+          "CQL_ALPHA": {"values": [1e-1, 1e-2]},
+          "SEED": {"values": [1, 2]},
         },
         {
-        "ALG": {"values": ["preplay"]},
-        "FIXED_EPSILON": {"values": [1]},
-        "CQL_ALPHA": {"values": [1e-3]},
-        "SEED": {"values": [1, 2]},
-        }
+          "ALG": {"values": ["preplay"]},
+          "FIXED_EPSILON": {"values": [1]},
+          "CQL_ALPHA": {"values": [1e-3]},
+          "SEED": {"values": [1, 2]},
+        },
       ],
-      "overrides": ["alg=preplay_craftax", "rlenv=craftax-dyna-multigoal", "user=wilka"],
+      "overrides": [
+        "alg=preplay_craftax",
+        "rlenv=craftax-dyna-multigoal",
+        "user=wilka",
+      ],
       "group": "preplay-testing-13-fixed-sampling",
     }
   elif search == "her":
