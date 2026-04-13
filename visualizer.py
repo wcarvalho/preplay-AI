@@ -138,7 +138,12 @@ def plot_frames(
     ax = axs[i]
     ax.imshow(frames[i])
     ax.axis("off")  # Hide the axis
-    ax.set_title(panel_title_fn(timesteps, i))
+    title_result = panel_title_fn(timesteps, i)
+    if isinstance(title_result, tuple):
+      text, color = title_result
+      ax.set_title(text, color=color)
+    else:
+      ax.set_title(title_result)
 
   # Hide unused subplots
   for i in range(T, H * ncols):

@@ -208,6 +208,7 @@ class EnvState:
   current_goal: int
   start_position: jnp.ndarray
   goal_location: jnp.ndarray
+  world_seed: int = 0
   fractal_noise_angles: tuple[int, int, int, int] = (None, None, None, None)
 
 
@@ -762,7 +763,9 @@ class CraftaxMultiGoalSymbolicWebEnvNoAutoReset(CraftaxSymbolicWebEnvNoAutoReset
       test_objects=task_config.test_objects.astype(jnp.int32),
     )
 
-    return super().reset(key, params)
+    obs, state = super().reset(key, params)
+    state = state.replace(world_seed=task_config.world_seed)
+    return obs, state
 
   def get_obs(self, state: EnvState, action: int, params: EnvParams):
     # [D]

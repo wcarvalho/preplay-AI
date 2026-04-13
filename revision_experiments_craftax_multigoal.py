@@ -17,8 +17,8 @@ EXPERIMENTS = [
   #("ql-final", "kempner_h100"),
   #("dyna-final", "kempner_h100"),
   #("usfa-final", "kempner_h100"),
-  #("preplay-final", "kempner_h100"),
-  ("preplay", "kempner_h100"),
+  ("preplay-final", "kempner_h100"),
+  #("preplay", "kempner_h100"),
 ]
 
 # partitions that require an explicit account override

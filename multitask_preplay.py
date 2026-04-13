@@ -327,10 +327,12 @@ class DuellingMLP(nn.Module):
   activation: str = "relu"
   activate_final: bool = True
   use_bias: bool = False
+  use_task: bool = True
 
   @nn.compact
   def __call__(self, x, task, train: bool = False):
-    x = jnp.concatenate((x, task), axis=-1)
+    if self.use_task:
+      x = jnp.concatenate((x, task), axis=-1)
     value_mlp = MLP(
       hidden_dim=self.hidden_dim,
       num_layers=self.num_layers,
@@ -1149,6 +1151,11 @@ class PreplayLossFn:
         non_terminal=all_t.discount,  # [S+1, num_sims]
         loss_mask=all_t_mask,  # [S+1, num_sims]
       )  # returns [S, num_sims], [num_sims], dict, dict
+      log_info["goal"] = main_goal                      # [num_sims, G]
+      log_info["epsilon_values"] = eps                    # [num_sims]
+      log_info["simulation_reward"] = reward              # [S+1, num_sims]
+      log_info["sim_ontask_q_values"] = main_q_online     # [S+1, num_sims, A]
+      log_info["sim_offtask_q_values"] = main_q_online    # [S+1, num_sims, A]
       return batch_td_error, batch_loss_mean, metrics, log_info
 
     # Vmap over timesteps T
@@ -1351,6 +1358,7 @@ def make_craftax_singlegoal_agent(
       activation=config["ACTIVATION"],
       activate_final=False,
       use_bias=True,
+      use_task=False,
       out_dim=env.action_space(env_params).n,
     ),
     off_task_q_head=QFnCls(
@@ -1568,7 +1576,7 @@ def make_train_craftax_singlegoal(**kwargs):
     any_achievable = jnp.bool_(True)
     return goals, achievable, any_achievable
 
-  def compute_rewards(timesteps, goal_onehot, expand_g_across_time=True):
+  def compute_rewards(timesteps, goal_vector, expand_g_across_time=True):
     """Compute rewards for given goals across timesteps.
 
     Args:
@@ -1581,13 +1589,13 @@ def make_train_craftax_singlegoal(**kwargs):
     achievement_coefficients = timesteps.observation.task_w.astype(
       jnp.float32
     )  # [T, ..., G]
-    achievement_coefficients = achievement_coefficients[..., : goal_onehot.shape[-1]]
+    achievement_coefficients = achievement_coefficients[..., : goal_vector.shape[-1]]
     if expand_g_across_time:
-      assert goal_onehot.ndim == achievements.ndim - 1
-      coeff_mask = goal_onehot.astype(jnp.float32)[None]  # [1, num_sims, G]
+      assert goal_vector.ndim == achievements.ndim - 1
+      coeff_mask = goal_vector.astype(jnp.float32)[None]  # [1, num_sims, G]
     else:
-      assert goal_onehot.ndim == achievements.ndim
-      coeff_mask = goal_onehot.astype(jnp.float32)  # [T, num_sims, G]
+      assert goal_vector.ndim == achievements.ndim
+      coeff_mask = goal_vector.astype(jnp.float32)  # [T, num_sims, G]
     offtask_reward = (achievements * achievement_coefficients * coeff_mask).sum(
       -1
     )  # [T, num_sims] or [T]
@@ -1605,10 +1613,24 @@ def make_train_craftax_singlegoal(**kwargs):
              or [G] zeros when expand_across_simulations=False
     """
     if not expand_across_simulations:
-      return jnp.zeros(timestep.observation.achievements.shape)  # [G]
-    return jnp.zeros(
+      return jnp.ones(timestep.observation.achievements.shape)  # [G]
+    return jnp.ones(
       (num_ontask_simulations, timestep.observation.achievements.shape[-1])
     )  # [num_ontask_simulations, G]
+
+  def make_log_extras(timestep, goal=None):
+    """Env-specific: extract goal reward, task vector, achievements from timestep."""
+    achievements = timestep.observation.achievements.astype(jnp.float32)
+    task_w = timestep.observation.task_w.astype(jnp.float32)
+    G = achievements.shape[-1]
+    goal_vec = goal if goal is not None else task_w[..., :G]
+    goal_vec = jnp.broadcast_to(goal_vec, achievements.shape)
+    goal_reward = (goal_vec * achievements).sum(-1)
+    return {
+      "goal_reward": goal_reward,
+      "goal_task_vector": goal_vec,
+      "goal_achievements": achievements,
+    }
 
   return vbb.make_train(
     make_agent=partial(
@@ -1622,6 +1644,7 @@ def make_train_craftax_singlegoal(**kwargs):
       sample_td_goals=sample_random_goals,
       compute_rewards=compute_rewards,
       get_main_goal=get_main_goal,
+      make_log_extras=make_log_extras,
     ),
     make_optimizer=base_agent.make_optimizer,
     make_actor=make_actor,
@@ -1639,21 +1662,26 @@ def make_train_craftax_singlegoal_dyna_multigoal(**kwargs):
   # ACME default epsilon schedule
   vals = np.logspace(num=256, start=1, stop=3, base=0.1)
 
-  num_offtask_goals = config["NUM_OFFTASK_GOALS"]
+  dyna_goal_swap_frac = config.get("DYNA_GOAL_SWAP_FRAC", 0.0)
   num_offtask_simulations = config["NUM_OFFTASK_SIMULATIONS"]
-  num_ontask_simulations = config.get("NUM_ONTASK_SIMULATIONS", 1)
-  num_simulations = num_ontask_simulations + num_offtask_simulations
+  num_offtask_goals = config.get("NUM_OFFTASK_GOALS", 0)
+  _num_ontask = config.get("NUM_ONTASK_SIMULATIONS", 1)
+  # Total sims matches preplay: ontask + offtask_sims * offtask_goals
+  num_ontask_simulations = _num_ontask + num_offtask_simulations * num_offtask_goals
+  # Force offtask goals to 0 so dyna_only_at_t is used
+  config["NUM_OFFTASK_GOALS"] = 0
+  config["NUM_ONTASK_SIMULATIONS"] = num_ontask_simulations
 
   def dyna_epsilon_values(rng):
     """Sample epsilon values for all simulations.
 
     Returns:
-      epsilons: [num_simulations] with first always greedy (0.0)
+      epsilons: [num_ontask_simulations] with first always greedy (0.0)
     """
     epsilons = jax.random.choice(
-      rng, vals, shape=(num_simulations - 1,)
-    )  # [num_simulations-1]
-    return jnp.concatenate((jnp.array([0.0]), epsilons))  # [num_simulations]
+      rng, vals, shape=(num_ontask_simulations - 1,)
+    )  # [num_ontask_simulations-1]
+    return jnp.concatenate((jnp.array([0.0]), epsilons))  # [num_ontask_simulations]
 
   def sample_random_goals(timestep, key, num):
     """Sample uniformly random goals.
@@ -1675,38 +1703,36 @@ def make_train_craftax_singlegoal_dyna_multigoal(**kwargs):
     any_achievable = jnp.bool_(True)
     return goals, achievable, any_achievable
 
-  def compute_rewards(timesteps, goal_onehot, expand_g_across_time=True):
+  def compute_rewards(timesteps, goal_vector, expand_g_across_time=True):
     """Compute rewards for given goals across timesteps.
 
     Args:
-      timesteps: [T, num_sims, ...] batch of timesteps
-      goal_onehot: [num_sims, G] (expand=True) or [T, num_sims, G] (expand=False)
+      timesteps: [T, num_sims, ...] or [T, ...] batch of timesteps
+      goal_onehot: [num_sims, G] or [G] (expand=True) or [T, num_sims, G] (expand=False)
     Returns:
-      offtask_reward: [T, num_sims] reward per timestep
+      offtask_reward: [T, num_sims] or [T] reward per timestep
     """
-    achievements = timesteps.observation.achievements.astype(
-      jnp.float32
-    )  # [T, num_sims, G]
+    achievements = timesteps.observation.achievements.astype(jnp.float32)  # [T, ..., G]
     achievement_coefficients = timesteps.observation.task_w.astype(
       jnp.float32
-    )  # [T, num_sims, G]
-    achievement_coefficients = achievement_coefficients[..., : goal_onehot.shape[-1]]
+    )  # [T, ..., G]
+    achievement_coefficients = achievement_coefficients[..., : goal_vector.shape[-1]]
     if expand_g_across_time:
-      assert goal_onehot.ndim == achievements.ndim - 1
-      coeff_mask = goal_onehot.astype(jnp.float32)[None]  # [1, num_sims, G]
+      assert goal_vector.ndim == achievements.ndim - 1
+      coeff_mask = goal_vector.astype(jnp.float32)[None]  # [1, num_sims, G]
     else:
-      import ipdb
-
-      ipdb.set_trace()
-      assert goal_onehot.ndim == achievements.ndim
-      coeff_mask = goal_onehot.astype(jnp.float32)  # [T, num_sims, G]
+      assert goal_vector.ndim == achievements.ndim
+      coeff_mask = goal_vector.astype(jnp.float32)  # [T, num_sims, G]
     offtask_reward = (achievements * achievement_coefficients * coeff_mask).sum(
       -1
-    )  # [T, num_sims]
+    )  # [T, num_sims] or [T]
     return offtask_reward
 
+  n_change_goal = max(1, round(num_ontask_simulations * dyna_goal_swap_frac))
+  n_keep_goal = num_ontask_simulations - n_change_goal
+
   def augment_dyna_reward(all_t, original_goal, rng):
-    """Swap goals for half the simulations and recompute rewards.
+    """Swap goals for a fraction of simulations and recompute rewards.
 
     Args:
         all_t: [sim_length+1, num_sims, ...]
@@ -1716,9 +1742,6 @@ def make_train_craftax_singlegoal_dyna_multigoal(**kwargs):
         new_rewards: [sim_length+1, num_sims]
         new_goals: [num_sims, G]
     """
-    num_sims = original_goal.shape[0]
-    n_keep_goal = num_sims // 2
-    n_change_goal = num_sims - n_keep_goal
 
     # sample random goals for the change portion
     # use last timestep for achievable info
@@ -1734,20 +1757,20 @@ def make_train_craftax_singlegoal_dyna_multigoal(**kwargs):
     return new_rewards, new_goals
 
   def get_main_goal(timestep, expand_across_simulations: bool = True):
-    """Tile the current task goal for all simulations.
+    """Get on-task goal tiled for each simulation.
 
     Args:
-      timestep: single timestep (no batch/time dims), task_w is [G]
+      timestep: single timestep (no batch/time dims)
     Returns:
-      goals: [num_simulations, G] or [G] when expand=False
+      goals: [num_ontask_simulations, G] zero goals (singlegoal uses env reward)
+             or [G] zeros when expand_across_simulations=False
     """
     if not expand_across_simulations:
-      import ipdb
+      return jnp.ones(timestep.observation.achievements.shape)  # [G]
+    return jnp.ones(
+      (num_ontask_simulations, timestep.observation.achievements.shape[-1])
+    )  # [num_ontask_simulations, G]
 
-      ipdb.set_trace()
-      return timestep.observation.task_w
-    goal = timestep.observation.task_w[None]  # [1, G]
-    return jnp.tile(goal, (num_simulations, 1))  # [num_simulations, G]
 
   return vbb.make_train(
     make_agent=partial(
@@ -1757,7 +1780,8 @@ def make_train_craftax_singlegoal_dyna_multigoal(**kwargs):
       make_loss_fn_class,
       dyna_epsilon_values=dyna_epsilon_values,
       get_main_goal=get_main_goal,
-      augment_dyna_reward=augment_dyna_reward,
+      compute_rewards=compute_rewards,
+      augment_dyna_reward=augment_dyna_reward if dyna_goal_swap_frac > 0.0 else None,
     ),
     make_optimizer=base_agent.make_optimizer,
     make_actor=make_actor,
@@ -2696,15 +2720,33 @@ def craftax_learner_log_extra(
   except (ImportError, NameError, AttributeError):
     _has_full_renderer = False
 
+  # Detect env type from observation fields
+  _sample_obs = None
+  if "online" in data:
+    _sample_obs = data["online"]["timesteps"].observation
+  elif "dyna" in data:
+    _sample_obs = data["dyna"]["timesteps"].observation
+  _is_singlegoal = _sample_obs is not None and hasattr(_sample_obs, "achievements")
+
   # Goal index -> human-readable name
-  idx_to_achievement = {v: k for k, v in Achiement_to_idx.items()}
-  GOAL_NAMES = {}
-  for idx, ach_val in idx_to_achievement.items():
-    GOAL_NAMES[idx] = Achievement(ach_val).name.replace("COLLECT_", "")
+  if _is_singlegoal:
+    GOAL_NAMES = {a.value: a.name for a in Achievement}
+    num_achievements = len(Achievement)
+    GOAL_NAMES[num_achievements] = "HEALTH"
+  else:
+    idx_to_achievement = {v: k for k, v in Achiement_to_idx.items()}
+    GOAL_NAMES = {}
+    for idx, ach_val in idx_to_achievement.items():
+      GOAL_NAMES[idx] = Achievement(ach_val).name.replace("COLLECT_", "")
   action_names = {a.value: a.name for a in Action}
 
   def goal_name_from_vec(goal_vec):
     """Convert one-hot goal vector [G] to human name."""
+    if jnp.abs(goal_vec).sum() < 1e-6:
+      return "EnvReward"
+    if _is_singlegoal and goal_vec.shape[-1] > len(Achievement):
+      # task_w is [coefficients, zeros] — truncate to achievement dims
+      goal_vec = goal_vec[..., : len(Achievement)]
     idx = int(jnp.argmax(goal_vec))
     return GOAL_NAMES.get(idx, f"Goal_{idx}")
 
@@ -2746,7 +2788,7 @@ def craftax_learner_log_extra(
 
     DYNA_IDX = 0
     PREPLAY_IDX = 1
-    simulation_goals = dyna.pop("goal")
+    simulation_goals = dyna.pop("goal", None)
     ontask_q_values = dyna.pop("sim_ontask_q_values")
     offtask_q_values = dyna.pop("sim_offtask_q_values")
     epsilon_values = dyna.pop("epsilon_values")
@@ -2947,7 +2989,7 @@ def craftax_learner_log_extra(
           goal_name = goal_name_from_vec(task_w)
           total_reward = float(online_timesteps.reward[ep_start:ep_end].sum())
           ax.set_title(
-            f"online — Ep 0 ({goal_name}, r={total_reward:.1f})", fontsize=22
+            f"online\nEp 0 ({goal_name}, r={total_reward:.1f})", fontsize=22
           )
           ax.axis("off")
         else:
@@ -2966,7 +3008,7 @@ def craftax_learner_log_extra(
         if goal is not None:
           ag_goal_name = goal_name_from_vec(goal)
           ax.set_title(
-            f"all_goals — (eval={ag_goal_name}, task={task_goal_name})", fontsize=22
+            f"all_goals\n(eval={ag_goal_name}\ntask={task_goal_name})", fontsize=22
           )
         else:
           ax.set_title(f"all_goals — ({task_goal_name})", fontsize=22)
@@ -2996,7 +3038,7 @@ def craftax_learner_log_extra(
         if goal is not None:
           sim_goal_name = goal_name_from_vec(goal)
           ax.set_title(
-            f"{col_name} — (sim={sim_goal_name}, task={t_goal_name})", fontsize=22
+            f"{col_name}\n(sim={sim_goal_name}\ntask={t_goal_name})", fontsize=22
           )
         else:
           ax.set_title(f"{col_name} — ({t_goal_name})", fontsize=22)
@@ -3222,12 +3264,27 @@ def craftax_learner_log_extra(
       frames.append(img)
 
     actions_taken = [Action(int(a)).name for a in actions_[:max_len]]
+    sim_reward = cd.get("simulation_reward")  # [S+1] preplay/off-task reward for sim goal
 
     def panel_title_fn(ts, i):
       title = f"t={i}\n{actions_taken[i]}"
+      color = "black"
       if i < nT - 1:
         title += f"\nr={ts.reward[i + 1]:.2f}, γ={ts.discount[i + 1]}"
-      return title
+        if sim_reward is not None:
+          r_off = float(sim_reward[i + 1])
+          title += f"\nr_off={r_off:.2f}"
+          if r_off != 0.0:
+            color = "red"
+      if hasattr(ts.observation, "achievable"):
+        achievable_list = craftax_env.print_possible_achievements(
+          ts.observation.achievable[i], return_list=True
+        )
+        if achievable_list:
+          title += "\nAchievable:"
+          for name in achievable_list:
+            title += f"\n- {name}"
+      return title, color
 
     goal = cd.get("goal")
     goal_name = goal_name_from_vec(goal) if goal is not None else "?"

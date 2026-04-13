@@ -8,7 +8,7 @@ HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue crafta
   app.parallel=none \
   app.debug=True \
   app.wandb=False \
-  app.search=ql
+  app.search=dyna-multigoal
 
 RUNNING ON SLURM:
 python craftax_trainer.py \
@@ -20,23 +20,11 @@ import os
 import sys
 from jax import config as jax_config
 
-jax_config.update("jax_default_matmul_precision", "bfloat16")
-os.environ.setdefault("NVIDIA_TF32_OVERRIDE", "1")
 if os.environ.get("JAX_PLATFORMS") != "cpu":
-  if sys.platform == "linux":
-    os.environ.setdefault(
-      "XLA_FLAGS",
-      " ".join(
-        [
-          "--xla_gpu_enable_triton_softmax_fusion=true",  # Fuse softmax ops
-          "--xla_gpu_triton_gemm_any=true",  # Use Triton for more GEMMs
-          "--xla_gpu_enable_async_collectives=true",  # Async communication
-          "--xla_gpu_enable_latency_hiding_scheduler=true",  # Better scheduling
-        ]
-      ),
-    )
-  os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "true")
-  os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.95")
+  os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "true"
+  # Use 90% of the A100 VRAM
+  os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".95"
+  os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
 
 MAX_SCORE = 226.0
 
@@ -76,7 +64,6 @@ from jaxneurorl.wrappers import TimestepWrapper
 
 import craftax_observer
 import networks
-import archive.alphazero_craftax as alphazero_craftax
 import dyna
 import her
 import multitask_preplay
@@ -453,7 +440,7 @@ def run_single(config: dict, save_path: str = None):
     config["NUM_ENV_SEEDS"] = config.get("NUM_ENV_SEEDS", 10_000)
 
     static_env_params = CraftaxSymbolicEnvNoAutoReset.default_static_params().replace(
-      use_precondition=config.get("USE_PRECONDITION", False)
+      use_precondition=config.get("USE_PRECONDITION", True)
     )
 
     env = CraftaxSymbolicEnvNoAutoReset(static_env_params=static_env_params)
@@ -493,7 +480,6 @@ def run_single(config: dict, save_path: str = None):
     train_fn = vbb.make_train(
       config=config,
       save_path=save_path,
-      online_trajectory_log_fn=default_craftax_log_fn,
       env=vec_env,
       make_agent=qlearning_craftax.make_craftax_agent,
       make_optimizer=qlearning_craftax.make_optimizer,
@@ -511,7 +497,6 @@ def run_single(config: dict, save_path: str = None):
     train_fn = vbb.make_train(
       config=config,
       save_path=save_path,
-      online_trajectory_log_fn=default_craftax_log_fn,
       env=vec_env,
       make_agent=qlearning_sf_aux_craftax.make_craftax_agent,
       make_optimizer=qlearning_sf_aux_craftax.make_optimizer,
@@ -529,7 +514,6 @@ def run_single(config: dict, save_path: str = None):
     train_fn = dyna.make_train(
       config=config,
       save_path=save_path,
-      online_trajectory_log_fn=default_craftax_log_fn,
       env=vec_env,
       model_env=env,
       make_logger=partial(make_logger, learner_log_extra=dyna.learner_log_extra),
@@ -542,12 +526,26 @@ def run_single(config: dict, save_path: str = None):
     train_fn = multitask_preplay.make_train_craftax_singlegoal(
       config=config,
       save_path=save_path,
-      online_trajectory_log_fn=default_craftax_log_fn,
       env=vec_env,
       model_env=env,
       make_logger=partial(
         make_logger,
-        # learner_log_extra=multitask_preplay.learner_log_extra,
+        learner_log_extra=multitask_preplay.craftax_learner_log_extra,
+      ),
+      train_env_params=env_params,
+      test_env_params=test_env_params,
+      ObserverCls=craftax_observer.Observer,
+      vmap_env=vmap_env,
+    )
+  elif config["ALG"] == "dyna_multigoal":
+    train_fn = multitask_preplay.make_train_craftax_singlegoal_dyna_multigoal(
+      config=config,
+      save_path=save_path,
+      env=vec_env,
+      model_env=env,
+      make_logger=partial(
+        make_logger,
+        learner_log_extra=multitask_preplay.craftax_learner_log_extra,
       ),
       train_env_params=env_params,
       test_env_params=test_env_params,
@@ -558,7 +556,6 @@ def run_single(config: dict, save_path: str = None):
     train_fn = vbb.make_train(
       config=config,
       save_path=save_path,
-      online_trajectory_log_fn=default_craftax_log_fn,
       env=vec_env,
       make_agent=usfa.make_craftax_agent,
       make_optimizer=usfa.make_optimizer,
@@ -571,10 +568,9 @@ def run_single(config: dict, save_path: str = None):
       vmap_env=vmap_env,
     )
   elif config["ALG"] == "her":
-    train_fn = base_algorithm.make_train(
+    train_fn = vbb.make_train(
       config=config,
       save_path=save_path,
-      online_trajectory_log_fn=default_craftax_log_fn,
       env=vec_env,
       make_agent=her.make_craftax_agent,
       make_optimizer=her.make_optimizer,
@@ -703,18 +699,6 @@ def sweep(search: str = ""):
       "overrides": ["alg=dyna_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "dyna-19-epsilon",
     }
-  elif search == "preplay":
-    sweep_config = {
-      "metric": metric,
-      "parameters": {
-        "ALG": {"values": ["preplay"]},
-        "SEED": {"values": list(range(1))},
-        "NUM_ENV_SEEDS": {"values": [128, 512]},
-        "COMBINE_REAL_SIM": {"values": [True, False]},
-      },
-      "overrides": ["alg=preplay_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "preplay-combine-2",
-    }
   elif search == "dyna":
     sweep_config = {
       "metric": metric,
@@ -727,6 +711,19 @@ def sweep(search: str = ""):
       "overrides": ["alg=dyna_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "dyna-combine-1",
     }
+  elif search == "preplay":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["preplay"]},
+        "NUM_ENV_SEEDS": {"values": [512]},
+        "ALL_GOALS_COEFF": {"values": [0., 1.0]},
+        "OFFTASK_USE_PENG": {"values": [False]},
+        "SEED": {"values": list(range(1, 2))},
+      },
+      "overrides": ["alg=preplay_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "group": "preplay-pnas-fixing-3-no-peng",
+    }
   elif search == "her":
     sweep_config = {
       "metric": metric,
@@ -735,7 +732,19 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 2))},
       },
       "overrides": ["alg=her", "rlenv=craftax-10m", "user=wilka"],
-      "group": "her-1",
+      "group": "her-2",
+    }
+  elif search == "dyna-multigoal":
+    sweep_config = {
+      "metric": metric,
+      "parameters": {
+        "ALG": {"values": ["dyna_multigoal"]},
+        "DYNA_GOAL_SWAP_FRAC": {"values": [0.2, 0.4, 0.6, 0.8]},
+        "NUM_ENV_SEEDS": {"values": [0]},
+        "SEED": {"values": list(range(1, 2))},
+      },
+      "overrides": ["alg=preplay_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "group": "dyna-multigoal-2",
     }
   ############################################################
   # More "final" experiments
@@ -770,7 +779,7 @@ def sweep(search: str = ""):
         "SEED": {"values": list(range(1, 6))},
       },
       "overrides": ["alg=dyna_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "dyna-final-5",
+      "group": "dyna-pnas-revision-1",
     }
   elif search == "preplay-final":
     sweep_config = {
@@ -778,10 +787,11 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512]},
-        "SEED": {"values": list(range(1, 6))},
+        "ALL_GOALS_COEFF": {"values": [0.]},
+        "SEED": {"values": list(range(1, 2))},
       },
       "overrides": ["alg=preplay_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "preplay-final-5",
+      "group": "preplay-pnas-revision-2",
     }
   ############################################################
   # Ablations
@@ -909,6 +919,7 @@ def sweep(search: str = ""):
       "overrides": ["alg=preplay_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
       "group": "preplay-benchmark-10k-5",
     }
+
   else:
     raise NotImplementedError(search)
 

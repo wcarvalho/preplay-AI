@@ -1271,7 +1271,8 @@ def crafax_learner_log_fn(data: dict, config: dict):
       # Add colored borders based on reward and state_features
       reward = float(timesteps.reward[idx])
       her_reward = float(reward_info["reward"][idx])
-      features = timesteps.observation.state_features[idx]
+      _, achievement_fn, _ = ENVIRONMENT_TO_GOAL_FNS[config["ENV"]]
+      features = achievement_fn(timesteps)[idx]
 
       # Determine border color (YELLOW for mismatch is highest priority)
       rewards_mismatch = abs(reward - her_reward) > 1e-5

@@ -341,6 +341,7 @@ def craftax_experience_logger(
       # Extract player positions [T, 2] with (row, col)
       player_pos = np.array(env_state.player_position)
       goal_pos = np.array(env_state.goal_location)  # [T, 2] with (row, col)
+      world_seeds = np.array(env_state.world_seed)  # [T]
 
       for ep_idx in range(max_episodes):
         start = ep_starts[ep_idx]
@@ -351,7 +352,8 @@ def craftax_experience_logger(
         goal_name = goal_names.get(goal_idx, f"Goal_{goal_idx}")
         ep_reward = float(rewards[start:end].sum())
         ep_len = end - start
-        info_str = f"{goal_name}, r={ep_reward:.1f}, len={ep_len}"
+        world_seed = int(world_seeds[start])
+        info_str = f"w{world_seed} {goal_name}, r={ep_reward:.1f}, len={ep_len}"
 
         # Col 0: Start state
         ax_start = axes[ep_idx, 0]
@@ -702,14 +704,14 @@ def sweep(search: str = ""):
       "metric": metric,
       "parameters": {
         "ALG": {"values": ["preplay"]},
-        "SEED": {"values": list(range(1, 2))},
+        "SEED": {"values": list(range(1, 11))},
       },
       "overrides": [
         "alg=preplay_craftax",
         "rlenv=craftax-dyna-multigoal",
         "user=wilka",
       ],
-      "group": "preplay-pnas-revision-4",
+      "group": "preplay-pnas-revision-6",
     }
 
   else:
