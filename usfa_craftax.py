@@ -68,7 +68,9 @@ class UsfaR2D2LossFn(vbb.RecurrentLossFn):
     # Compute per-policy lambda with Peng's trace cutting for off-policy policies
     if self.offtask_use_peng and online_preds.is_collection_policy is not None:
       # selector_actions: [T+1, B, N], data.action: [T+1, B]
-      peng_lambda = (selector_actions == data.action[:, :, None]).astype(jnp.float32) * self.lambda_
+      peng_lambda = (selector_actions == data.action[:, :, None]).astype(
+        jnp.float32
+      ) * self.lambda_
       is_cp = online_preds.is_collection_policy  # [T+1, B, N]
       lambda_ = jnp.where(is_cp, self.lambda_, peng_lambda)  # [T+1, B, N]
     else:
@@ -456,7 +458,8 @@ class UsfaAgent(nn.Module):
     if self.learn_z_vectors == "ALL_TASKS":
       # learn_w_vectors: [N, C], xs.observation.task_w: [T, B, C]
       is_collection_policy = jnp.all(
-        jnp.abs(learn_w_vectors[None, None] - xs.observation.task_w[:, :, None, :]) < 1e-6,
+        jnp.abs(learn_w_vectors[None, None] - xs.observation.task_w[:, :, None, :])
+        < 1e-6,
         axis=-1,
       )  # [T, B, N]
       predictions = predictions._replace(is_collection_policy=is_collection_policy)

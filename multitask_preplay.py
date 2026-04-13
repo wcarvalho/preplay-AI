@@ -1151,11 +1151,11 @@ class PreplayLossFn:
         non_terminal=all_t.discount,  # [S+1, num_sims]
         loss_mask=all_t_mask,  # [S+1, num_sims]
       )  # returns [S, num_sims], [num_sims], dict, dict
-      log_info["goal"] = main_goal                      # [num_sims, G]
-      log_info["epsilon_values"] = eps                    # [num_sims]
-      log_info["simulation_reward"] = reward              # [S+1, num_sims]
-      log_info["sim_ontask_q_values"] = main_q_online     # [S+1, num_sims, A]
-      log_info["sim_offtask_q_values"] = main_q_online    # [S+1, num_sims, A]
+      log_info["goal"] = main_goal  # [num_sims, G]
+      log_info["epsilon_values"] = eps  # [num_sims]
+      log_info["simulation_reward"] = reward  # [S+1, num_sims]
+      log_info["sim_ontask_q_values"] = main_q_online  # [S+1, num_sims, A]
+      log_info["sim_offtask_q_values"] = main_q_online  # [S+1, num_sims, A]
       return batch_td_error, batch_loss_mean, metrics, log_info
 
     # Vmap over timesteps T
@@ -1334,12 +1334,6 @@ def make_craftax_singlegoal_agent(
     unroll_output_state=True,
   )
 
-  qhead_type = config.get("QHEAD_TYPE", "dot")
-  if qhead_type == "dot":
-    QFnCls = DuellingDotMLP
-  else:
-    QFnCls = DuellingMLP
-
   agent = PreplayAgent(
     observation_encoder=CraftaxObsEncoder(
       hidden_dim=config["MLP_HIDDEN_DIM"],
@@ -1352,7 +1346,7 @@ def make_craftax_singlegoal_agent(
       action_dim=env.action_space(env_params).n,
     ),
     rnn=rnn,
-    main_q_head=QFnCls(
+    main_q_head=DuellingMLP(
       hidden_dim=config.get("Q_HIDDEN_DIM", 512),
       num_layers=config.get("NUM_Q_LAYERS", 1),
       activation=config["ACTIVATION"],
@@ -1361,12 +1355,13 @@ def make_craftax_singlegoal_agent(
       use_task=False,
       out_dim=env.action_space(env_params).n,
     ),
-    off_task_q_head=QFnCls(
+    off_task_q_head=DuellingMLP(
       hidden_dim=config.get("Q_HIDDEN_DIM", 512),
-      num_layers=config.get("NUM_AUX_LAYERS", 0),
+      num_layers=config.get("NUM_AUX_LAYERS", 1),
       activation=config["ACTIVATION"],
       activate_final=False,
       use_bias=True,
+      use_task=True,
       out_dim=env.action_space(env_params).n,
     ),
     env=model_env,
@@ -1771,7 +1766,6 @@ def make_train_craftax_singlegoal_dyna_multigoal(**kwargs):
       (num_ontask_simulations, timestep.observation.achievements.shape[-1])
     )  # [num_ontask_simulations, G]
 
-
   return vbb.make_train(
     make_agent=partial(
       make_craftax_singlegoal_agent, model_env=kwargs.pop("model_env")
@@ -1820,7 +1814,9 @@ def make_train_craftax_multigoal(**kwargs):
       achievable: [G] achievability scores (nearby minus task objects)
       any_achievable: scalar bool
     """
-    is_object_nearby = timestep.observation.nearby_objects.astype(jnp.int32)  # [N_placed, G]
+    is_object_nearby = timestep.observation.nearby_objects.astype(
+      jnp.int32
+    )  # [N_placed, G]
     is_object_nearby = is_object_nearby.sum(-2)  # [G]
     task_object = timestep.observation.task_w.astype(jnp.int32)  # [G]
     achievable = nn.relu((is_object_nearby - task_object).astype(jnp.float32))  # [G]
@@ -2742,11 +2738,11 @@ def craftax_learner_log_extra(
 
   def goal_name_from_vec(goal_vec):
     """Convert one-hot goal vector [G] to human name."""
-    if jnp.abs(goal_vec).sum() < 1e-6:
-      return "EnvReward"
-    if _is_singlegoal and goal_vec.shape[-1] > len(Achievement):
+    if _is_singlegoal:
       # task_w is [coefficients, zeros] — truncate to achievement dims
-      goal_vec = goal_vec[..., : len(Achievement)]
+      goal_vec = goal_vec[..., : len(Achievement)].astype(jnp.int32)
+      if (goal_vec == 1).all():
+        return "EnvReward"
     idx = int(jnp.argmax(goal_vec))
     return GOAL_NAMES.get(idx, f"Goal_{idx}")
 
@@ -2988,9 +2984,7 @@ def craftax_learner_log_extra(
           task_w = online_timesteps.observation.task_w[ep_start]
           goal_name = goal_name_from_vec(task_w)
           total_reward = float(online_timesteps.reward[ep_start:ep_end].sum())
-          ax.set_title(
-            f"online\nEp 0 ({goal_name}, r={total_reward:.1f})", fontsize=22
-          )
+          ax.set_title(f"online\nEp 0 ({goal_name}, r={total_reward:.1f})", fontsize=22)
           ax.axis("off")
         else:
           ax.set_visible(False)
@@ -3074,7 +3068,7 @@ def craftax_learner_log_extra(
         actions_,
         f"{col_name} — Q-values",
         nT,
-        action_names_=action_names,
+        # action_names_=action_names,
         show_numbers=col_name in ("preplay", "dyna"),
         vmin=q_vmin,
         vmax=q_vmax,
@@ -3099,7 +3093,7 @@ def craftax_learner_log_extra(
           actions_,
           f"{col_name} — Target Q",
           nT,
-          action_names_=action_names,
+          # action_names_=action_names,
           show_numbers=col_name in ("preplay", "dyna"),
           vmin=q_vmin,
           vmax=q_vmax,
@@ -3264,7 +3258,9 @@ def craftax_learner_log_extra(
       frames.append(img)
 
     actions_taken = [Action(int(a)).name for a in actions_[:max_len]]
-    sim_reward = cd.get("simulation_reward")  # [S+1] preplay/off-task reward for sim goal
+    sim_reward = cd.get(
+      "simulation_reward"
+    )  # [S+1] preplay/off-task reward for sim goal
 
     def panel_title_fn(ts, i):
       title = f"t={i}\n{actions_taken[i]}"

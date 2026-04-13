@@ -170,7 +170,9 @@ class RnnAgent(nn.Module):
 
     return Predictions(q_vals=q_vals, rnn_states=rnn_out)
 
-  def unroll_offtask(self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey, goal: Goal):
+  def unroll_offtask(
+    self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey, goal: Goal
+  ):
     """Like unroll, but uses an explicit goal instead of extracting from timestep.
 
     Called inside vmaps that strip the B dimension, so xs is [T, ...] not [T, B, ...].
@@ -489,14 +491,14 @@ class HerLossFn(base.RecurrentLossFn):
 
       # [B, N, T], [B, N], [B, N, T], [B, N, T, D]
       _, her_loss, her_metrics, her_log_info = her_loss_fn(
-        new_goals,        # [N, B, D]
-        goal_indices,     # [N, B]
-        key_grad_,        # [N, B, 2]
-        data.timestep,    # [T, B, D]
-        data.action,      # [T, B]
-        logits,           # [T, B]
-        online_state,     # [B, D]
-        target_state,     # [B, D]
+        new_goals,  # [N, B, D]
+        goal_indices,  # [N, B]
+        key_grad_,  # [N, B, 2]
+        data.timestep,  # [T, B, D]
+        data.action,  # [T, B]
+        logits,  # [T, B]
+        online_state,  # [B, D]
+        target_state,  # [B, D]
       )
 
       loss = loss + self.her_coeff * her_loss.mean(1)
@@ -608,12 +610,12 @@ class HerLossFn(base.RecurrentLossFn):
 
       # [B, N]
       _, ag_loss, ag_metrics, ag_log_info = ag_fn(
-        all_goals,        # GoalPosition [N, B, D]
-        data.timestep,    # [T, B, ...]
-        data.action,      # [T, B]
-        online_state,     # [B, D]
-        target_state,     # [B, D]
-        key_grad_,        # [N, B, 2]
+        all_goals,  # GoalPosition [N, B, D]
+        data.timestep,  # [T, B, ...]
+        data.action,  # [T, B]
+        online_state,  # [B, D]
+        target_state,  # [B, D]
+        key_grad_,  # [N, B, 2]
       )
       # only first goal
       all_log_info["all_goals"] = jax.tree_util.tree_map(
@@ -1379,7 +1381,6 @@ class DuellingDotMLP(nn.Module):
     q_values = (sf * task[None, :]).sum(-1)  # [A]
 
     return q_values
-
 
 
 # --------------------

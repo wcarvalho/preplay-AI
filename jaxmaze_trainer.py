@@ -169,7 +169,7 @@ def run_single(config: dict, save_path: str = None):
   env = mt_env.HouseMaze(
     task_runner=task_runner,
     num_categories=200,
-    curriculum_strategy=config.get("CURRICULUM_STRATEGY", 'half_uniform_half_far'),
+    curriculum_strategy=config.get("CURRICULUM_STRATEGY", "half_uniform_half_far"),
   )
 
   env = jaxmaze_utils.AutoResetWrapper(env)
@@ -382,10 +382,12 @@ def run_single(config: dict, save_path: str = None):
 
 def sweep(search: str = ""):
   search = search or "ql"
-  base = {"metric": {
-          "name": "evaluator_performance/0.0 avg_episode_return",
-          "goal": "maximize",
-        }}
+  base = {
+    "metric": {
+      "name": "evaluator_performance/0.0 avg_episode_return",
+      "goal": "maximize",
+    }
+  }
   if search == "ql":
     sweep_config = {
       **base,
@@ -517,14 +519,14 @@ def sweep(search: str = ""):
     }
   elif search == "her-final":
     sweep_config = {
-        **base,
-        "parameters": {
-            "ALG": {"values": ["her"]},
-            "SEED": {"values": list(range(1, 11))},
-            "env.exp": {"values": ["exp4"]},
-        },
-        "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
-        "group": "her-pnas-revision-2",
+      **base,
+      "parameters": {
+        "ALG": {"values": ["her"]},
+        "SEED": {"values": list(range(1, 11))},
+        "env.exp": {"values": ["exp4"]},
+      },
+      "overrides": ["alg=her", "rlenv=jaxmaze", "user=wilka"],
+      "group": "her-pnas-revision-2",
     }
   elif search == "usfa-final":
     sweep_config = {
@@ -538,14 +540,14 @@ def sweep(search: str = ""):
     }
   elif search == "dyna-final":
     sweep_config = {
-        **base,
-        "parameters": {
-            "ALG": {"values": ["dyna"]},
-            "SEED": {"values": list(range(1, 11))},
-            "env.exp": {"values": ["exp4"]},
-        },
-        "overrides": ["alg=dyna_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-        "group": "dyna-pnas-revision-3",
+      **base,
+      "parameters": {
+        "ALG": {"values": ["dyna"]},
+        "SEED": {"values": list(range(1, 11))},
+        "env.exp": {"values": ["exp4"]},
+      },
+      "overrides": ["alg=dyna_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
+      "group": "dyna-pnas-revision-3",
     }
   elif search == "preplay-final":
     sweep_config = {
@@ -577,39 +579,39 @@ def sweep(search: str = ""):
     }
   elif search == "preplay-all-goals-ablation":
     sweep_config = {
-        **base,
-        "parameters": {
-            "ALG": {"values": ["preplay"]},
-            "SEED": {"values": list(range(5))},
-            "ALL_GOALS_COEFF": {"values": [0.0]},
-            "env.exp": {"values": ["exp4"]},
-        },
-        "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-        "group": "preplay-all-goals-ablation-pnas-revision-2",
+      **base,
+      "parameters": {
+        "ALG": {"values": ["preplay"]},
+        "SEED": {"values": list(range(5))},
+        "ALL_GOALS_COEFF": {"values": [0.0]},
+        "env.exp": {"values": ["exp4"]},
+      },
+      "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
+      "group": "preplay-all-goals-ablation-pnas-revision-2",
     }
   elif search == "preplay-peng-ablation":
     sweep_config = {
-        **base,
-        "parameters": {
-            "ALG": {"values": ["preplay"]},
-            "SEED": {"values": list(range(5))},
-            "OFFTASK_USE_PENG": {"values": [False]},
-            "env.exp": {"values": ["exp4"]},
-        },
-        "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-        "group": "preplay-peng-ablation-pnas-revision-2",
+      **base,
+      "parameters": {
+        "ALG": {"values": ["preplay"]},
+        "SEED": {"values": list(range(5))},
+        "OFFTASK_USE_PENG": {"values": [False]},
+        "env.exp": {"values": ["exp4"]},
+      },
+      "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
+      "group": "preplay-peng-ablation-pnas-revision-2",
     }
   elif search == "preplay-cql-ablation":
     sweep_config = {
-        **base,
-        "parameters": {
-            "ALG": {"values": ["preplay"]},
-            "SEED": {"values": list(range(5))},
-            "CQL_ALPHA": {"values": [0.0]},
-            "env.exp": {"values": ["exp4"]},
-        },
-        "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
-        "group": "preplay-cql-ablation-pnas-revision-2",
+      **base,
+      "parameters": {
+        "ALG": {"values": ["preplay"]},
+        "SEED": {"values": list(range(5))},
+        "CQL_ALPHA": {"values": [0.0]},
+        "env.exp": {"values": ["exp4"]},
+      },
+      "overrides": ["alg=preplay_jaxmaze", "rlenv=jaxmaze", "user=wilka"],
+      "group": "preplay-cql-ablation-pnas-revision-2",
     }
   elif search == "her-test-small":
     sweep_config = {
