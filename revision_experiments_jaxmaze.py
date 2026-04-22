@@ -24,7 +24,7 @@ EXPERIMENTS = [
   # ("her-final", "kempner"),
   ## HER ablations
   ##("her-test-small", "kempner"),
-  ("her-test-big", "kempner"),
+  #("her-test-big", "kempner"),
   ## Preplay ablations
 ]
 

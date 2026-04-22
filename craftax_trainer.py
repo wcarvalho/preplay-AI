@@ -8,12 +8,12 @@ HYDRA_FULL_ERROR=1 JAX_TRACEBACK_FILTERING=off python -m ipdb -c continue crafta
   app.parallel=none \
   app.debug=True \
   app.wandb=False \
-  app.search=dyna-multigoal
+  app.search=her
 
 RUNNING ON SLURM:
 python craftax_trainer.py \
   app.parallel=slurm \
-  app.search=usfa
+  app.search=her
 """
 
 import os
@@ -670,46 +670,25 @@ def sweep(search: str = ""):
       "group": "usfa-10-achievable",
     }
 
-  elif search == "alphazero":
-    sweep_config = {
-      "metric": metric,
-      "parameters": {
-        "NUM_ENV_SEEDS": {"values": [0]},
-        "NUM_SIMULATIONS": {"values": [2]},
-        "GUMBEL_SCALE": {"values": [1.0, 0.1, 10.0]},
-        "value_coef": {"values": [0.25, 1.0, 0.025]},
-        "MAX_PRIORITY_WEIGHT": {"values": [0.0]},
-        "IMPORTANCE_SAMPLING_EXPONENT": {"values": [0.0]},
-        # "MAX_VALUE": {'values': [10, 20]},
-        # "SAMPLE_LENGTH": {'values': [40, 60, 80]},
-      },
-      "overrides": ["alg=alphazero", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "alphazero-4",
-    }
   elif search == "dyna":
     sweep_config = {
       "metric": metric,
-      "parameters": {
-        "ALG": {"values": ["dyna"]},
-        "SEED": {"values": list(range(1, 4))},
-        "NUM_ENV_SEEDS": {"values": [128]},
-        "NUM_SIMULATIONS": {"values": [4]},
-        "FIXED_EPSILON": {"values": [2]},
-      },
-      "overrides": ["alg=dyna_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "dyna-19-epsilon",
-    }
-  elif search == "dyna":
-    sweep_config = {
-      "metric": metric,
-      "parameters": {
+      "parameters": [{
         "ALG": {"values": ["dyna"]},
         "SEED": {"values": list(range(1))},
-        "NUM_ENV_SEEDS": {"values": [128, 512]},
-        "COMBINE_REAL_SIM": {"values": [True, False]},
+        "NUM_ENV_SEEDS": {"values": [512]},
+        "DYNA_COEFF": {"values": [5.0]},
       },
+      {
+        "ALG": {"values": ["dyna_multigoal"]},
+        "SEED": {"values": list(range(1))},
+        "NUM_ENV_SEEDS": {"values": [512]},
+        "DYNA_GOAL_SWAP_FRAC": {"values": [0]},
+        "DYNA_COEFF": {"values": [5.0]},
+      }
+      ],
       "overrides": ["alg=dyna_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "dyna-combine-1",
+      "group": "dyna-combine-3",
     }
   elif search == "preplay":
     sweep_config = {
@@ -717,23 +696,38 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "NUM_ENV_SEEDS": {"values": [512]},
-        "ALL_GOALS_COEFF": {"values": [1.0]},
-        "OFFTASK_LOSS_COEFF": {"values": [1.0]},
-        "OFFTASK_USE_PENG": {"values": [True, False]},
+        #"ALL_GOALS_COEFF": {"values": [1.0]},
+        #"DYNA_COEFF": {"values": [1.0, 2.0, 5.0]},
+        #"OFFTASK_LOSS_COEFF": {"values": [1.0]},
+        #"CQL_ALPHA": {"values": [0.0, ]},
+        "MAINQ_COEFF": {"values": [0.0]},
         "SEED": {"values": list(range(1, 2))},
       },
       "overrides": ["alg=preplay_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "preplay-pnas-fixing-4-more-preplay",
+      "group": "preplay-pnas-fixing-5-more-dyna",
     }
   elif search == "her":
     sweep_config = {
       "metric": metric,
-      "parameters": {
-        "NUM_ENV_SEEDS": {"values": [0]},
-        "SEED": {"values": list(range(1, 2))},
-      },
-      "overrides": ["alg=her", "rlenv=craftax-10m", "user=wilka"],
-      "group": "her-2",
+      "parameters": [
+      #{
+      #  "NUM_ENV_SEEDS": {"values": [512]},
+      #  "SEED": {"values": list(range(1, 2))},
+      #  "SEPARATE_OFFTASK_HEAD": {"values": [False]},
+      #  "CQL_ALPHA": {"values": [0]},
+      #  "ALL_GOALS_COEFF": {"values": [0]},
+      #  "HER_COEFF": {"values": [0]},
+      #  "FIXED_EPSILON": {"values": [0]},
+      #  "EPSILON_ANNEAL_TIME": {"values": [5e5, 5e6]},
+      #},
+      {
+        "NUM_ENV_SEEDS": {"values": [512]},
+        "SEED": {"values": [1]},
+        "FIXED_EPSILON": {"values": [1, 2]},
+      }
+      ],
+      "overrides": ["alg=her_craftax", "rlenv=craftax-10m", "user=wilka"],
+      "group": "her-8-ql-only",
     }
   ############################################################
   # More "final" experiments
@@ -763,11 +757,11 @@ def sweep(search: str = ""):
     sweep_config = {
       "metric": metric,
       "parameters": {
-        "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512]},
+        "NUM_ENV_SEEDS": {"values": [512, 256, 128, 64, 32, 16, 8]},
         "SEED": {"values": list(range(1, 6))},
       },
-      "overrides": ["alg=her", "rlenv=craftax-10m", "user=wilka"],
-      "group": "her-2",
+      "overrides": ["alg=her_craftax", "rlenv=craftax-10m", "user=wilka"],
+      "group": "her-pnas-2",
     }
   elif search == "dyna-final":
     sweep_config = {
@@ -786,11 +780,10 @@ def sweep(search: str = ""):
       "parameters": {
         "ALG": {"values": ["preplay"]},
         "NUM_ENV_SEEDS": {"values": [8, 16, 32, 64, 128, 256, 512]},
-        "ALL_GOALS_COEFF": {"values": [0.0]},
-        "SEED": {"values": list(range(1, 2))},
+        "SEED": {"values": list(range(1, 6))},
       },
-      "overrides": ["alg=preplay_craftax", "rlenv=craftax-1m-dyna", "user=wilka"],
-      "group": "preplay-pnas-revision-2",
+      "overrides": ["alg=preplay_craftax_ai", "rlenv=craftax-1m-dyna", "user=wilka"],
+      "group": "preplay-pnas-revision-3",
     }
   ############################################################
   # Ablations

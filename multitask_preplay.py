@@ -325,7 +325,6 @@ class DuellingMLP(nn.Module):
   num_layers: int = 1
   norm_type: str = "none"
   activation: str = "relu"
-  activate_final: bool = True
   use_bias: bool = False
   use_task: bool = True
 
@@ -444,6 +443,7 @@ class PreplayLossFn:
   place_goal_in_timestep: Callable = None
   make_log_extras: Callable = None
   offtask_use_peng: bool = True  # Use Peng's Q(λ) trace cutting for off-policy goals
+  ontask_use_env_reward: bool = True  # Use timestep.reward for on-task instead of compute_rewards
   cql_alpha: float = 0.0  # CQL(H) regularizer coefficient; 0.0 = disabled
   cql_temperature: float = (
     1.0  # CQL logsumexp temperature; lower = sharper penalty on max Q
@@ -612,7 +612,10 @@ class PreplayLossFn:
     if self.online_coeff > 0.0:
       # [T, B, G]
       goal = self.get_main_goal(data.timestep, expand_across_simulations=False)
-      rewards = self.compute_rewards(data.timestep, goal, expand_g_across_time=False)
+      if self.ontask_use_env_reward:
+        rewards = data.timestep.reward
+      else:
+        rewards = self.compute_rewards(data.timestep, goal, expand_g_across_time=False)
 
       td_error, batch_loss, metrics, log_info = self.loss_fn(
         timestep=data.timestep,  # [T, B, ...]
@@ -997,7 +1000,10 @@ class PreplayLossFn:
       )
 
       all_t_is_last = make_float(all_t.last())
-      ontask_reward = self.compute_rewards(all_t, ontask_goals_tiled)
+      if self.ontask_use_env_reward:
+        ontask_reward = all_t.reward
+      else:
+        ontask_reward = self.compute_rewards(all_t, ontask_goals_tiled)
 
       # on-task sims are on-policy for the main goal, off-task sims are off-policy
       ontask_collection_goal_is_eval_goal = jnp.concatenate(
@@ -1198,6 +1204,7 @@ def make_loss_fn_class(config, **kwargs) -> PreplayLossFn:
     online_task_coeff=config.get("MAINQ_COEFF", 1.0),
     all_goals_coeff=config.get("ALL_GOALS_COEFF", 1.0),
     offtask_use_peng=config.get("OFFTASK_USE_PENG", True),
+    ontask_use_env_reward=config.get("ONTASK_USE_ENV_REWARD", False),
     cql_alpha=config.get("CQL_ALPHA", 1e-3),
     cql_temperature=config.get("CQL_TEMPERATURE", 1.0),
     **kwargs,
@@ -1505,6 +1512,7 @@ def make_jaxmaze_multigoal_agent(
 ##############################
 def make_train_craftax_singlegoal(**kwargs):
   config = kwargs["config"]
+  config.setdefault("ONTASK_USE_ENV_REWARD", True)
   # ACME default epsilon schedule - in range of ~(0, .1)
   vals = np.logspace(num=256, start=1, stop=3, base=0.1)
 
@@ -1649,6 +1657,7 @@ def make_train_craftax_singlegoal(**kwargs):
 
 def make_train_craftax_singlegoal_dyna_multigoal(**kwargs):
   config = kwargs["config"]
+  config.setdefault("ONTASK_USE_ENV_REWARD", True)
   config["ALL_GOALS_COEFF"] = 0.0
   config["DYNA_COEFF"] = 1.0
   config["OFFTASK_COEFF"] = 0.0
@@ -1785,6 +1794,7 @@ def make_train_craftax_singlegoal_dyna_multigoal(**kwargs):
 
 def make_train_craftax_multigoal(**kwargs):
   config = kwargs["config"]
+  config.setdefault("ONTASK_USE_ENV_REWARD", False)
   vals = np.logspace(num=256, start=1, stop=3, base=0.1)
 
   num_offtask_simulations = config["NUM_OFFTASK_SIMULATIONS"]
@@ -1940,6 +1950,7 @@ def make_train_craftax_multigoal(**kwargs):
 
 def make_train_jaxmaze_multigoal(**kwargs):
   config = kwargs["config"]
+  config.setdefault("ONTASK_USE_ENV_REWARD", False)
   all_tasks = jnp.array(kwargs.pop("all_tasks"))
   # ACME default epsilon range ~(0.001, .1)
   vals = np.logspace(num=256, start=1, stop=3, base=0.1)
@@ -2477,7 +2488,7 @@ def jaxmaze_learner_log_extra(
         f"{col_name} — Q-values",
         nT,
         action_names=action_names,
-        show_numbers=col_name in ("preplay", "dyna"),
+        show_numbers=False,
         vmin=q_vmin,
         vmax=q_vmax,
       )
@@ -2520,7 +2531,7 @@ def jaxmaze_learner_log_extra(
             f"{col_name} — Target Q",
             nT,
             action_names=action_names,
-            show_numbers=col_name in ("preplay", "dyna"),
+            show_numbers=False,
             vmin=q_vmin,
             vmax=q_vmax,
           )
@@ -2529,7 +2540,10 @@ def jaxmaze_learner_log_extra(
     if im_tq is not None:
       fig.colorbar(im_tq, ax=axes[3, :].tolist(), shrink=0.8, pad=0.02)
 
-    # --- Row 4: Goal vectors ---
+    # --- Row 4: Goal vectors (shared colorscale vmin=0, vmax=2) ---
+    # 0=inactive, 1=task OR achieved, 2=both task AND achieved
+    GOAL_VMIN, GOAL_VMAX = 0, 2
+    im_goal = None
     for ci, col_name in enumerate(col_names):
       ax = axes[4, ci]
       cd = col_data[col_name]
@@ -2540,17 +2554,18 @@ def jaxmaze_learner_log_extra(
         goal_ach = cd.get("goal_achievements")
         if goal_tv is not None and goal_ach is not None:
           combined = (goal_tv + goal_ach).T  # [D, T]
-          ax.imshow(
+          im_goal = ax.imshow(
             combined,
             aspect="auto",
             cmap="viridis",
             interpolation="nearest",
-            vmin=0,
-            vmax=2,
+            vmin=GOAL_VMIN,
+            vmax=GOAL_VMAX,
           )
           ax.set_title(f"{col_name} — Task+Ach", fontsize=22)
           ax.set_ylabel("Dims", fontsize=18)
           ax.set_yticks(range(combined.shape[0]))
+          ax.set_yticklabels([])
           ax.set_xticks(range(nT))
           ax.grid(True, axis="x", alpha=0.3, color="white")
           loss_mask = cd.get("loss_mask")
@@ -2573,23 +2588,27 @@ def jaxmaze_learner_log_extra(
         goal = cd.get("goal")
         if goal is not None:
           goal_2d = jnp.tile(goal[None, :], (nT, 1)).T  # [D, T]
-          ax.imshow(
+          im_goal = ax.imshow(
             goal_2d,
             aspect="auto",
             cmap="viridis",
             interpolation="nearest",
-            vmin=0,
-            vmax=1,
+            vmin=GOAL_VMIN,
+            vmax=GOAL_VMAX,
           )
           ax.set_title(f"{col_name} — Goal Vector", fontsize=22)
           ax.set_ylabel("Dims", fontsize=18)
           ax.set_yticks(range(goal_2d.shape[0]))
+          ax.set_yticklabels([])
           ax.set_xticks(range(nT))
           ax.grid(True, axis="x", alpha=0.3, color="white")
         else:
           ax.set_visible(False)
       else:
         ax.set_visible(False)
+
+    if im_goal is not None:
+      fig.colorbar(im_goal, ax=axes[4, :].tolist(), shrink=0.8, pad=0.02)
 
     fig.tight_layout()
 
@@ -2741,10 +2760,12 @@ def craftax_learner_log_extra(
     if _is_singlegoal:
       # task_w is [coefficients, zeros] — truncate to achievement dims
       goal_vec = goal_vec[..., : len(Achievement)].astype(jnp.int32)
-      if (goal_vec == 1).all():
+      # all-ones goal or raw reward coefficients → environment reward
+      if int((goal_vec > 0).sum()) > 1:
         return "EnvReward"
     idx = int(jnp.argmax(goal_vec))
-    return GOAL_NAMES.get(idx, f"Goal_{idx}")
+    name = GOAL_NAMES.get(idx, f"Goal_{idx}")
+    return f"{name} ({idx})"
 
   def render_env_state(env_state):
     """Render map from env_state. Returns float [0,1] for matplotlib."""
@@ -3069,7 +3090,7 @@ def craftax_learner_log_extra(
         f"{col_name} — Q-values",
         nT,
         # action_names_=action_names,
-        show_numbers=col_name in ("preplay", "dyna"),
+        show_numbers=False,
         vmin=q_vmin,
         vmax=q_vmax,
       )
@@ -3094,7 +3115,7 @@ def craftax_learner_log_extra(
           f"{col_name} — Target Q",
           nT,
           # action_names_=action_names,
-          show_numbers=col_name in ("preplay", "dyna"),
+          show_numbers=False,
           vmin=q_vmin,
           vmax=q_vmax,
         )
@@ -3103,7 +3124,10 @@ def craftax_learner_log_extra(
     if im_tq is not None:
       fig.colorbar(im_tq, ax=axes[3, :].tolist(), shrink=0.8, pad=0.02)
 
-    # --- Row 4: Goal vectors ---
+    # --- Row 4: Goal vectors (shared colorscale vmin=0, vmax=2) ---
+    # 0=inactive, 1=task OR achieved, 2=both task AND achieved
+    GOAL_VMIN, GOAL_VMAX = 0, 2
+    im_goal = None
     for ci, col_name in enumerate(col_names):
       ax = axes[4, ci]
       cd = col_data[col_name]
@@ -3114,20 +3138,19 @@ def craftax_learner_log_extra(
         goal_ach = cd.get("goal_achievements")
         if goal_tv is not None and goal_ach is not None:
           combined = (goal_tv + goal_ach).T  # [D, T]
-          ax.imshow(
+          im_goal = ax.imshow(
             combined,
             aspect="auto",
             cmap="viridis",
             interpolation="nearest",
-            vmin=0,
-            vmax=2,
+            vmin=GOAL_VMIN,
+            vmax=GOAL_VMAX,
           )
           ax.set_title(f"{col_name} — Task+Ach", fontsize=22)
           ax.set_ylabel("Dims", fontsize=18)
           n_dims = combined.shape[0]
           ax.set_yticks(range(n_dims))
-          ytick_labels = [GOAL_NAMES.get(i, str(i)) for i in range(n_dims)]
-          ax.set_yticklabels(ytick_labels)
+          ax.set_yticklabels([])
           ax.set_xticks(range(nT))
           ax.grid(True, axis="x", alpha=0.3, color="white")
           loss_mask = cd.get("loss_mask")
@@ -3149,26 +3172,28 @@ def craftax_learner_log_extra(
         goal = cd.get("goal")
         if goal is not None:
           goal_2d = jnp.tile(goal[None, :], (nT, 1)).T  # [D, T]
-          ax.imshow(
+          im_goal = ax.imshow(
             goal_2d,
             aspect="auto",
             cmap="viridis",
             interpolation="nearest",
-            vmin=0,
-            vmax=1,
+            vmin=GOAL_VMIN,
+            vmax=GOAL_VMAX,
           )
           ax.set_title(f"{col_name} — Goal Vector", fontsize=22)
           ax.set_ylabel("Dims", fontsize=18)
           n_dims = goal_2d.shape[0]
           ax.set_yticks(range(n_dims))
-          ytick_labels = [GOAL_NAMES.get(i, str(i)) for i in range(n_dims)]
-          ax.set_yticklabels(ytick_labels)
+          ax.set_yticklabels([])
           ax.set_xticks(range(nT))
           ax.grid(True, axis="x", alpha=0.3, color="white")
         else:
           ax.set_visible(False)
       else:
         ax.set_visible(False)
+
+    if im_goal is not None:
+      fig.colorbar(im_goal, ax=axes[4, :].tolist(), shrink=0.8, pad=0.02)
 
     fig.tight_layout()
     return fig

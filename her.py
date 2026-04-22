@@ -53,6 +53,14 @@ AgentState = flax.struct.PyTreeNode
 RNNInput = base.RNNInput
 
 
+def craftax_achievement_vector(t, weighted: bool=True):
+  achievements = t.observation.achievements.astype(jnp.float32)
+  if not weighted:
+    return achievements
+  coefficients = t.observation.task_w.astype(jnp.float32)
+  coefficients = coefficients[..., : achievements.shape[-1]]
+  return jax.lax.stop_gradient(achievements*coefficients)
+
 ENVIRONMENT_TO_GOAL_FNS = {
   "jaxmaze": (
     lambda t: jax.lax.stop_gradient(t.observation.task_w),  # task vector
@@ -65,8 +73,8 @@ ENVIRONMENT_TO_GOAL_FNS = {
     lambda t: jax.lax.stop_gradient(t.observation.player_position),
   ),
   "craftax-gen": (
-    lambda t: jax.lax.stop_gradient(jnp.ones_like(t.observation.achievements)),
-    lambda t: jax.lax.stop_gradient(t.observation.achievements),
+    lambda t: jnp.ones_like(t.observation.achievements).astype(jnp.float32),
+    craftax_achievement_vector,
     lambda t: jax.lax.stop_gradient(t.observation.player_position),
   ),
 }
@@ -98,6 +106,13 @@ class RnnAgent(nn.Module):
   q_fn: nn.Module
   task_encoder: nn.Module
   goal_from_timestep: Callable[[TimeStep], jax.Array]
+  off_task_q_fn: nn.Module = None
+
+  def setup(self):
+    if self.off_task_q_fn is None:
+      self._off_task_q_fn = self.q_fn
+    else:
+      self._off_task_q_fn = self.off_task_q_fn
 
   def initialize(self, x: TimeStep):
     """Only used for initialization."""
@@ -106,7 +121,12 @@ class RnnAgent(nn.Module):
     batch_dims = (x.reward.shape[0],)
     rnn_state = self.initialize_carry(rng, batch_dims)
 
-    return self(rnn_state, x, rng)
+    preds, new_rnn_state = self(rnn_state, x, rng)
+    # also init off-task head if separate
+    if self.off_task_q_fn is not None:
+      goal_embedding = jax.vmap(self.task_encoder)(self.goal_from_timestep(x))
+      jax.vmap(self._off_task_q_fn)(preds.rnn_states, goal_embedding)
+    return preds, new_rnn_state
 
   def __call__(self, rnn_state, x: TimeStep, rng: jax.random.PRNGKey):
     embedding = self.observation_encoder(x.observation)
@@ -152,23 +172,23 @@ class RnnAgent(nn.Module):
       rnn_states=rnn_out,
     ), new_rnn_state
 
-  def unroll_rnn_only(self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey):
-    """Like unroll() but returns only RNN states, skipping Q-value computation."""
-    embedding = nn.BatchApply(self.observation_encoder)(xs.observation)
-    rng, _rng = jax.random.split(rng)
-    rnn_in = RNNInput(obs=embedding, reset=xs.first())
-    new_rnn_state, rnn_out = self.rnn.unroll(rnn_state, rnn_in, _rng)
-    return rnn_out, new_rnn_state
+  #def unroll_rnn_only(self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey):
+  #  """Like unroll() but returns only RNN states, skipping Q-value computation."""
+  #  embedding = nn.BatchApply(self.observation_encoder)(xs.observation)
+  #  rng, _rng = jax.random.split(rng)
+  #  rnn_in = RNNInput(obs=embedding, reset=xs.first())
+  #  new_rnn_state, rnn_out = self.rnn.unroll(rnn_state, rnn_in, _rng)
+  #  return rnn_out, new_rnn_state
 
-  def apply_q(self, rnn_out, goal: Goal):
-    """
-    rnn_out [T, D],
-    goal [T, D],
-    """
-    goal_embedding = jax.vmap(self.task_encoder)(goal)
-    q_vals = jax.vmap(self.q_fn)(rnn_out, goal_embedding)
+  #def apply_q(self, rnn_out, goal: Goal):
+  #  """
+  #  rnn_out [T, D],
+  #  goal [T, D],
+  #  """
+  #  goal_embedding = jax.vmap(self.task_encoder)(goal)
+  #  q_vals = jax.vmap(self._off_task_q_fn)(rnn_out, goal_embedding)
 
-    return Predictions(q_vals=q_vals, rnn_states=rnn_out)
+  #  return Predictions(q_vals=q_vals, rnn_states=rnn_out)
 
   def unroll_offtask(
     self, rnn_state, xs: TimeStep, rng: jax.random.PRNGKey, goal: Goal
@@ -187,7 +207,7 @@ class RnnAgent(nn.Module):
     rnn_in = RNNInput(obs=embedding, reset=xs.first())
     new_rnn_state, rnn_out = self.rnn.unroll(rnn_state, rnn_in, _rng)
     goal_embedding = jax.vmap(self.task_encoder)(goal)
-    q_vals = jax.vmap(self.q_fn)(rnn_out, goal_embedding)
+    q_vals = jax.vmap(self._off_task_q_fn)(rnn_out, goal_embedding)
     return Predictions(q_vals=q_vals, rnn_states=rnn_out), new_rnn_state
 
   def initialize_carry(self, *args, **kwargs):
@@ -209,14 +229,14 @@ def is_truncated(timestep):
   return jax.lax.stop_gradient(make_float(1 - truncated))
 
 
-def episode_finished_mask(timesteps):
-  # either termination or truncation
-  is_last_t = make_float(timesteps.last())
+#def episode_finished_mask(timesteps):
+#  # either termination or truncation
+#  is_last_t = make_float(timesteps.last())
 
-  # time-step of termination and everything afterwards is masked out
-  term_cumsum_t = jnp.cumsum(is_last_t, 0)
-  loss_mask_t = make_float((term_cumsum_t + timesteps.discount) < 2)
-  return jax.lax.stop_gradient(loss_mask_t)
+#  # time-step of termination and everything afterwards is masked out
+#  term_cumsum_t = jnp.cumsum(is_last_t, 0)
+#  loss_mask_t = make_float((term_cumsum_t + timesteps.discount) < 2)
+#  return jax.lax.stop_gradient(loss_mask_t)
 
 
 @struct.dataclass
@@ -240,6 +260,7 @@ class HerLossFn(base.RecurrentLossFn):
   place_goal_in_timestep: Callable = None
   cql_alpha: float = 1.0
   cql_temperature: float = 1.0
+  ontask_use_env_reward: bool = False
 
   def loss_fn(
     self,
@@ -315,6 +336,7 @@ class HerLossFn(base.RecurrentLossFn):
       "q_values": online_preds.q_vals,  # [T]
       "q_loss": batch_loss,  # [T]
       "q_target": target_q_t,
+      "loss_reward": rewards,  # [T] exact reward fed into the TD target
     }
     return batch_td_error, batch_loss_mean, metrics, log_info
 
@@ -368,13 +390,18 @@ class HerLossFn(base.RecurrentLossFn):
     # [T, B, ...] reward info
     online_reward_info = self.online_reward_fn(data.timestep)
 
+    if self.ontask_use_env_reward:
+      online_rewards = make_float(data.timestep.reward)
+    else:
+      online_rewards = online_reward_info["reward"]
+
     # [B, T-1], [T], [B, T], [B, T, D]
     td_error, loss, metrics, log_info = jax.vmap(self.loss_fn, 1, 0)(
       data.timestep,
       online_preds,
       target_preds,
       data.action,
-      online_reward_info["reward"],
+      online_rewards,
       make_float(data.timestep.last()),
       data.timestep.discount,
       loss_mask,
@@ -419,8 +446,11 @@ class HerLossFn(base.RecurrentLossFn):
         """new_goal is [D], goal_index is scalar, sub_key_grad is [2], ..."""
 
         # Swap goal into timestep observation for goal-conditioned RNN
-        place_goal_in_timestep = jax.vmap(self.place_goal_in_timestep, (0, None), 0)
-        timestep_w_g = place_goal_in_timestep(timestep, new_goal)
+        if self.place_goal_in_timestep:
+          place_goal_in_timestep = jax.vmap(self.place_goal_in_timestep, (0, None), 0)
+          timestep_w_g = place_goal_in_timestep(timestep, new_goal)
+        else:
+          timestep_w_g = timestep
 
         # Expand goal over time for Q-head
         length = len(data.action)
@@ -535,8 +565,11 @@ class HerLossFn(base.RecurrentLossFn):
         Uses fresh RNN unroll from initial state with goal swapped into timestep.
         """
         # Swap goal into timestep observation for goal-conditioned RNN
-        place_goal_in_timestep = jax.vmap(self.place_goal_in_timestep, (0, None), 0)
-        timestep_w_g = place_goal_in_timestep(timestep, new_goal)
+        if self.place_goal_in_timestep:
+          place_goal_in_timestep = jax.vmap(self.place_goal_in_timestep, (0, None), 0)
+          timestep_w_g = place_goal_in_timestep(timestep, new_goal)
+        else:
+          timestep_w_g = timestep
 
         # Expand goal over time for Q-head
         length = actions.shape[0]
@@ -644,8 +677,8 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     achievements = achievement_fn(timesteps).astype(jnp.float32)
     goal_reward = (task_vector * achievements).sum(-1)
 
+    goal_reward = jax.tree_util.tree_map(jax.lax.stop_gradient, goal_reward)
     reward = goal_reward
-    reward = jax.tree_util.tree_map(jax.lax.stop_gradient, reward)
     return {
       "reward": reward,
       "goal_reward": goal_reward,
@@ -697,7 +730,10 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     # T, C
     task_vector_fn, achievement_fn, position_fn = ENVIRONMENT_TO_GOAL_FNS[config["ENV"]]
 
-    achievements = achievement_fn(timesteps)
+    if config["ENV"] == "craftax-gen":
+      achievements = achievement_fn(timesteps, weighted=False)
+    else:
+      achievements = achievement_fn(timesteps)
     # T, if vector non-zero, achieved
     goal_achieved = achievements.sum(-1)
 
@@ -786,6 +822,10 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     new_observation = timestep.observation.replace(task_w=goal.goal)
     return timestep.replace(observation=new_observation)
 
+
+  if config["ENV"] == "craftax-gen":
+    place_goal_in_timestep = None
+
   return functools.partial(
     HerLossFn,
     discount=config["GAMMA"],
@@ -813,6 +853,7 @@ def make_loss_fn_class(config) -> base.RecurrentLossFn:
     place_goal_in_timestep=place_goal_in_timestep,
     cql_alpha=config.get("CQL_ALPHA", 1e-3),
     cql_temperature=config.get("CQL_TEMPERATURE", 1.0),
+    ontask_use_env_reward=config.get("ONTASK_USE_ENV_REWARD", False),
   )
 
 
@@ -842,6 +883,7 @@ def create_data_plots(d_, reward_info, is_her=False, subfig=None, goal_index=-1)
   q_target = d_["q_target"]
   q_values_taken = rlax.batched_index(q_values, actions)
   td_errors = d_["td_errors"]
+  loss_reward = d_.get("loss_reward")
 
   # Figure dimensions
   width = 0.3
@@ -872,6 +914,8 @@ def create_data_plots(d_, reward_info, is_her=False, subfig=None, goal_index=-1)
   # Column 0: goal reward info
   ax = axes1[0, 0]
   ax.plot(reward_info["goal_reward"], label="Goal Reward")
+  if loss_reward is not None:
+    ax.plot(loss_reward, label="Loss Reward", linestyle=":", alpha=0.9)
   if loss_mask is not None:
     ax.plot(loss_mask, label="Loss Mask", alpha=0.5, linestyle="--")
   ax.set_title("Goal Reward")
@@ -956,6 +1000,8 @@ def create_data_plots(d_, reward_info, is_her=False, subfig=None, goal_index=-1)
 
   # Rewards, Q-values, Q-targets
   ax2a.plot(reward_info["goal_reward"], label="Goal Reward")
+  if loss_reward is not None:
+    ax2a.plot(loss_reward, label="Loss Reward", linestyle=":", alpha=0.9)
   ax2a.plot(q_values_taken, label="Q-Values")
   ax2a.plot(q_target, label="Q-Targets")
   ax2a.set_title("Rewards and Q-Values")
@@ -1328,7 +1374,7 @@ def crafax_learner_log_fn(data: dict, config: dict):
     plt.close(fig2)
 
   def plot_both(d):
-    # plot_individual(d["online"], "online")
+    plot_individual(d["online"], "online")
     plot_individual(d["her"], "her")
 
   # this will be the value after update is applied
@@ -1343,13 +1389,48 @@ def crafax_learner_log_fn(data: dict, config: dict):
   )
 
 
+class DuellingMLP(nn.Module):
+  hidden_dim: int
+  out_dim: int = 0
+  num_layers: int = 1
+  norm_type: str = "none"
+  activation: str = "relu"
+  use_bias: bool = False
+  use_task: bool = True
+
+  @nn.compact
+  def __call__(self, x, task, train: bool = False):
+    if self.use_task:
+      x = jnp.concatenate((x, task), axis=-1)
+    value_mlp = base.MLP(
+      hidden_dim=self.hidden_dim,
+      num_layers=self.num_layers,
+      use_bias=self.use_bias,
+      activate_final=False,
+      out_dim=1,
+    )
+    advantage_mlp = base.MLP(
+      hidden_dim=self.hidden_dim,
+      num_layers=self.num_layers,
+      use_bias=self.use_bias,
+      activate_final=False,
+      out_dim=self.out_dim,
+    )
+    assert self.out_dim > 0, "must have at least one action"
+
+    value = value_mlp(x)
+    advantages = advantage_mlp(x)
+    advantages -= jnp.mean(advantages, axis=-1, keepdims=True)
+    q_values = value + advantages
+    return q_values
+
+
 class DuellingDotMLP(nn.Module):
   hidden_dim: int
   num_actions: int = 0
   num_layers: int = 1
   norm_type: str = "none"
   activation: str = "relu"
-  activate_final: bool = True
   use_bias: bool = False
 
   @nn.compact
@@ -1360,12 +1441,14 @@ class DuellingDotMLP(nn.Module):
       hidden_dim=self.hidden_dim,
       num_layers=self.num_layers,
       use_bias=self.use_bias,
+      activate_final=False,
       out_dim=task_dim,
     )
     advantage_mlp = base.MLP(
       hidden_dim=self.hidden_dim,
       num_layers=self.num_layers,
       use_bias=self.use_bias,
+      activate_final=False,
       out_dim=self.num_actions * task_dim,
     )
     assert self.num_actions > 0, "must have at least one action"
@@ -1392,6 +1475,7 @@ class TaskEncoder(nn.Module):
   """Task encoder for regular craftax setting"""
 
   vocab_size: int = 512
+  position_goals: bool = False
 
   @nn.compact
   def __call__(self, goal: GoalPosition):
@@ -1400,10 +1484,13 @@ class TaskEncoder(nn.Module):
     # [D]
     task = nn.Dense(128, kernel_init=kernel_init, use_bias=False)(goal.goal)
 
-    # position is categorical
-    # [2, D]
-    position = jax.vmap(flax.linen.Embed(self.vocab_size, 128))(goal.position)
-    return jnp.concatenate((task, position.reshape(-1)))
+    if self.position_goals:
+      # position is categorical
+      # [2, D]
+      position = jax.vmap(flax.linen.Embed(self.vocab_size, 128))(goal.position)
+      return jnp.concatenate((task, position.reshape(-1)))
+    else:
+      return task
 
 
 def goal_from_env_timestep(t: TimeStep, env: str, position_goals: bool = False):
@@ -1424,6 +1511,17 @@ def make_craftax_agent(
   rng: jax.random.PRNGKey,
 ):
   rnn = base.ScannedRNN(hidden_dim=config["AGENT_RNN_DIM"])
+  num_actions = env.action_space(env_params).n
+  position_goals = config.get("POSITION_GOALS", False)
+
+  # single head for both on-task and off-task
+  q_fn = DuellingMLP(
+    hidden_dim=config.get("Q_HIDDEN_DIM", 512),
+    num_layers=config.get("NUM_Q_LAYERS", 2),
+    out_dim=num_actions,
+    use_bias=True,
+    use_task=True,
+  )
 
   agent = RnnAgent(
     observation_encoder=CraftaxObsEncoder(
@@ -1433,20 +1531,18 @@ def make_craftax_agent(
       norm_type=config.get("NORM_TYPE", "none"),
       structured_inputs=config.get("STRUCTURED_INPUTS", False),
       use_bias=config.get("USE_BIAS", True),
-      action_dim=env.action_space(env_params).n,
+      action_dim=num_actions,
     ),
     rnn=rnn,
-    q_fn=DuellingDotMLP(
-      hidden_dim=config.get("Q_HIDDEN_DIM", 512),
-      num_layers=config.get("NUM_Q_LAYERS", 2),
-      num_actions=env.action_space(env_params).n,
-      use_bias=config.get("USE_BIAS", True),
+    q_fn=q_fn,
+    task_encoder=TaskEncoder(
+      vocab_size=200,
+      position_goals=position_goals,
     ),
-    task_encoder=TaskEncoder(100),
     goal_from_timestep=partial(
       goal_from_env_timestep,
       env=config["ENV"],
-      position_goals=config.get("POSITION_GOALS", False),
+      position_goals=position_goals,
     ),
   )
 
@@ -1480,7 +1576,10 @@ def make_multigoal_craftax_agent(
       use_bias=config.get("USE_BIAS", True),
       action_dim=env.action_space(env_params).n,
     ),
-    task_encoder=TaskEncoder(100),
+    task_encoder=TaskEncoder(
+      vocab_size=100,
+      position_goals=config.get("POSITION_GOALS", False),
+    ),
     rnn=rnn,
     q_fn=DuellingDotMLP(
       hidden_dim=config.get("Q_HIDDEN_DIM", 512),
@@ -1537,7 +1636,10 @@ def make_jaxmaze_agent(
       num_actions=env.num_actions(env_params),
       use_bias=config.get("USE_BIAS", False),
     ),
-    task_encoder=TaskEncoder(100),
+    task_encoder=TaskEncoder(
+      vocab_size=100,
+      position_goals=config.get("POSITION_GOALS", False),
+    ),
     goal_from_timestep=partial(
       goal_from_env_timestep,
       env="jaxmaze",
